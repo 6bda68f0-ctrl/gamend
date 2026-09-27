@@ -523,12 +523,15 @@ defmodule GamendWeb.HostLayoutNavigation do
   attr :inactive_class, :string, required: true
 
   defp main_nav_links(assigns) do
+    assigns = assign(assigns, :best_href, best_href(assigns.links, assigns.current_path))
+
     ~H"""
     <%= for entry <- @links do %>
       <li>
         <.main_nav_link_item
           link={entry}
           current_path={@current_path}
+          best_href={@best_href}
           inactive_class={@inactive_class}
         />
       </li>
@@ -541,12 +544,15 @@ defmodule GamendWeb.HostLayoutNavigation do
   attr :inactive_class, :string, required: true
 
   defp mobile_nav_links(assigns) do
+    assigns = assign(assigns, :best_href, best_href(assigns.links, assigns.current_path))
+
     ~H"""
     <%= for entry <- @links do %>
       <li class="w-full">
         <.mobile_nav_link_item
           link={entry}
           current_path={@current_path}
+          best_href={@best_href}
           inactive_class={@inactive_class}
         />
       </li>
@@ -683,9 +689,10 @@ defmodule GamendWeb.HostLayoutNavigation do
   attr :link, :map, required: true
   attr :current_path, :string, default: nil
   attr :inactive_class, :string, required: true
+  attr :best_href, :string, default: nil
 
   defp main_nav_link_item(assigns) do
-    active? = entry_active?(assigns.link, assigns.current_path)
+    active? = sibling_active?(assigns.link, assigns.current_path, assigns[:best_href])
 
     assigns = assign(assigns, active?: active?)
 
@@ -728,9 +735,10 @@ defmodule GamendWeb.HostLayoutNavigation do
   attr :link, :map, required: true
   attr :current_path, :string, default: nil
   attr :inactive_class, :string, required: true
+  attr :best_href, :string, default: nil
 
   defp mobile_nav_link_item(assigns) do
-    active? = entry_active?(assigns.link, assigns.current_path)
+    active? = sibling_active?(assigns.link, assigns.current_path, assigns[:best_href])
 
     assigns = assign(assigns, active?: active?)
 
@@ -783,18 +791,21 @@ defmodule GamendWeb.HostLayoutNavigation do
   attr :current_path, :string, default: nil
 
   defp dropdown_menu_entries(assigns) do
+    assigns = assign(assigns, :best_href, best_href(assigns.entries, assigns.current_path))
+
     ~H"""
     <%= for entry <- @entries do %>
-      <.dropdown_menu_entry entry={entry} current_path={@current_path} />
+      <.dropdown_menu_entry entry={entry} current_path={@current_path} best_href={@best_href} />
     <% end %>
     """
   end
 
   attr :entry, :map, required: true
   attr :current_path, :string, default: nil
+  attr :best_href, :string, default: nil
 
   defp dropdown_menu_entry(assigns) do
-    active? = entry_active?(assigns.entry, assigns.current_path)
+    active? = sibling_active?(assigns.entry, assigns.current_path, assigns[:best_href])
 
     assigns = assign(assigns, active?: active?)
 
@@ -1058,6 +1069,29 @@ defmodule GamendWeb.HostLayoutNavigation do
   end
 
   defp entry_active?(entry, current_path), do: link_active?(entry, current_path)
+
+  # Siblings in one menu can both match: `/docs` and `/docs/reference` each
+  # start `/docs/reference/body2d`. Lighting both says the reader is in two
+  # places, so among one list's links only the longest match is active. A
+  # group is active when anything under it is, as before.
+  defp sibling_active?(entry, current_path, best_href) do
+    cond do
+      dropdown_entry?(entry) -> entry_active?(entry, current_path)
+      is_nil(best_href) -> link_active?(entry, current_path)
+      true -> entry["href"] == best_href
+    end
+  end
+
+  defp best_href(entries, current_path) do
+    entries
+    |> Enum.reject(&dropdown_entry?/1)
+    |> Enum.filter(&link_active?(&1, current_path))
+    |> Enum.max_by(&String.length(&1["href"]), fn -> nil end)
+    |> case do
+      nil -> nil
+      entry -> entry["href"]
+    end
+  end
 
   defp dropdown_entry?(%{"items" => items}) when is_list(items), do: true
   defp dropdown_entry?(_entry), do: false

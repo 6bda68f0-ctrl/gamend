@@ -219,6 +219,8 @@ With `base_path: "/docs"`, a link to a neighbouring file — `[Scenes](./scenes.
 
 A post's frontmatter may give `title`, `slug`, `date`, `description`, `authors`, `image`, `keywords` and `tags`; without it, the first `# ` heading and the `YYYY-MM-DD-slug.md` filename still work. `authors: [dragos]` is resolved from `blog/_authors/dragos.md` (`name`, `title`, `url`, `image`). `<!-- truncate -->` marks where the excerpt ends. Feeds are at `/blog/rss.xml` and `/blog/atom.xml`.
 
+The index lists one card to a row, the picture beside the text. `"blog": {"layout": "grid"}` in the theme JSON puts two to a row on a tablet and three on a desktop, the picture above the text; a phone gets one column either way.
+
 #### Pages
 
 Register a `:pages` collection (`nesting: :tree`, `base_path: "/"`) and a markdown file answers its path with nothing routed: `content/pages/faq.md` is `/faq`, `content/pages/help/install.md` is `/help/install`. `layout: wide` in its frontmatter widens the frame.

@@ -35,6 +35,7 @@ defmodule GamendWeb.BlogLive do
     socket
     |> assign(:page_title, gettext("Blog"))
     |> assign(:grouped_posts, Content.blog_posts_grouped())
+    |> assign(:grid?, layout(GamendWeb.Layouts.resolve_theme()) == :grid)
     |> assign(:post, nil)
   end
 
@@ -56,6 +57,16 @@ defmodule GamendWeb.BlogLive do
         |> assign(:next_post, next)
     end
   end
+
+  @doc """
+  How the index lays its cards out, from the theme JSON: `"blog": {"layout":
+  "grid"}` puts two to a row on a tablet and three on a desktop, a picture
+  over its text; anything else, or nothing, is the list, one card to a row
+  with the picture beside the text. A phone gets one column either way.
+  """
+  @spec layout(map()) :: :grid | :list
+  def layout(%{"blog" => %{"layout" => "grid"}}), do: :grid
+  def layout(_theme), do: :list
 
   @impl true
   def render(%{post: %{} = _post} = assigns) do
@@ -80,6 +91,7 @@ defmodule GamendWeb.BlogLive do
       current_path={assigns[:current_path]}
       blog_available?={@blog_available?}
       grouped_posts={assigns[:grouped_posts] || []}
+      grid?={assigns[:grid?] || false}
       changelog_available?={@changelog_available?}
       roadmap_available?={@roadmap_available?}
     />

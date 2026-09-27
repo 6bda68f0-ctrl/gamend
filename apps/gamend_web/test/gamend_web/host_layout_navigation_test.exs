@@ -107,6 +107,36 @@ defmodule GamendWeb.HostLayoutNavigationTest do
     assert html =~ "menu-active"
   end
 
+  # `/docs` and `/docs/reference` both start the page's path; only the more
+  # specific one is where the reader is.
+  test "only the most specific sibling is active, on desktop and mobile" do
+    nav = [
+      %{
+        "label" => "Docs",
+        "items" => [
+          %{"label" => "Documentation", "href" => "/docs"},
+          %{"label" => "Reference", "href" => "/docs/reference"}
+        ]
+      }
+    ]
+
+    assigns = %{base_assigns(nav) | current_path: "/docs/reference/components/body2d"}
+
+    desktop = render_component(&HostLayoutNavigation.desktop_nav/1, assigns)
+    assert [_one] = Regex.scan(~r/menu-active/, desktop)
+    assert desktop =~ ~r{href="/docs/reference"\s+class="menu-active"}
+
+    mobile = render_component(&HostLayoutNavigation.mobile_nav/1, assigns)
+    refute mobile =~ ~r{href="/docs"\s+class="btn w-full btn-primary"}
+    assert mobile =~ ~r{href="/docs/reference"\s+class="btn w-full btn-primary"}
+
+    # A page only the broad link matches still lights it.
+    guide = %{assigns | current_path: "/docs/manual/scenes"}
+
+    assert render_component(&HostLayoutNavigation.desktop_nav/1, guide) =~
+             ~r{href="/docs"\s+class="menu-active"}
+  end
+
   test "mobile hamburger is a <details> toggle (native open/close, focus-independent)" do
     html =
       render_component(

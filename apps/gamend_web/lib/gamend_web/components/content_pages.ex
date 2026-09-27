@@ -126,6 +126,10 @@ defmodule GamendWeb.ContentPages do
   attr :changelog_available?, :boolean, default: false
   attr :roadmap_available?, :boolean, default: false
 
+  attr :grid?, :boolean,
+    default: false,
+    doc: "cards two and three to a row, see `GamendWeb.BlogLive.layout/1`"
+
   @doc """
   The blog index: every post grouped by year and month, newest first.
 
@@ -135,7 +139,10 @@ defmodule GamendWeb.ContentPages do
   def blog_index(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={@current_path}>
-      <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+      <div class={[
+        "mx-auto px-4 py-8 sm:px-6",
+        if(@grid?, do: "max-w-6xl", else: "max-w-4xl")
+      ]}>
         <.empty_state
           :if={!@blog_available?}
           icon="hero-newspaper"
@@ -182,22 +189,33 @@ defmodule GamendWeb.ContentPages do
                   <.month_heading year={year} month={month} />
                 </h3>
 
-                <div class="space-y-4">
+                <div class={
+                  if(@grid?,
+                    do: "grid gap-5 sm:grid-cols-2 lg:grid-cols-3",
+                    else: "space-y-4"
+                  )
+                }>
                   <article
                     :for={post <- posts}
                     class="overflow-hidden rounded-3xl border border-base-300 bg-base-100/95 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                   >
-                    <.link navigate={~p"/blog/#{post.slug}"} class="block sm:flex">
+                    <.link
+                      navigate={~p"/blog/#{post.slug}"}
+                      class={if(@grid?, do: "flex h-full flex-col", else: "block sm:flex")}
+                    >
                       <%!-- The cover, when the post has one: cropped to a
-                            landscape tile beside the text, whole on the post
-                            itself. --%>
+                            landscape tile beside the text in the list, above
+                            it in the grid, whole on the post itself. --%>
                       <img
                         :if={post[:image]}
                         src={post.image}
                         alt=""
                         loading="lazy"
                         decoding="async"
-                        class="aspect-video w-full object-cover sm:w-64 sm:shrink-0"
+                        class={[
+                          "aspect-video w-full object-cover",
+                          !@grid? && "sm:w-64 sm:shrink-0"
+                        ]}
                       />
                       <div class="space-y-2 p-5">
                         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs uppercase tracking-[0.18em] text-base-content/70">
@@ -213,7 +231,11 @@ defmodule GamendWeb.ContentPages do
 
                         <p class="text-sm leading-6 text-base-content/70">{post.excerpt}</p>
 
-                        <.post_authors :if={post[:authors] not in [nil, []]} authors={post.authors} />
+                        <.post_authors
+                          :if={post[:authors] not in [nil, []]}
+                          authors={post.authors}
+                          links?={false}
+                        />
                       </div>
                     </.link>
                   </article>
@@ -237,6 +259,8 @@ defmodule GamendWeb.ContentPages do
 
   @doc "One blog post, with links to the neighbouring posts."
   def blog_post(assigns) do
+    assigns = assign(assigns, :cover, cover(assigns.post, assigns.html))
+
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={@current_path}>
       <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6">
@@ -262,8 +286,8 @@ defmodule GamendWeb.ContentPages do
             </div>
 
             <img
-              :if={@post[:image]}
-              src={@post.image}
+              :if={@cover}
+              src={@cover}
               alt=""
               decoding="async"
               class="w-full rounded-2xl border border-base-300"
@@ -310,11 +334,35 @@ defmodule GamendWeb.ContentPages do
     """
   end
 
+  @doc """
+  The picture to show above a post, or nil. The frontmatter `image` is the
+  card's and the link preview's; a post that also shows it in its body, as
+  the same file or the same name in another format (`x.webp` for `x.png`),
+  would show it twice, so the page leaves it to the body.
+  """
+  @spec cover(map(), String.t() | nil) :: String.t() | nil
+  def cover(post, html) do
+    case post[:image] do
+      image when is_binary(image) and image != "" ->
+        shown = for [_, src] <- Regex.scan(~r/<img[^>]+src="([^"]+)"/, html || ""), do: stem(src)
+        if stem(image) in shown, do: nil, else: image
+
+      _ ->
+        nil
+    end
+  end
+
+  defp stem(src), do: src |> String.split(["?", "#"]) |> hd() |> Path.rootname()
+
   attr :authors, :list, required: true
+  attr :links?, :boolean, default: true
 
   # Who wrote it: a name, its role when the author file gives one, an avatar
   # when it gives that, and a link when it gives a URL. A post's `authors:`
-  # keys that have no file still show as names.
+  # keys that have no file still show as names. On an index card the whole
+  # card is already a link, and a link inside a link is not HTML: the parser
+  # closes the card's early and the text falls out of it. So `links?: false`
+  # there, and the name links from the post itself.
   defp post_authors(assigns) do
     ~H"""
     <ul class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
@@ -327,10 +375,15 @@ defmodule GamendWeb.ContentPages do
           class="size-7 rounded-full border border-base-300"
         />
         <span class="flex flex-col leading-tight">
-          <a :if={author[:url]} href={author.url} class="font-medium link link-hover" rel="noopener">
+          <a
+            :if={@links? and author[:url]}
+            href={author.url}
+            class="font-medium link link-hover"
+            rel="noopener"
+          >
             {author.name}
           </a>
-          <span :if={!author[:url]} class="font-medium">{author.name}</span>
+          <span :if={!(@links? and author[:url])} class="font-medium">{author.name}</span>
           <span :if={author[:title]} class="text-xs text-base-content/70">{author.title}</span>
         </span>
       </li>
