@@ -246,6 +246,36 @@ defmodule Gamend.Content.MarkdownTest do
       assert html =~ ~s(src="/img/manual/x.webp")
       assert html =~ ~s(src="/content/docs/shots/y.png")
     end
+
+    test "image_url swaps each resolved local image, never an external one" do
+      html =
+        render!(
+          ~s|![a](gamend/auth.png) ![b](https://example.com/x.png) <img src="/content/blog/y.png">|,
+          collection: "blog",
+          image_url: &String.replace(&1, ".png", ".small.webp")
+        )
+
+      assert html =~ ~s(src="/content/blog/gamend/auth.small.webp")
+      assert html =~ ~s(src="/content/blog/y.small.webp")
+      assert html =~ ~s(src="https://example.com/x.png")
+    end
+
+    test "first_image is the first picture, where the page serves it" do
+      assert Markdown.first_image("Text.\n\n![x](2026/a.png)\n\n![y](b.png)\n",
+               collection: "blog"
+             ) ==
+               "/content/blog/2026/a.png"
+
+      assert Markdown.first_image(~s|<figure><img src="/img/c.webp"></figure>\n\n![x](a.png)\n|,
+               collection: "blog",
+               assets: :static
+             ) == "/img/c.webp"
+
+      assert Markdown.first_image("```md\n![not](a.png)\n```\n\nNo picture.\n") == nil
+
+      assert Markdown.first_image("![x](https://example.com/a.png)\n") ==
+               "https://example.com/a.png"
+    end
   end
 
   test "gdscript fences borrow the javascript grammar" do

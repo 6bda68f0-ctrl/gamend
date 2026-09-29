@@ -3297,3 +3297,8 @@ msgstr "Спершу підтвердьте адресу за посилання
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "Підтвердження за цим посиланням видаляє пароль, з яким зареєстровано обліковий запис, тож потім задайте новий у налаштуваннях облікового запису. Посилання з листа підтвердження його зберігає."
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "%{count} хв читання"

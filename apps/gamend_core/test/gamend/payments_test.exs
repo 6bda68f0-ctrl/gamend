@@ -458,6 +458,58 @@ defmodule Gamend.PaymentsTest do
       end
   end
 
+  describe "grant_entitlement/3" do
+    test "grants without a purchase, once per key, and says it ever existed" do
+      user = AccountsFixtures.user_fixture()
+      in_a_month = DateTime.add(DateTime.utc_now(:second), 30, :day)
+
+      refute Payments.entitlement_ever?(user.id, "trial_key")
+
+      assert {:ok, %Entitlement{} = e} =
+               Payments.grant_entitlement(user.id, "trial_key",
+                 expires_at: in_a_month,
+                 metadata: %{"source" => "trial"}
+               )
+
+      assert e.status == "active"
+      assert e.expires_at == in_a_month
+      assert e.metadata["source"] == "trial"
+      assert Payments.has_entitlement?(user.id, "trial_key")
+      assert Payments.entitlement_ever?(user.id, "trial_key")
+    end
+
+    test "never shortens an active grant, and no end beats any end" do
+      user = AccountsFixtures.user_fixture()
+      now = DateTime.utc_now(:second)
+      long = DateTime.add(now, 365, :day)
+      short = DateTime.add(now, 30, :day)
+
+      {:ok, _} = Payments.grant_entitlement(user.id, "k", expires_at: long)
+      {:ok, e} = Payments.grant_entitlement(user.id, "k", expires_at: short)
+      assert e.expires_at == long
+
+      {:ok, e} = Payments.grant_entitlement(user.id, "k", expires_at: nil)
+      assert is_nil(e.expires_at)
+
+      {:ok, e} = Payments.grant_entitlement(user.id, "k", expires_at: short)
+      assert is_nil(e.expires_at)
+    end
+
+    test "an expired grant is renewed from now, not extended from the past" do
+      user = AccountsFixtures.user_fixture()
+      now = DateTime.utc_now(:second)
+
+      {:ok, _} =
+        Payments.grant_entitlement(user.id, "k2", expires_at: DateTime.add(now, -1, :day))
+
+      refute Payments.has_entitlement?(user.id, "k2")
+
+      {:ok, e} = Payments.grant_entitlement(user.id, "k2", expires_at: DateTime.add(now, 7, :day))
+      assert Payments.has_entitlement?(user.id, "k2")
+      assert DateTime.compare(e.expires_at, now) == :gt
+    end
+  end
+
   defp unique_sku(prefix), do: "#{prefix}_#{System.unique_integer([:positive])}"
 
   defp restore_env(key, nil), do: Application.delete_env(:gamend_core, key)

@@ -3248,3 +3248,8 @@ msgstr "Önce sana gönderdiğimiz bağlantıyla e-postanı onayla ya da e-posta
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "Bu bağlantıyla onaylamak, hesabın kaydedildiği parolayı kaldırır; bu yüzden ardından hesap ayarlarından yeni bir parola belirle. Onay e-postasındaki bağlantı parolayı korur."
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "%{count} dk okuma"

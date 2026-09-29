@@ -3248,3 +3248,8 @@ msgstr "Bekräfta först din e-post med länken vi skickade, eller logga in med 
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "Att bekräfta med den här länken tar bort lösenordet som kontot registrerades med, så välj ett nytt i dina kontoinställningar efteråt. Länken i bekräftelsemejlet behåller det."
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "%{count} min lästid"

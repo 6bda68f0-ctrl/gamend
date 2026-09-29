@@ -389,26 +389,46 @@ defmodule Gamend.Retention do
   end
 
   defp prune_snapshots_before(cutoff, scope) do
-    events = from(e in Event, where: e.inserted_at < ^cutoff)
-    snapshots = from(s in Snapshot, where: s.inserted_at < ^cutoff)
+    delete_in_batches(Event, cutoff, scope, 0) + delete_in_batches(Snapshot, cutoff, scope, 0)
+  end
 
-    {event_count, _} = Repo.delete_all(scope_to_unflagged(events, scope))
-    {snapshot_count, _} = Repo.delete_all(scope_to_unflagged(snapshots, scope))
+  # In batches, each its own statement. SQLite has ONE writer: a single DELETE
+  # over a big history held the write lock until it finished, and every other
+  # write in the app queued behind it — page loads hung. On a dev database
+  # with 115k snapshots it ran past the 15 s checkout timeout, rolled back and
+  # started over at the next sweep, so it never finished and hung the app
+  # again each time. Small batches let other writes in between, and a sweep
+  # interrupted part-way keeps what it already deleted.
+  @prune_batch 500
 
-    event_count + snapshot_count
+  defp delete_in_batches(schema, cutoff, scope, deleted) do
+    ids =
+      from(r in schema, where: r.inserted_at < ^cutoff, select: r.id, limit: @prune_batch)
+      |> scope_to_unflagged(scope)
+      |> Repo.all()
+
+    case ids do
+      [] ->
+        deleted
+
+      ids ->
+        {count, _} = Repo.delete_all(from(r in schema, where: r.id in ^ids))
+
+        if length(ids) < @prune_batch,
+          do: deleted + count,
+          else: delete_in_batches(schema, cutoff, scope, deleted + count)
+    end
   end
 
   defp scope_to_unflagged(query, :all), do: query
 
+  # Flagged is a property of the RUN: any flagged snapshot keeps its lobby's
+  # whole timeline. The flagged lobbies are found once, not per row — the
+  # correlated NOT EXISTS this replaced re-scanned a lobby's snapshots for
+  # every candidate row.
   defp scope_to_unflagged(query, :unflagged_runs) do
-    from r in query,
-      as: :row,
-      where:
-        not exists(
-          from s in Snapshot,
-            where: s.lobby_id == parent_as(:row).lobby_id and s.flagged,
-            select: 1
-        )
+    flagged_lobbies = from(s in Snapshot, where: s.flagged, distinct: true, select: s.lobby_id)
+    from r in query, where: r.lobby_id not in subquery(flagged_lobbies)
   end
 
   # Client log sessions, on the same flagged/unflagged split as lobby snapshots

@@ -3199,3 +3199,8 @@ msgstr "まず送信したリンクでメールアドレスを確認するか、
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "このリンクで確認すると、このアカウントの登録時に設定されたパスワードは削除されます。確認後にアカウント設定で新しいパスワードを設定してください。確認メールのリンクを使うとパスワードは保持されます。"
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "%{count}分で読めます"

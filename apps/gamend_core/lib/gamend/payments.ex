@@ -540,6 +540,86 @@ defmodule Gamend.Payments do
     |> Kernel.>(0)
   end
 
+  @doc """
+  Grant an entitlement without a purchase: a trial, a contributor's reward,
+  a support gesture. Upserts the one `(user, key)` row.
+
+  Never shortens what the user already has: an active row with no end (a
+  lifetime purchase) keeps no end, and an active row ending later than
+  `:expires_at` keeps its later end. A row a purchase created keeps its
+  `source_purchase_id`, so its provider sync still finds it.
+
+  Options: `:expires_at` (a `DateTime`, `nil` for no end), `:metadata` (a map
+  merged into the row's, e.g. `%{"source" => "trial", "granted_by" => id}`).
+  """
+  @spec grant_entitlement(Ecto.UUID.t(), String.t(), keyword()) ::
+          {:ok, Entitlement.t()} | {:error, term()}
+  def grant_entitlement(user_id, key, opts \\ [])
+      when is_binary(user_id) and is_binary(key) do
+    now = DateTime.utc_now(:second)
+    requested = Keyword.get(opts, :expires_at)
+    extra = Keyword.get(opts, :metadata, %{})
+    existing = Repo.get_by(Entitlement, user_id: user_id, key: key)
+
+    expires_at = granted_expiry(existing, requested, now)
+
+    attrs = %{
+      user_id: user_id,
+      key: key,
+      status: "active",
+      starts_at: (existing && existing_active?(existing, now) && existing.starts_at) || now,
+      expires_at: expires_at,
+      revoked_at: nil,
+      metadata: Map.merge((existing && existing.metadata) || %{}, extra)
+    }
+
+    case (existing || %Entitlement{})
+         |> Entitlement.changeset(attrs)
+         |> Repo.insert_or_update() do
+      {:ok, entitlement} ->
+        after_entitlement_changed(entitlement)
+        {:ok, entitlement}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  # The later of what the user holds (while it is still active) and what is
+  # granted; no end beats any end.
+  defp granted_expiry(nil, requested, _now), do: requested
+
+  defp granted_expiry(%Entitlement{} = existing, requested, now) do
+    cond do
+      not existing_active?(existing, now) -> requested
+      is_nil(existing.expires_at) -> nil
+      is_nil(requested) -> nil
+      DateTime.compare(existing.expires_at, requested) == :gt -> existing.expires_at
+      true -> requested
+    end
+  end
+
+  defp existing_active?(%Entitlement{status: "active", expires_at: nil}, _now), do: true
+
+  defp existing_active?(%Entitlement{status: "active", expires_at: %DateTime{} = at}, now),
+    do: DateTime.compare(at, now) == :gt
+
+  defp existing_active?(_entitlement, _now), do: false
+
+  @doc """
+  Whether the user has EVER held `key`, active or not. What a once-per-account
+  grant (a trial) checks, since the row outlives its end.
+  """
+  @spec entitlement_ever?(Ecto.UUID.t(), String.t()) :: boolean()
+  def entitlement_ever?(user_id, key) when is_binary(user_id) and is_binary(key) do
+    Repo.exists?(from e in Entitlement, where: e.user_id == ^user_id and e.key == ^key)
+  end
+
+  @doc "The user's `key` row, active or not, or `nil`."
+  @spec get_user_entitlement_by_key(Ecto.UUID.t(), String.t()) :: Entitlement.t() | nil
+  def get_user_entitlement_by_key(user_id, key) when is_binary(user_id) and is_binary(key),
+    do: Repo.get_by(Entitlement, user_id: user_id, key: key)
+
   @spec product_entitlement_key(Product.t()) :: String.t()
   def product_entitlement_key(%Product{grant_config: config, sku: sku}) do
     config = config || %{}

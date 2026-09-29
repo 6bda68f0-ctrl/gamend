@@ -3248,3 +3248,8 @@ msgstr "Bestätige zuerst deine E-Mail mit dem Link, den wir dir geschickt haben
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "Die Bestätigung über diesen Link entfernt das Passwort, mit dem dieses Konto registriert wurde. Lege danach in deinen Kontoeinstellungen ein neues fest. Der Link in der Bestätigungs-E-Mail behält es bei."
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "%{count} Min. Lesezeit"

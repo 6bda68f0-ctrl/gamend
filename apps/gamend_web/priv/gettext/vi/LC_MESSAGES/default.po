@@ -3199,3 +3199,8 @@ msgstr "Hãy xác nhận email trước bằng liên kết chúng tôi đã gử
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "Xác nhận bằng liên kết này sẽ xóa mật khẩu mà tài khoản này đã dùng khi đăng ký, vì vậy hãy đặt mật khẩu mới trong phần cài đặt tài khoản sau đó. Liên kết trong email xác nhận sẽ giữ lại mật khẩu."
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "%{count} phút đọc"

@@ -3248,3 +3248,8 @@ msgstr "Επιβεβαιώστε πρώτα το email σας με τον σύν
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "Η επιβεβαίωση με αυτόν τον σύνδεσμο αφαιρεί το συνθηματικό με το οποίο καταχωρίστηκε ο λογαριασμός, οπότε ορίστε ένα νέο στις ρυθμίσεις του λογαριασμού σας μετά. Ο σύνδεσμος στο email επιβεβαίωσης το διατηρεί."
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "%{count} λεπ. ανάγνωσης"

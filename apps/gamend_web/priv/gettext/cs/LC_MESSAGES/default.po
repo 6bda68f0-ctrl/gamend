@@ -3297,3 +3297,8 @@ msgstr "Nejdřív potvrď svůj e-mail odkazem, který jsme ti poslali, nebo se 
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "Potvrzení tímto odkazem odstraní heslo, se kterým byl účet zaregistrován, takže si pak nastav nové v nastavení účtu. Odkaz v potvrzovacím e-mailu ho zachová."
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "%{count} min čtení"

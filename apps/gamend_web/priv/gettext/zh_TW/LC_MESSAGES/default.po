@@ -3199,3 +3199,8 @@ msgstr "請先透過我們寄出的連結確認電子郵件，或使用電子郵
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "透過此連結確認會移除註冊此帳戶時設定的密碼，請在確認後到帳戶設定中設定新密碼。使用確認電子郵件中的連結則會保留密碼。"
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "閱讀時間 %{count} 分鐘"

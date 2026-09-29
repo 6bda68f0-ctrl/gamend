@@ -26,16 +26,25 @@ defmodule GamendWeb.ContentPages do
   `Calendar.strftime`, so they never picked up the reader's timezone the way
   `<.timestamp>` does.
 
+  The blog is shared the same way: `GamendWeb.BlogLive` renders it for any
+  host that routes it, and Polyglot Pirates renders the same two components
+  from its controller. The index is a grid, one layout for every host; it was
+  a list with an opt-in grid for a day, and two layouts is one more than a
+  page of cards needs.
+
   ## `href`, not `navigate`
 
-  The cross-links between the two pages are plain anchors. `navigate` needs a
-  LiveView root to push into, and on a controller-rendered page there is none —
-  it would render an `<a>` that the client script treats as live and the server
-  has nowhere to route. These are static documents where a full navigation is
-  what happens anyway.
+  The cross-links between the changelog and roadmap are plain anchors. These
+  are static documents where a full navigation is what happens anyway. The
+  blog's links are `navigate`, which from `GamendWeb.BlogLive` keeps the
+  socket and on a controller-rendered page is a plain link: LiveView's client
+  leaves a live link to the browser when no LiveView is mounted.
   """
 
   use GamendWeb, :html
+
+  alias Gamend.Content
+  alias Gamend.Content.Markdown
 
   attr :flash, :map, required: true
   attr :current_scope, :any, default: nil
@@ -126,23 +135,21 @@ defmodule GamendWeb.ContentPages do
   attr :changelog_available?, :boolean, default: false
   attr :roadmap_available?, :boolean, default: false
 
-  attr :grid?, :boolean,
-    default: false,
-    doc: "cards two and three to a row, see `GamendWeb.BlogLive.layout/1`"
-
   @doc """
-  The blog index: every post grouped by year and month, newest first.
+  The blog index: every post grouped by year and month, newest first, as a
+  grid of cards — one to a row on a phone, two on a tablet, three on a
+  desktop — each with its picture above its date, reading time, title,
+  excerpt and authors.
 
   Takes `grouped_posts` in the shape `Gamend.Content.blog_posts_grouped/0`
-  returns.
+  returns. A card's picture is the post's `:card_image`, else its `:image`.
   """
   def blog_index(assigns) do
+    assigns = assign(assigns, :first_slug, first_slug(assigns.grouped_posts))
+
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={@current_path}>
-      <div class={[
-        "mx-auto px-4 py-8 sm:px-6",
-        if(@grid?, do: "max-w-6xl", else: "max-w-4xl")
-      ]}>
+      <div class="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <.empty_state
           :if={!@blog_available?}
           icon="hero-newspaper"
@@ -151,10 +158,12 @@ defmodule GamendWeb.ContentPages do
         />
 
         <div :if={@blog_available?}>
-          <div class="mb-8 flex items-center justify-between">
+          <%!-- Wraps rather than squeezes: on a phone, "Feuille de route"
+                and "Journal des modifications" do not fit beside the title. --%>
+          <div class="mb-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
             <h1 class="text-3xl font-bold">{gettext("Blog")}</h1>
 
-            <div class="flex items-center gap-3">
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 whitespace-nowrap">
               <.link
                 :if={@roadmap_available?}
                 href={~p"/roadmap"}
@@ -189,39 +198,30 @@ defmodule GamendWeb.ContentPages do
                   <.month_heading year={year} month={month} />
                 </h3>
 
-                <div class={
-                  if(@grid?,
-                    do: "grid gap-5 sm:grid-cols-2 lg:grid-cols-3",
-                    else: "space-y-4"
-                  )
-                }>
+                <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                   <article
                     :for={post <- posts}
                     class="overflow-hidden rounded-3xl border border-base-300 bg-base-100/95 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                   >
-                    <.link
-                      navigate={~p"/blog/#{post.slug}"}
-                      class={if(@grid?, do: "flex h-full flex-col", else: "block sm:flex")}
-                    >
-                      <%!-- The cover, when the post has one: cropped to a
-                            landscape tile beside the text in the list, above
-                            it in the grid, whole on the post itself. --%>
+                    <.link navigate={~p"/blog/#{post.slug}"} class="flex h-full flex-col">
+                      <%!-- The post's picture, cropped to a landscape tile
+                            above the text; whole on the post itself. The
+                            newest post's is the first thing a reader sees,
+                            so it is fetched first rather than lazily. --%>
                       <img
-                        :if={post[:image]}
-                        src={post.image}
+                        :if={card_image(post)}
+                        src={card_image(post)}
                         alt=""
-                        loading="lazy"
+                        loading={if post.slug == @first_slug, do: "eager", else: "lazy"}
+                        fetchpriority={if post.slug == @first_slug, do: "high"}
                         decoding="async"
-                        class={[
-                          "aspect-video w-full object-cover",
-                          !@grid? && "sm:w-64 sm:shrink-0"
-                        ]}
+                        class="aspect-video w-full object-cover"
                       />
                       <div class="space-y-2 p-5">
                         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs uppercase tracking-[0.18em] text-base-content/70">
                           <span><.timestamp at={post.date} format="date" /></span>
                           <span :if={post[:reading_minutes]}>
-                            {ngettext("%{count} min read", "%{count} min read", post.reading_minutes)}
+                            {reading_time(post.reading_minutes)}
                           </span>
                         </div>
 
@@ -257,9 +257,22 @@ defmodule GamendWeb.ContentPages do
   attr :prev, :any, default: nil
   attr :next, :any, default: nil
 
-  @doc "One blog post, with links to the neighbouring posts."
+  @doc """
+  One blog post, with links to the neighbouring posts.
+
+  Opens with the post's description, else its first paragraph in full (which
+  `Gamend.Content.blog_post_html/1` has dropped from the body), then the
+  cover when the body does not already show it. Whichever picture comes
+  first, the cover or one the body opens with, is fetched first.
+  """
   def blog_post(assigns) do
-    assigns = assign(assigns, :cover, cover(assigns.post, assigns.html))
+    cover = cover(assigns.post, assigns.html)
+
+    assigns =
+      assign(assigns,
+        cover: cover,
+        html: if(cover, do: assigns.html, else: eager_opening_image(assigns.html))
+      )
 
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={@current_path}>
@@ -273,7 +286,7 @@ defmodule GamendWeb.ContentPages do
               <span>/</span>
               <span><.timestamp at={@post.date} format="date" /></span>
               <span :if={@post[:reading_minutes]}>
-                · {ngettext("%{count} min read", "%{count} min read", @post.reading_minutes)}
+                · {reading_time(@post.reading_minutes)}
               </span>
             </div>
 
@@ -281,7 +294,7 @@ defmodule GamendWeb.ContentPages do
               <h1 class="text-4xl font-bold leading-tight text-base-content/95 sm:text-5xl">
                 {@post.title}
               </h1>
-              <p class="max-w-2xl text-base leading-7 text-base-content/70">{@post.excerpt}</p>
+              <p class="max-w-2xl text-base leading-7 text-base-content/70">{lede(@post)}</p>
               <.post_authors :if={@post[:authors] not in [nil, []]} authors={@post.authors} />
             </div>
 
@@ -289,6 +302,7 @@ defmodule GamendWeb.ContentPages do
               :if={@cover}
               src={@cover}
               alt=""
+              fetchpriority="high"
               decoding="async"
               class="w-full rounded-2xl border border-base-300"
             />
@@ -335,17 +349,22 @@ defmodule GamendWeb.ContentPages do
   end
 
   @doc """
-  The picture to show above a post, or nil. The frontmatter `image` is the
-  card's and the link preview's; a post that also shows it in its body, as
-  the same file or the same name in another format (`x.webp` for `x.png`),
-  would show it twice, so the page leaves it to the body.
+  The picture to show above a post, or nil, at the URL the page serves it
+  from (the blog's `:image_url` with `:page`, see `Gamend.Content.image_url/3`).
+
+  The post's `image` is the card's and the link preview's. A post that also
+  shows it in its body, as the same file or the same name in another format
+  (`x.webp` for `x.png`), would show it twice, so the page leaves it to the
+  body; a post with no frontmatter `image` took its picture from the body in
+  the first place.
   """
   @spec cover(map(), String.t() | nil) :: String.t() | nil
   def cover(post, html) do
     case post[:image] do
       image when is_binary(image) and image != "" ->
+        url = Content.image_url(:blog, image, :page)
         shown = for [_, src] <- Regex.scan(~r/<img[^>]+src="([^"]+)"/, html || ""), do: stem(src)
-        if stem(image) in shown, do: nil, else: image
+        if stem(url) in shown or stem(image) in shown, do: nil, else: url
 
       _ ->
         nil
@@ -353,6 +372,45 @@ defmodule GamendWeb.ContentPages do
   end
 
   defp stem(src), do: src |> String.split(["?", "#"]) |> hd() |> Path.rootname()
+
+  @doc """
+  The body with the picture it opens with fetched first: `loading="eager"
+  fetchpriority="high"` in place of the `lazy` every rendered image gets,
+  when nothing but markup comes before it. With no cover above, that picture
+  is the first thing a reader sees. A picture further down is left lazy.
+  """
+  @spec eager_opening_image(String.t() | nil) :: String.t() | nil
+  def eager_opening_image(nil), do: nil
+
+  def eager_opening_image(html) do
+    with {start, _length} <- :binary.match(html, "<img"),
+         "" <- Markdown.plain_text(binary_part(html, 0, start)) do
+      Regex.replace(~r/<img\b[^>]*>/, html, &eager/1, global: false)
+    else
+      _later_or_none -> html
+    end
+  end
+
+  defp eager(tag) do
+    tag
+    |> String.replace(~r/\s(loading|fetchpriority)="[^"]*"/, "")
+    |> String.replace_prefix("<img", ~s(<img loading="eager" fetchpriority="high"))
+  end
+
+  # The lede above the body: the description when there is one, else the
+  # first paragraph in full. The excerpt is that paragraph cut to 200
+  # characters, and the body no longer holds the rest of it.
+  defp lede(%{lede_in_body?: true, lede: lede}) when is_binary(lede) and lede != "", do: lede
+  defp lede(post), do: post[:excerpt]
+
+  defp card_image(post), do: post[:card_image] || post[:image]
+
+  defp first_slug([{_year, [{_month, [post | _]} | _]} | _]), do: post[:slug]
+  defp first_slug(_grouped_posts), do: nil
+
+  # One number and an abbreviation, which no locale inflects, so one
+  # translation rather than every locale's plural forms.
+  defp reading_time(minutes), do: gettext("%{count} min read", count: minutes)
 
   attr :authors, :list, required: true
   attr :links?, :boolean, default: true

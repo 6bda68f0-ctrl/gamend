@@ -219,7 +219,9 @@ With `base_path: "/docs"`, a link to a neighbouring file — `[Scenes](./scenes.
 
 A post's frontmatter may give `title`, `slug`, `date`, `description`, `authors`, `image`, `keywords` and `tags`; without it, the first `# ` heading and the `YYYY-MM-DD-slug.md` filename still work. `authors: [dragos]` is resolved from `blog/_authors/dragos.md` (`name`, `title`, `url`, `image`). `<!-- truncate -->` marks where the excerpt ends. Feeds are at `/blog/rss.xml` and `/blog/atom.xml`.
 
-The index lists one card to a row, the picture beside the text. `"blog": {"layout": "grid"}` in the theme JSON puts two to a row on a tablet and three on a desktop, the picture above the text; a phone gets one column either way.
+The index is a grid of cards, grouped by year and month: one to a row on a phone, two on a tablet, three on a desktop. Each card shows the post's picture above its date, reading time, title, excerpt and authors. The picture is the frontmatter `image`, else the first picture in the post; a relative path is served from `/content/blog/` like the body's. The post page opens with the description, else the first paragraph, and shows the frontmatter `image` above the body only when the body does not already show it.
+
+A host with smaller copies of its pictures registers the blog with `image_url: {MyHost.BlogImages, :url}` (`Gamend.Content.register_path/2`). It is called as `url(url, use)` for each picture the blog serves itself, and answers the URL to serve instead: `use` is `:card` on the index and `:page` on the post. `post_render:` runs on a post's HTML as it does on a guide's.
 
 #### Pages
 

@@ -108,14 +108,17 @@ defmodule Gamend.Content.BlogTest do
     assert someone.name == "someone"
   end
 
-  test "the truncate marker decides the excerpt when there is no description" do
+  test "the truncate marker decides the excerpt, and the page still opens with the lede once" do
     post = Content.get_blog_post("truncated")
 
     assert post.excerpt == "Above the marker."
-    refute post.lede_in_body?
+    assert post.lede == "Above the marker."
+    # The page shows the lede above the body; keeping it in the body as
+    # well printed the opening paragraph twice.
+    assert post.lede_in_body?
 
     html = Content.blog_post_html("truncated")
-    assert html =~ "<p>Above the marker.</p>"
+    refute html =~ "Above the marker."
     assert html =~ "<p>Below.</p>"
     refute html =~ "truncate"
   end
@@ -158,4 +161,101 @@ defmodule Gamend.Content.BlogTest do
   test "the lede skips an import line left over from MDX" do
     assert Content.get_blog_post("hello").lede == "Opening paragraph that is not the description."
   end
+
+  describe "a post's picture" do
+    setup %{root: root} do
+      File.write!(Path.join(root, "2026-09-03-shown.md"), """
+      # Shown
+
+      Opening paragraph.
+
+      ![A ship](2026-sep/ship.png)
+
+      ![A map](2026-sep/map.png)
+      """)
+
+      File.write!(Path.join(root, "2026-09-04-relative-cover.md"), """
+      ---
+      image: covers/hello.png
+      ---
+      # Relative cover
+
+      Text.
+      """)
+
+      Content.reload()
+      :ok
+    end
+
+    test "is the frontmatter image, as written" do
+      post = Content.get_blog_post("hello")
+
+      assert post.image == "/img/blog/hello.png"
+      assert post.card_image == "/img/blog/hello.png"
+    end
+
+    test "is else the body's first picture, where the body serves it" do
+      post = Content.get_blog_post("shown")
+
+      assert post.image == "/content/blog/2026-sep/ship.png"
+      assert Content.blog_post_html("shown") =~ ~s(src="/content/blog/2026-sep/ship.png")
+    end
+
+    test "is nil for a post with none" do
+      post = Content.get_blog_post("classic")
+
+      assert post.image == nil
+      assert post.card_image == nil
+    end
+
+    test "a relative frontmatter image resolves like the body's" do
+      assert Content.get_blog_post("relative-cover").image == "/content/blog/covers/hello.png"
+    end
+
+    test "goes through the blog's image_url: :card on the index, :page in the body", %{
+      root: root
+    } do
+      Content.register_path(:blog,
+        kind: :dir,
+        path: root,
+        image_url: {__MODULE__, :smaller},
+        post_render: {__MODULE__, :stamp}
+      )
+
+      on_exit(fn -> Content.unregister_path(:blog) end)
+
+      post = Content.get_blog_post("shown")
+      assert post.image == "/content/blog/2026-sep/ship.png"
+      assert post.card_image == "/content/blog/card/2026-sep/ship.webp"
+
+      html = Content.blog_post_html("shown")
+      assert html =~ ~s(src="/content/blog/page/2026-sep/ship.webp")
+      assert html =~ ~s(src="/content/blog/page/2026-sep/map.webp")
+      assert html =~ "<!-- stamped -->"
+
+      assert Content.image_url(:blog, post.image, :page) ==
+               "/content/blog/page/2026-sep/ship.webp"
+
+      assert Content.image_url(:blog, "https://example.com/x.png", :card) ==
+               "https://example.com/x.png"
+
+      assert Content.image_url(:changelog, "/content/changelog/x.png", :page) ==
+               "/content/changelog/x.png"
+    end
+
+    test "image_url is rejected unless it is a {module, function}", %{root: root} do
+      assert_raise ArgumentError, fn ->
+        Content.register_path(:bad_images, kind: :dir, path: root, image_url: :nope)
+      end
+    end
+  end
+
+  # A host's prebuilt copies: `/content/blog/x.png` -> `/content/blog/<use>/x.webp`,
+  # and anything it has no copy of as it is.
+  def smaller("/content/blog/" <> rest, use),
+    do: "/content/blog/#{use}/#{Path.rootname(rest)}.webp"
+
+  def smaller(url, _use), do: url
+
+  def stamp(html), do: html <> "<!-- stamped -->"
 end

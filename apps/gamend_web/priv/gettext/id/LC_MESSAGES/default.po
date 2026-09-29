@@ -3199,3 +3199,8 @@ msgstr "Konfirmasikan email Anda terlebih dahulu dengan tautan yang kami kirim, 
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "Mengonfirmasi dengan tautan ini akan menghapus kata sandi yang dipakai saat akun ini didaftarkan, jadi setel yang baru di pengaturan akun Anda setelahnya. Tautan di email konfirmasi mempertahankannya."
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "%{count} menit baca"

@@ -52,7 +52,8 @@ defmodule Gamend.Content do
     * `:path` - single candidate path
     * `:candidates` - ordered candidate paths
     * `:asset_root` - `:self` or `:dirname` when serving assets
-    * `:post_render` - `{module, function}` applied to rendered guide HTML
+    * `:post_render` - `{module, function}` applied to a guide's or a blog
+      post's rendered HTML
     * `:nesting` - `:flat` (the default: one folder level, slugs are file
       names) or `:tree` (any depth, slugs are paths; see `Gamend.Content.Tree`)
     * `:base_path` - the route prefix guides are served under, such as
@@ -61,6 +62,11 @@ defmodule Gamend.Content do
     * `:assets` - `:content` (the default) serves images through the
       `/content/<name>/` asset route; `:static` leaves root-absolute image
       paths alone, for a site whose images live in `priv/static`
+    * `:image_url` - `{module, function}` called as `function(url, use)` for
+      each image the collection serves itself, answering the URL to serve
+      instead: a smaller copy the host has built, say. `use` is `:page` for
+      a picture on the page itself (in the body, or a post's cover) and
+      `:card` for a post's picture on the blog index. See `image_url/3`
   """
   @spec register_path(atom() | String.t(), keyword()) :: :ok
   def register_path(name, opts) when is_atom(name) or is_binary(name) do
@@ -120,6 +126,35 @@ defmodule Gamend.Content do
 
       {_entry, _resolved_path} ->
         nil
+    end
+  end
+
+  @doc """
+  The URL to serve an image of a collection at, through the collection's
+  registered `:image_url` (see `register_path/2`): `use` is `:page` or
+  `:card`. Without one, or for an `http`/`data:` URL, `url` itself.
+
+  The rendered HTML and `list_blog_posts/0` already went through it; this is
+  for a picture a page places itself, such as a post's cover.
+  """
+  @spec image_url(atom() | String.t(), String.t() | nil, :page | :card) :: String.t() | nil
+  def image_url(_collection, nil, _use), do: nil
+
+  def image_url(collection, url, use) when is_binary(url) and use in [:page, :card] do
+    case Map.get(registered_paths(), normalize_registered_name(collection)) do
+      %{image_url: {module, function}} ->
+        if Markdown.external?(url), do: url, else: apply(module, function, [url, use]) || url
+
+      _entry ->
+        url
+    end
+  end
+
+  # What `Markdown` takes for `:image_url`: the pictures in a rendered page.
+  defp page_images(collection) do
+    case Map.get(registered_paths(), normalize_registered_name(collection)) do
+      %{image_url: {_module, _function}} -> &image_url(collection, &1, :page)
+      _entry -> nil
     end
   end
 
@@ -454,7 +489,8 @@ defmodule Gamend.Content do
   over the finished HTML — the hook Polyglot Pirates' guide uses to turn
   `[coins:250]` into a badge. It runs *after* markdown rendering because the
   sanitiser strips raw HTML out of the markdown, and inside the cache because
-  the result is as static as the markdown it came from.
+  the result is as static as the markdown it came from. One registered with
+  `:image_url` has its pictures swapped the same way, inside the cache.
   """
   @spec doc_html(atom(), String.t()) :: String.t() | nil
   def doc_html(collection \\ :docs, slug)
@@ -475,7 +511,8 @@ defmodule Gamend.Content do
             base_path: Map.get(entry, :base_path),
             slug: slug,
             dir: Map.get(doc, :dir, ""),
-            id: "doc-" <> String.replace(slug, "/", "-")
+            id: "doc-" <> String.replace(slug, "/", "-"),
+            image_url: page_images(collection)
           )
           |> case do
             nil -> nil
@@ -603,7 +640,13 @@ defmodule Gamend.Content do
     * `:lede` – the first paragraph in full, which is what a post opens
       with when it has no description of its own; `:lede_in_body?` says
       whether that paragraph is also the body's first, so the page drops one
-    * `:description`, `:image`, `:keywords`, `:tags` – frontmatter
+    * `:image` – the post's picture, for its card, its feed entry and a link
+      to it: the frontmatter `image`, else the first picture in the body, at
+      the URL the body serves it from (`Gamend.Content.Markdown.image_src/2`,
+      so a relative path is a `/content/blog/…` one); nil when it has none
+    * `:card_image` – `:image` as the index card shows it: through the
+      blog's registered `:image_url` with `:card`, else the same
+    * `:description`, `:keywords`, `:tags` – frontmatter
     * `:authors` – resolved from `_authors/<key>.md` beside the posts:
       `%{key, name, title, url, image}`, with a key that has no file
       answering its key as its name
@@ -618,15 +661,23 @@ defmodule Gamend.Content do
 
         dir ->
           authors = blog_authors(dir)
+          opts = blog_render_opts()
 
           dir
           |> Path.join("**/*.md")
           |> Path.wildcard()
           |> Enum.reject(&hidden_path?(&1, dir))
-          |> Enum.map(&parse_blog_post(&1, authors))
+          |> Enum.map(&parse_blog_post(&1, authors, opts))
           |> Enum.sort_by(& &1.date, {:desc, Date})
       end
     end)
+  end
+
+  # How a post's markdown is rendered, which is also how its picture is
+  # resolved: one set of options, so the card's URL is the body's.
+  defp blog_render_opts do
+    entry = Map.get(registered_paths(), "blog", %{})
+    [collection: "blog", assets: Map.get(entry, :assets, :content)]
   end
 
   # `_authors/dragos.md`, a `_drafts/` folder, a `_template.md`: an underscore
@@ -694,17 +745,13 @@ defmodule Gamend.Content do
           nil
 
         post ->
-          entry = Map.get(registered_paths(), "blog", %{})
-
           post.path
           |> Markdown.render_file(
-            collection: "blog",
-            assets: Map.get(entry, :assets, :content),
-            id: "post-" <> slug
+            blog_render_opts() ++ [id: "post-" <> slug, image_url: page_images(:blog)]
           )
           |> case do
             nil -> nil
-            html -> html |> Markdown.strip_first_h1() |> strip_lede(post)
+            html -> html |> Markdown.strip_first_h1() |> strip_lede(post) |> post_render(:blog)
           end
       end
     end)
@@ -731,7 +778,7 @@ defmodule Gamend.Content do
 
   @truncate_marker ~r/<!--\s*truncate\s*-->/
 
-  defp parse_blog_post(path, authors) do
+  defp parse_blog_post(path, authors, opts) do
     filename = Path.basename(path, ".md")
     {file_date, file_slug} = extract_date_and_slug(filename)
     {meta, body} = Frontmatter.parse(File.read!(path))
@@ -747,6 +794,8 @@ defmodule Gamend.Content do
         true -> String.slice(lede, 0, 200)
       end
 
+    image = frontmatter_image(meta["image"], opts) || Markdown.first_image(body, opts)
+
     %{
       slug: string(meta["slug"]) |> then(&(&1 && String.trim(&1, "/"))) || file_slug,
       title: string(meta["title"]) || extract_title(body) || humanize_slug(file_slug),
@@ -754,11 +803,15 @@ defmodule Gamend.Content do
       path: path,
       excerpt: excerpt,
       lede: lede,
-      # A description or a truncate marker means the page shows *that* above
-      # the body, so the first paragraph stays where it is.
-      lede_in_body?: is_nil(description) and is_nil(truncated),
+      # A description means the page shows *that* above the body, so the
+      # first paragraph stays where it is. Without one the page opens with
+      # the first paragraph, and the body drops its copy. A truncate marker
+      # only decides the excerpt: the text above it is the first paragraph
+      # too, and the page used to print it twice.
+      lede_in_body?: is_nil(description),
       description: description,
-      image: string(meta["image"]),
+      image: image,
+      card_image: image_url(:blog, image, :card),
       keywords: Frontmatter.list(meta["keywords"]),
       tags: Frontmatter.list(meta["tags"]),
       authors:
@@ -767,6 +820,17 @@ defmodule Gamend.Content do
         |> Enum.map(&Map.get(authors, &1, %{key: &1, name: &1, title: nil, url: nil, image: nil})),
       reading_minutes: reading_minutes(body)
     }
+  end
+
+  # A URL as written, which is what the frontmatter has always meant; only a
+  # relative path, which has no URL of its own, is resolved the way the body
+  # resolves one.
+  defp frontmatter_image(value, opts) do
+    case string(value) do
+      nil -> nil
+      "/" <> _absolute = image -> image
+      image -> if Markdown.external?(image), do: image, else: Markdown.image_src(image, opts)
+    end
   end
 
   defp truncated_excerpt(body) do
@@ -878,21 +942,25 @@ defmodule Gamend.Content do
       kind: kind,
       candidates: candidates,
       asset_root: asset_root,
-      post_render: normalize_post_render!(Keyword.get(opts, :post_render)),
+      post_render: normalize_hook!(opts, :post_render),
+      image_url: normalize_hook!(opts, :image_url),
       nesting: nesting,
       base_path: Keyword.get(opts, :base_path),
       assets: assets
     }
   end
 
-  defp normalize_post_render!(nil), do: nil
+  defp normalize_hook!(opts, key) do
+    case Keyword.get(opts, key) do
+      nil ->
+        nil
 
-  defp normalize_post_render!({module, function} = hook)
-       when is_atom(module) and is_atom(function),
-       do: hook
+      {module, function} = hook when is_atom(module) and is_atom(function) ->
+        hook
 
-  defp normalize_post_render!(_other) do
-    raise ArgumentError, "registered content path post_render must be {module, function}"
+      _other ->
+        raise ArgumentError, "registered content path #{key} must be {module, function}"
+    end
   end
 
   defp normalize_registered_name(name) when is_atom(name), do: Atom.to_string(name)

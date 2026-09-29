@@ -168,6 +168,35 @@ defmodule Gamend.RetentionTest do
       assert Repo.get(Event, fresh_event.id)
     end
 
+    # More than one batch: the prune deletes in small statements so SQLite's
+    # one write lock is never held for the whole history, and it must still
+    # get through all of it.
+    test "a history bigger than one batch is pruned whole, flagged runs kept" do
+      old = DateTime.add(DateTime.utc_now(), -40, :day)
+      plain = Ecto.UUID.generate()
+      flagged = Ecto.UUID.generate()
+
+      rows = fn lobby, n, flag ->
+        for _ <- 1..n,
+            do: %{
+              id: Gamend.UUIDv7.generate(),
+              lobby_id: lobby,
+              trigger: "test",
+              flagged: flag,
+              section_hashes: %{},
+              inserted_at: old
+            }
+      end
+
+      Repo.insert_all(Snapshot, rows.(plain, 1_201, false))
+      Repo.insert_all(Snapshot, rows.(flagged, 3, false) ++ rows.(flagged, 1, true))
+
+      Retention.prune_all()
+
+      assert Repo.aggregate(from(s in Snapshot, where: s.lobby_id == ^plain), :count) == 0
+      assert Repo.aggregate(from(s in Snapshot, where: s.lobby_id == ^flagged), :count) == 4
+    end
+
     test "a flagged run keeps its whole timeline, unflagged snapshots included" do
       flagged_lobby = Ecto.UUID.generate()
       plain_lobby = Ecto.UUID.generate()

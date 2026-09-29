@@ -53,6 +53,10 @@ defmodule Gamend.Content.Markdown do
     folder, so its links resolve against the slug rather than its parent.
     `render_file/2` sets it from the file name.
   * `:id` — a stable prefix for element ids (mermaid diagrams need one)
+  * `:image_url` — given each image's URL once it is resolved (never an
+    `http` or `data:` one), answers the URL to serve instead: a smaller copy
+    the host has built, say. `Gamend.Content` passes the collection's
+    registered `:image_url` here
   """
   @type opt ::
           {:collection, String.t()}
@@ -62,6 +66,7 @@ defmodule Gamend.Content.Markdown do
           | {:slug, String.t() | nil}
           | {:index, boolean()}
           | {:id, String.t()}
+          | {:image_url, (String.t() -> String.t()) | nil}
 
   @admonitions ~w(note tip info warning danger caution important)
 
@@ -182,6 +187,40 @@ defmodule Gamend.Content.Markdown do
     |> String.replace("&quot;", "\"")
     |> String.replace("&#39;", "'")
     |> String.replace("&amp;", "&")
+  end
+
+  @doc """
+  The first picture in a markdown body, at the URL the rendered page serves it
+  from (`image_src/2`, before any `:image_url`), or nil.
+
+  A markdown image or an `<img>` written in raw HTML, whichever comes first;
+  one inside a code block is code, not a picture. For a card that has only
+  the post itself to take a picture from. Give it the body, after the
+  frontmatter.
+  """
+  @spec first_image(String.t(), [opt()]) :: String.t() | nil
+  def first_image(body, opts \\ []) when is_binary(body) do
+    case MDEx.parse_document(body, options()) do
+      {:ok, document} ->
+        document
+        |> Enum.find_value(fn
+          %MDEx.Image{url: url} when url != "" -> url
+          %MDEx.HtmlBlock{literal: html} -> html_image(html)
+          %MDEx.HtmlInline{literal: html} -> html_image(html)
+          _node -> nil
+        end)
+        |> then(&(&1 && image_src(&1, opts)))
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  defp html_image(html) do
+    case Regex.run(~r/<img\b[^>]*\ssrc="([^"]+)"/, html) do
+      [_, src] -> src
+      nil -> nil
+    end
   end
 
   @doc """
@@ -453,59 +492,78 @@ defmodule Gamend.Content.Markdown do
 
   ## HTML
 
-  # Rewrite image `src` attributes so they point to `/content/<type>/…`,
-  # which is served by the host content asset route.
-  #
-  # Handles three conventions authors may use:
-  #   1. Relative:     `gamend/auth.png`        → `/content/blog/gamend/auth.png`
-  #   2. Absolute:     `/gamend/auth.png`        → `/content/blog/gamend/auth.png`
-  #   3. Type-prefixed: `/blog/gamend/auth.png`  → `/content/blog/gamend/auth.png`
-  #
-  # With `assets: :static`, an absolute path is a URL the host serves and is
-  # left alone; only relative ones are resolved, against the file's folder.
+  # Every image's `src` through `image_src/2`, then the host's `:image_url`,
+  # with the same lazy-loading attributes.
   #
   # On the HTML rather than the tree, on purpose: a raw `<figure>` holds an
   # `<img>` that is no `MDEx.Image`, and this way every image, written either
-  # way, gets the same path and the same lazy-loading attributes. Also
-  # handles `<image>` tags (non-standard HTML) by converting them to `<img>`.
-  # External URLs (`http…`) and already-rewritten `/content/…` paths are left
-  # alone.
+  # way, gets the same path and the same attributes. Also handles `<image>`
+  # tags (non-standard HTML) by converting them to `<img>`. External URLs
+  # (`http…`, `data:`) are left exactly as written.
   defp rewrite_images(html, opts) do
-    collection = Keyword.get(opts, :collection, "docs")
-    mode = Keyword.get(opts, :assets, :content)
-    dir = opts |> Keyword.get(:dir, "") |> normalize_dir()
-
+    swap = Keyword.get(opts, :image_url) || (& &1)
     html = Regex.replace(~r/<image\b/, html, "<img")
 
     Regex.replace(
       ~r/<img([^>]*)\ssrc="([^"]+)"([^>]*)>/,
       html,
       fn full, before, src, after_attr ->
-        cond do
-          String.starts_with?(src, ["http", "data:"]) ->
-            full
+        if external?(src) do
+          full
+        else
+          url = src |> image_src(opts) |> swap.()
 
-          String.starts_with?(src, "/content/") ->
-            add_lazy_image_attrs(full)
-
-          mode == :static and String.starts_with?(src, "/") ->
-            add_lazy_image_attrs(full)
-
-          true ->
-            clean =
-              src
-              |> String.trim_leading("/")
-              |> String.trim_leading("./")
-              # Strip redundant type prefix (e.g. "blog/" from "/blog/gamend/img.png")
-              |> strip_content_type_prefix(collection)
-              |> prefix_dir(mode, dir)
-
-            ~s(<img#{before} src="/content/#{collection}/#{clean}"#{after_attr}>)
-            |> add_lazy_image_attrs()
+          add_lazy_image_attrs(~s(<img#{before} src="#{url}"#{after_attr}>))
         end
       end
     )
   end
+
+  @doc """
+  The URL an image written in a collection's markdown is served from.
+
+  Points it at `/content/<collection>/…`, the host content asset route, in
+  the three ways authors write it:
+
+    1. Relative:      `gamend/auth.png`       → `/content/blog/gamend/auth.png`
+    2. Absolute:      `/gamend/auth.png`      → `/content/blog/gamend/auth.png`
+    3. Type-prefixed: `/blog/gamend/auth.png` → `/content/blog/gamend/auth.png`
+
+  With `assets: :static`, an absolute path is a URL the host serves and is
+  left alone; only relative ones are resolved, against the file's folder
+  (`:dir`). External URLs (`http…`, `data:`) and paths already under
+  `/content/` come back as they are.
+  """
+  @spec image_src(String.t(), [opt()]) :: String.t()
+  def image_src(src, opts \\ []) when is_binary(src) do
+    collection = Keyword.get(opts, :collection, "docs")
+    mode = Keyword.get(opts, :assets, :content)
+    dir = opts |> Keyword.get(:dir, "") |> normalize_dir()
+
+    cond do
+      external?(src) or String.starts_with?(src, "/content/") ->
+        src
+
+      mode == :static and String.starts_with?(src, "/") ->
+        src
+
+      true ->
+        clean =
+          src
+          |> String.trim_leading("/")
+          |> String.trim_leading("./")
+          # Strip redundant type prefix (e.g. "blog/" from "/blog/gamend/img.png")
+          |> strip_content_type_prefix(collection)
+          |> prefix_dir(mode, dir)
+
+        "/content/#{collection}/#{clean}"
+    end
+  end
+
+  @doc false
+  # Not served by this site: left as written, and never handed to a host's
+  # `:image_url`.
+  def external?(src), do: String.starts_with?(src, ["http", "data:"])
 
   # A relative path in a nested guide is relative to that guide's folder, so
   # `../shared/x.png` from `10-manual/20-scenes.md` is `shared/x.png`.

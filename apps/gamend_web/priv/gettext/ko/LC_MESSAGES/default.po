@@ -3199,3 +3199,8 @@ msgstr "먼저 보내 드린 링크로 이메일을 인증하거나, 이메일�
 #, elixir-autogen, elixir-format
 msgid "Confirming with this link removes the password this account was registered with, so set a new one in your account settings afterwards. The link in the confirmation email keeps it."
 msgstr "이 링크로 인증하면 이 계정을 등록할 때 설정한 비밀번호가 삭제되므로, 이후 계정 설정에서 새 비밀번호를 설정하세요. 인증 이메일의 링크를 사용하면 비밀번호가 유지됩니다."
+
+#: lib/gamend_web/components/content_pages.ex:413
+#, elixir-autogen, elixir-format
+msgid "%{count} min read"
+msgstr "%{count}분 읽기"
