@@ -1491,9 +1491,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The server archives only: the run's other artifacts (the SDKs, the
+      # Docker build records) are not release assets, and a folder fails the upload.
       - uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: gamend-*
           merge-multiple: true
 
       - name: Checksums and installer
@@ -1521,3 +1524,8 @@ jobs:
             gh release create server-latest --prerelease --title "Gamend server (latest)" --notes "$notes" --verify-tag
           fi
           gh release upload server-latest dist/* --clobber
+          # The release holds this build alone: drop what an older upload left.
+          gh release view server-latest --json assets --jq '.assets[].name' |
+            while read -r asset; do
+              [ -e "dist/$asset" ] || gh release delete-asset server-latest "$asset" --yes
+            done
