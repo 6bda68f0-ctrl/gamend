@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Write the Balaur SDK, the way generate_godot.sh writes the Godot one: the
-# mix task refreshes the OpenAPI document, then the generator turns it and
+# mix task refreshes the OpenAPI document, then clients/sdkgen turns it and
 # the realtime table into addons/gamend.
 #
 #   clients/generate_balaur.sh            # regenerate
@@ -15,7 +15,7 @@ if [ "${1:-}" != "--check" ]; then
   mix openapi.spec.json --spec GamendWeb.ApiSpec --filename clients/godot/openapi.json --pretty=true
 fi
 
-python3 clients/generate_balaur.py "$@"
+python3 clients/sdkgen balaur "$@"
 
 if [ -n "${APP_VERSION:-}" ]; then
   echo "Stamping ${APP_VERSION} into the addon"

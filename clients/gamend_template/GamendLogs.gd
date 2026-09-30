@@ -224,7 +224,7 @@ func _on_flushed(result: int, code: int, body: PackedByteArray, batch: Array) ->
 		# mid-session re-sends exactly the unacknowledged tail.
 		_session_registered = true
 		_spool_rewrite()
-		var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+		var parsed: Variant = _unwrap(JSON.parse_string(body.get_string_from_utf8()))
 		var payload: Dictionary = parsed if parsed is Dictionary else {}
 		flushed.emit(true, int(payload.get("accepted", batch.size())), int(payload.get("dropped", 0)))
 		return
@@ -257,13 +257,21 @@ func _fetch_policy() -> void:
 			request.queue_free()
 			if result != HTTPRequest.RESULT_SUCCESS or code != 200:
 				return
-			var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+			var parsed: Variant = _unwrap(JSON.parse_string(body.get_string_from_utf8()))
 			if parsed is Dictionary:
 				_apply_policy(parsed)
 	)
 	var error := request.request(_base_url + _POLICY_PATH, _headers(), HTTPClient.METHOD_GET)
 	if error != OK:
 		request.queue_free()
+
+
+# Every API answer carries its payload under `data`; a server from before that
+# change sent it bare, so take either.
+func _unwrap(parsed: Variant) -> Variant:
+	if parsed is Dictionary and parsed.get("data") is Dictionary:
+		return parsed["data"]
+	return parsed
 
 
 func _apply_policy(policy: Dictionary) -> void:

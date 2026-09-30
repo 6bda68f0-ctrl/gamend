@@ -45,7 +45,7 @@ defmodule Mix.Tasks.Gamend.Settings.Guide do
         Mix.shell().info("no #{Path.dirname(path)} directory - skipping the settings guide")
 
       Keyword.get(opts, :check, false) ->
-        check(path, generated)
+        Gamend.Codegen.check!(path, generated, "gamend.settings.guide")
 
       true ->
         File.write!(path, generated)
@@ -53,19 +53,13 @@ defmodule Mix.Tasks.Gamend.Settings.Guide do
     end
   end
 
-  defp check(path, generated) do
-    case File.read(path) do
-      {:ok, ^generated} -> Mix.shell().info("#{path} is up to date")
-      {:ok, _stale} -> Mix.raise("#{path} is out of date. Run: mix gamend.settings.guide")
-      {:error, _} -> Mix.raise("#{path} does not exist. Run: mix gamend.settings.guide")
-    end
-  end
-
   defp render do
+    # By label, like the admin page (`Settings.groups/0`) — sorting by the
+    # group atom filed "Public features" (`:features`) under D.
     groups =
       Settings.all()
       |> Enum.group_by(& &1.group)
-      |> Enum.sort_by(fn {group, _} -> to_string(group) end)
+      |> Enum.sort_by(fn {_group, definitions} -> group_label(definitions) end)
 
     """
     ---
@@ -90,12 +84,20 @@ defmodule Mix.Tasks.Gamend.Settings.Guide do
     config :gamend_core, Gamend.Retention, chat_messages_days: 90
     ```
 
-    To feed the variables below in, a host adds one line to
-    `config/runtime.exs`:
+    To feed the variables below in, a host's `config/runtime.exs` runs one loop
+    over `GamendWeb.HostRuntime.config/2`. It folds in
+    `Gamend.Settings.from_env/0` and also derives the Repo, Endpoint, mailer and
+    push configuration from these settings, so a loop over `from_env/0` alone
+    boots a production server with no Repo or Endpoint configuration:
 
     ```elixir
-    for {app, module, opts} <- Gamend.Settings.from_env() do
-      config app, module, opts
+    host_root = System.get_env("RELEASE_ROOT") || Path.expand("..", __DIR__)
+
+    for entry <- GamendWeb.HostRuntime.config(config_env(), host_root: host_root) do
+      case entry do
+        {app, opts} -> config app, opts
+        {app, key, value} -> config app, key, value
+      end
     end
     ```
 
@@ -132,9 +134,61 @@ defmodule Mix.Tasks.Gamend.Settings.Guide do
     "| `#{d.env}` | #{d.type} | #{format_default(d)} | #{notes} |"
   end
 
-  defp required_note(%{required: :prod}), do: "**Required in production.**"
-  defp required_note(%{required: :warn}), do: "Warns when unset."
+  defp required_note(%{required: :prod} = d), do: "**Required in production#{gate_text(d)}.**"
+  defp required_note(%{required: :warn} = d), do: "Warns if unset#{gate_text(d)}."
   defp required_note(_), do: nil
+
+  # The gate a requirement waits on, as `Gamend.Settings.validate/1` applies it
+  # and the admin settings page words it: `when:` ties it to another setting's
+  # value, `with:` makes it apply only once a sibling is set. Named by env var,
+  # since that is how this page names every setting.
+  defp gate_text(d) do
+    case Enum.reject([when_text(d.when), with_text(d)], &is_nil/1) do
+      [] -> ""
+      parts -> " " <> Enum.join(parts, " and ")
+    end
+  end
+
+  defp when_text(nil), do: nil
+  defp when_text({_path, _value} = condition), do: when_text([condition])
+
+  defp when_text(conditions) when is_list(conditions) do
+    "when " <>
+      Enum.map_join(conditions, " and ", fn {[group, key], value} ->
+        "`#{when_env(group, key)}` is `#{format_value(value)}`"
+      end)
+  end
+
+  defp with_text(%{with: siblings, module: module, key: key}) do
+    case Enum.reject(siblings, &(&1 == key)) do
+      [] -> nil
+      others -> "once " <> join_or(Enum.map(others, &"`#{module_env(module, &1)}`")) <> " is set"
+    end
+  end
+
+  defp when_env(group, key) do
+    case Enum.find(Settings.group(group), &(&1.key == key)) do
+      nil -> "#{group}.#{key}"
+      definition -> definition.env
+    end
+  end
+
+  defp module_env(module, key) do
+    case Enum.find(Settings.all(), &(&1.module == module and &1.key == key)) do
+      nil -> to_string(key)
+      definition -> definition.env
+    end
+  end
+
+  defp format_value(value) when is_atom(value), do: to_string(value)
+  defp format_value(value), do: inspect(value)
+
+  defp join_or([one]), do: one
+
+  defp join_or(items) do
+    {init, [last]} = Enum.split(items, -1)
+    Enum.join(init, ", ") <> " or " <> last
+  end
 
   defp secret_note(%{secret: true}), do: "Secret - never log or commit it."
   defp secret_note(_), do: nil
@@ -142,6 +196,8 @@ defmodule Mix.Tasks.Gamend.Settings.Guide do
   defp format_default(%{secret: true, default: d}) when d not in [nil, ""], do: "_(set)_"
   defp format_default(%{default: nil}), do: "-"
   defp format_default(%{default: ""}), do: "-"
+  # An empty list would otherwise join to an empty code span.
+  defp format_default(%{default: []}), do: "-"
 
   defp format_default(%{default: default}) when is_list(default),
     do: "`#{Enum.join(default, ",")}`"

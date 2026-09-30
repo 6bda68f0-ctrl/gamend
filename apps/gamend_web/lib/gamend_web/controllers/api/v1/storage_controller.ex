@@ -26,53 +26,72 @@ defmodule GamendWeb.Api.V1.StorageController do
   # as an opaque download.
   @servable_types ~w(image/png image/jpeg image/webp image/gif)
 
-  @doc "PUT /storage/upload?key=...&token=... — authenticated raw-body upload (local backend)."
+  @doc """
+  PUT /storage/upload?key=...&token=... — authenticated raw-body upload (local
+  backend). Answers `{"ok": true}`: the client already holds the key from its
+  ticket, and an S3 presigned PUT answers with no body at all.
+  """
   def upload(conn, %{"token" => token} = params) do
-    content_type = request_content_type(conn)
+    content_type = Uploads.request_content_type(conn)
     max = Gamend.Limits.get(:max_upload_bytes)
 
     with {:ok, key} <- verify_token(token, params["key"]),
-         {:ok, body, conn} <- read_full_body(conn, max),
+         {:ok, body, conn} <- Uploads.read_full_body(conn, max),
          :ok <- Storage.validate_upload(content_type, byte_size(body)),
          :ok <- verify_magic_bytes(body, content_type),
          :ok <- check_owner_quota(key, byte_size(body)),
          {:ok, ^key} <- Storage.put(key, body, content_type: content_type) do
-      json(conn, %{ok: true, key: key})
+      reply_ok(conn)
     else
       {:error, :forbidden} ->
-        conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
+        reply_error(conn, :forbidden, "forbidden")
 
       {:error, :content_mismatch} ->
-        conn |> put_status(:unsupported_media_type) |> json(%{error: "content_mismatch"})
+        reply_error(conn, :unsupported_media_type, "content_mismatch")
 
       {:error, :too_large} ->
-        conn |> put_status(:request_entity_too_large) |> json(%{error: "too_large"})
+        reply_error(conn, :request_entity_too_large, "too_large")
 
       {:error, :quota_exceeded} ->
-        conn |> put_status(:insufficient_storage) |> json(%{error: "quota_exceeded"})
+        reply_error(conn, :insufficient_storage, "quota_exceeded")
 
       {:error, :unsupported_content_type} ->
-        conn |> put_status(:unsupported_media_type) |> json(%{error: "unsupported_content_type"})
+        reply_error(conn, :unsupported_media_type, "unsupported_content_type")
 
       _ ->
-        conn |> put_status(:bad_request) |> json(%{error: "upload_failed"})
+        reply_error(conn, :bad_request, "upload_failed")
     end
   end
 
-  def upload(conn, _), do: conn |> put_status(:bad_request) |> json(%{error: "missing_token"})
+  def upload(conn, _), do: reply_error(conn, :bad_request, "missing_param", "token is required")
 
-  @doc "GET /storage/*key — serve a stored object (local backend)."
+  @doc """
+  GET /storage/*key — serve a stored object. The local backend serves the
+  bytes; any other backend redirects to a signed link (`Storage.url/2` hands
+  out this path for a private S3 bucket, since a signed link expires).
+  """
   def show(conn, %{"key" => segments}) do
     key = Enum.join(segments, "/")
 
-    if publicly_servable?(key) do
-      serve_object(conn, key)
-    else
-      conn |> put_status(:not_found) |> json(%{error: "not_found"})
+    cond do
+      not publicly_servable?(key) -> reply_error(conn, :not_found, "not_found")
+      Storage.adapter() == Storage.Local -> serve_object(conn, key)
+      true -> redirect_to_object(conn, key)
     end
   end
 
-  # Prefixes this unauthenticated route may serve.
+  # Cached for half the link's life, so a cached redirect never points at an
+  # expired link.
+  defp redirect_to_object(conn, key) do
+    max_age = div(Storage.signed_url_seconds(), 2)
+
+    conn
+    |> put_resp_header("cache-control", "public, max-age=#{max_age}")
+    |> redirect(external: Storage.url(key, signed: true))
+  end
+
+  # Prefixes this unauthenticated route may serve: `Storage.public_prefixes/0`,
+  # `avatars/` and `icons/` unless a host adds its own.
   #
   # It used to serve *any* key in the store. Avatar and icon keys carry 16 bytes
   # of entropy so they are effectively unguessable, but the admin uploader
@@ -81,10 +100,8 @@ defmodule GamendWeb.Api.V1.StorageController do
   # hand-written key like `backups/db.sql` is guessable by construction.
   # Everything outside these prefixes is reachable only through the
   # authenticated admin download route.
-  @public_prefixes ~w(avatars/ icons/)
-
   defp publicly_servable?(key) do
-    Enum.any?(@public_prefixes, &String.starts_with?(key, &1))
+    Enum.any?(Storage.public_prefixes(), &String.starts_with?(key, &1))
   end
 
   defp serve_object(conn, key) do
@@ -107,7 +124,7 @@ defmodule GamendWeb.Api.V1.StorageController do
         end
 
       {:error, _} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
     end
   end
 
@@ -166,23 +183,5 @@ defmodule GamendWeb.Api.V1.StorageController do
     if Storage.sniff_content_type(body) == content_type,
       do: :ok,
       else: {:error, :content_mismatch}
-  end
-
-  defp request_content_type(conn) do
-    case get_req_header(conn, "content-type") do
-      [ct | _] -> ct |> String.split(";") |> hd() |> String.trim()
-      [] -> ""
-    end
-  end
-
-  # Reads one byte past the cap so an oversized body is detected without buffering
-  # the whole thing. Image bodies pass the endpoint parser unparsed (`pass: */*`).
-  defp read_full_body(conn, max) do
-    case read_body(conn, length: max + 1) do
-      {:ok, body, conn} when byte_size(body) <= max -> {:ok, body, conn}
-      {:ok, _body, _conn} -> {:error, :too_large}
-      {:more, _partial, _conn} -> {:error, :too_large}
-      {:error, _} = err -> err
-    end
   end
 end

@@ -105,6 +105,14 @@ config :gamend_core, Gamend.Storage, adapter: :local
 
 config :ex_aws, json_codec: Jason
 
+# The downloadable releases link libsrtp statically, from the prefix
+# rel/scripts/static-deps.sh builds (found through PKG_CONFIG_PATH).
+# Otherwise ex_libsrtp downloads a shared libsrtp and loads it through an rpath,
+# one more library the machine running the release would need.
+if System.get_env("GAMEND_BUILD_STATIC_DEPS") == "true" do
+  config :bundlex, :disable_precompiled_os_deps, apps: [:ex_libsrtp]
+end
+
 host_root = Path.expand("..", __DIR__)
 host_theme_root = Path.join(host_root, "theme")
 web_dep_root = Mix.Project.deps_paths()[:gamend_web]
@@ -261,10 +269,10 @@ config :gamend_web, GamendWeb.Auth.Guardian,
   issuer: "gamend",
   secret_key: "REPLACE_THIS_IN_RUNTIME_CONFIG"
 
-# WebRTC DataChannel support (requires ex_webrtc + ex_sctp deps)
-config :gamend_web, :webrtc,
-  enabled: true,
-  ice_servers: [%{urls: "stun:stun.l.google.com:19302"}]
+# WebRTC DataChannel support (requires ex_webrtc + ex_sctp deps). The ICE
+# servers are the GAMEND_WEBRTC_* settings; an `ice_servers:` list here would
+# replace them outright.
+config :gamend_web, :webrtc, enabled: true
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
@@ -276,7 +284,7 @@ config :mime, :types, %{
 }
 
 # Ueberauth drives Steam only: its OpenID 2.0 callback verification has no
-# OAuth-shaped equivalent. Discord, Google, Facebook and Apple run through
+# OAuth-shaped equivalent. Discord, Google, Facebook, GitHub and Apple run through
 # GamendWeb.AuthController and Gamend.OAuth.Exchanger directly, so that one
 # code path can serve the browser redirect flow, the SDK session-polling flow
 # and the native-token endpoints alike. ueberauth_apple stays a dependency for

@@ -55,7 +55,7 @@ defmodule GamendWeb.AdminLive.Analytics do
       <div class="space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div class="flex items-center gap-3">
-            <.link navigate={~p"/admin"} class="btn btn-outline btn-sm">&larr; Admin</.link>
+            <.link navigate={~p"/admin"} class="btn btn-outline btn-sm">&larr; Back to Admin</.link>
             <h1 class="text-xl font-bold">Analytics · activity &amp; retention</h1>
           </div>
           <div class="flex items-center gap-2">
@@ -140,7 +140,7 @@ defmodule GamendWeb.AdminLive.Analytics do
               <h2 class="card-title">Economy · last {@flow_days} days</h2>
               <p class="text-xs text-base-content/60">
                 Every wallet grant and spend, by the ledger <code>reason</code> the game
-                passed. Sources are positive, sinks negative — the net line is what inflates
+                passed. Sources are positive, sinks negative — the Net column is what inflates
                 or drains balances.
               </p>
               <div class="overflow-x-auto">
@@ -179,9 +179,9 @@ defmodule GamendWeb.AdminLive.Analytics do
             <div class="card-body">
               <h2 class="card-title">Counters · last {@flow_days} days</h2>
               <p class="text-xs text-base-content/60">
-                Game-defined daily counters (<code>Gamend.Analytics.count/3</code>): levels
-                started / finished / failed, starts blocked by empty hearts, and whatever else
-                the game reports. Empty until the game writes some.
+                Game-defined daily counters (<code>Gamend.Analytics.count/3</code>): whatever
+                the game reports, such as levels started, finished or failed. Empty until the
+                game writes some.
               </p>
               <div class="overflow-x-auto">
                 <table class="table table-sm table-zebra">

@@ -5,6 +5,22 @@ defmodule GamendWeb.QuestsLive do
   Anonymous users browse the catalog (hidden quests appear as teasers).
   Logged-in users see their progress per reset period, can filter by category
   and status, and claim completed quests.
+
+  ## The group selector
+
+  Quests that share a `group_key` collapse to one card each. When the viewer's
+  quests fall into any group, the page also offers a selector over them
+  (`Gamend.Quests.groups/2`): picking one lists that group's members and drops
+  the selector's other groups from the page. Fifty groups are fifty cards
+  otherwise, and a host with one group per language wants "pick a language",
+  not a wall.
+
+  The plain `<select>` covers every group and has an "All" option, which is
+  the collapsed cards. A host registers a `GamendWeb.QuestGroupSelector`
+  (`config :gamend_web, :quest_group_selector, Module`) to draw its own
+  control, say which groups it covers — the others keep their collapsed card
+  — and name the group to open on. Behind a host selector, nothing picked
+  lists none of its groups: the selector is the way in.
   """
   use GamendWeb, :live_view
 
@@ -12,6 +28,7 @@ defmodule GamendWeb.QuestsLive do
   alias Gamend.Quests
   alias Gamend.Quests.Quest
   alias GamendWeb.ContentText
+  alias GamendWeb.LiveHelpers
   alias GamendWeb.Plugs.FeatureGate
 
   @page_size 50
@@ -42,6 +59,7 @@ defmodule GamendWeb.QuestsLive do
       |> assign(:status, nil)
       |> assign(:chain, nil)
       |> assign(:chain_focus, nil)
+      |> assign(:group_key, default_group(user))
       |> load_quests()
 
     {:ok, socket}
@@ -59,6 +77,16 @@ defmodule GamendWeb.QuestsLive do
     {:noreply,
      socket
      |> assign(:category, if(category in socket.assigns.categories, do: category))
+     |> assign(:page, 1)
+     |> load_quests()}
+  end
+
+  def handle_event("group", %{"group" => key}, socket) do
+    key = if key == "", do: nil, else: key
+
+    {:noreply,
+     socket
+     |> assign(:group_key, key)
      |> assign(:page, 1)
      |> load_quests()}
   end
@@ -127,29 +155,14 @@ defmodule GamendWeb.QuestsLive do
 
   def handle_event("chain_noop", _params, socket), do: {:noreply, socket}
 
-  def handle_event("prev_page", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:page, max(1, socket.assigns.page - 1))
-     |> load_quests()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> load_quests()}
 
-  def handle_event("next_page", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:page, socket.assigns.page + 1)
-     |> load_quests()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> load_quests()}
 
-  def handle_event("page_size", %{"size" => size}, socket) do
-    size = size |> String.to_integer() |> min(200) |> max(24)
-
-    {:noreply,
-     socket
-     |> assign(:page_size, size)
-     |> assign(:page, 1)
-     |> load_quests()}
-  end
+  def handle_event("page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size, min: 24) |> load_quests()}
 
   @impl true
   def handle_info({:quests_changed}, socket) do
@@ -176,22 +189,30 @@ defmodule GamendWeb.QuestsLive do
     category = socket.assigns.category
     status = socket.assigns.status
     active = Quests.active_quests()
+    selectable = selectable(Quests.groups(user && user.id, category))
+    {selected, drop} = group_opts(socket.assigns.group_key, selectable)
+    group_opts = [group: selected, drop_groups: drop]
 
     {entries, total_count, claimable} =
       if user do
-        opts = [page: page, page_size: page_size, category: category, status: status]
+        opts =
+          [page: page, page_size: page_size, category: category, status: status] ++ group_opts
 
         {Quests.list_user_quests(user.id, opts),
-         Quests.count_user_quests(user.id, category: category, status: status),
+         Quests.count_user_quests(user.id, [category: category, status: status] ++ group_opts),
          Quests.claimable_count(user.id)}
       else
-        {catalog_entries, total} = anonymous_catalog(active, category, page, page_size)
+        {catalog_entries, total} =
+          anonymous_catalog(active, category, selected, drop, page, page_size)
+
         {catalog_entries, total, 0}
       end
 
     entries = entries |> ContentText.translate() |> lock_labels(user)
 
     socket
+    |> assign(:groups, selectable)
+    |> assign(:selected_group, selected)
     |> assign(:categories, [nil | Quests.visible_categories(user && user.id)])
     # Titles and descriptions are stored in the source language; translate on
     # the way to the page. Admin pages deliberately show the stored string.
@@ -202,6 +223,54 @@ defmodule GamendWeb.QuestsLive do
     |> assign(:chain_positions, chain_positions(active))
     |> assign(:now, DateTime.utc_now(:second))
     |> refresh_chain()
+  end
+
+  # The groups the selector covers: the host's pick of them, or all of them
+  # for the plain select. The rest keep their collapsed card.
+  defp selectable(groups) do
+    case host_selector() do
+      nil -> groups
+      mod -> Enum.filter(groups, &mod.selectable?/1)
+    end
+  end
+
+  # What the list is asked for: the picked group when the view still offers
+  # it, and which of the selector's groups to leave out. Nothing picked behind
+  # a host selector drops them all — the selector is the only way in, and the
+  # wall of collapsed cards is what it exists to replace. The plain select's
+  # "All" is that wall, on purpose: with no host, nothing picked drops nothing.
+  defp group_opts(key, selectable) do
+    selected = if is_binary(key) and Enum.any?(selectable, &(&1.key == key)), do: key
+
+    drop =
+      if is_nil(selected) and is_nil(host_selector()),
+        do: [],
+        else: Enum.map(selectable, & &1.key) -- List.wrap(selected)
+
+    {selected, drop}
+  end
+
+  defp default_group(user) do
+    case host_selector() do
+      nil ->
+        nil
+
+      mod ->
+        case mod.default_group(user && user.id) do
+          key when is_binary(key) and key != "" -> key
+          _ -> nil
+        end
+    end
+  end
+
+  defp host_selector do
+    case Application.get_env(:gamend_web, :quest_group_selector) do
+      mod when is_atom(mod) and not is_nil(mod) and not is_boolean(mod) ->
+        if Code.ensure_loaded?(mod) and function_exported?(mod, :selector, 1), do: mod
+
+      _ ->
+        nil
+    end
   end
 
   # The host's reason this viewer cannot claim this quest yet, resolved once per
@@ -298,41 +367,54 @@ defmodule GamendWeb.QuestsLive do
     end
   end
 
-  defp anonymous_catalog(active, category, page, page_size) do
+  defp anonymous_catalog(active, category, group, drop, page, page_size) do
     now = DateTime.utc_now(:second)
 
     # Chains collapse to their first tier: with no progress every later tier
     # is locked anyway, and listing them would show one chain as N cards.
     visible =
-      Enum.filter(active, fn q ->
+      active
+      |> Enum.filter(fn q ->
         category in [nil, q.category] and within_window?(q, now) and
-          is_nil(q.prerequisite_quest_key)
+          is_nil(q.prerequisite_quest_key) and q.group_key not in drop
       end)
+      |> Quests.host_visible(nil)
 
-    collapsed = collapse_groups_for_catalog(visible)
+    collapsed = collapse_groups_for_catalog(visible, group)
 
     entries =
       collapsed
       |> Enum.drop((page - 1) * page_size)
       |> Enum.take(page_size)
-      |> Enum.map(fn {quest, size} ->
-        %{quest: quest, progress: nil, claimable: false, group_size: size}
+      |> Enum.map(fn {quest, size, collapsed?} ->
+        %{quest: quest, progress: nil, claimable: false, group_size: size, collapsed: collapsed?}
       end)
 
     {entries, length(collapsed)}
   end
 
-  # `{quest, group_size}` in first-appearance order. Nobody is signed in, so
-  # there is no progress to rank members by — the first one stands for the group.
-  defp collapse_groups_for_catalog(quests) do
+  # `{quest, group_size, collapsed?}` in first-appearance order, the same
+  # reading of `opened` as `Gamend.Quests.list_user_quests/2`: that group's
+  # members in full, every other group one entry. Nobody is signed in, so
+  # there is no progress to rank members by — the first one stands for the
+  # group. Only a collapsed entry stands for its group on the card.
+  defp collapse_groups_for_catalog(quests, opened) do
     by_key = Enum.group_by(quests, & &1.group_key)
 
     quests
     |> Enum.map(& &1.group_key)
     |> Enum.uniq()
     |> Enum.flat_map(fn
-      nil -> Enum.map(Map.get(by_key, nil, []), &{&1, 1})
-      key -> [{hd(Map.fetch!(by_key, key)), length(Map.fetch!(by_key, key))}]
+      nil ->
+        Enum.map(Map.get(by_key, nil, []), &{&1, 1, false})
+
+      key ->
+        members = Map.fetch!(by_key, key)
+        size = length(members)
+
+        if key == opened,
+          do: Enum.map(members, &{&1, size, false}),
+          else: [{hd(members), size, true}]
     end)
   end
 
@@ -392,13 +474,15 @@ defmodule GamendWeb.QuestsLive do
   defp status_label("claimable"), do: gettext("Claimable")
   defp status_label("done"), do: gettext("Completed")
 
-  # Whichever comes first: the window closing, or the next reset.
+  # Whichever comes first: the window closing, or the next reset — tagged, so
+  # the card says "Resets in" when the reset is what it is counting down to.
+  # It used to say "Ends in" whenever the quest had a window at all.
   defp time_left(quest, now) do
-    [window_left(quest, now), reset_left(quest, now)]
-    |> Enum.reject(&is_nil/1)
+    [{:ends, window_left(quest, now)}, {:resets, reset_left(quest, now)}]
+    |> Enum.reject(fn {_kind, seconds} -> is_nil(seconds) end)
     |> case do
       [] -> nil
-      values -> Enum.min(values)
+      values -> Enum.min_by(values, &elem(&1, 1))
     end
   end
 
@@ -487,24 +571,34 @@ defmodule GamendWeb.QuestsLive do
           <% end %>
         </div>
 
-        <%!-- Kind tabs --%>
-        <div role="tablist" class="tabs tabs-box w-fit">
-          <button
-            :for={category <- @categories}
-            role="tab"
-            phx-click="category"
-            phx-value-category={category || ""}
-            class={["tab", @category == category && "tab-active"]}
-          >
-            {category_label(category)}
-          </button>
+        <%!-- Kind tabs, and the group selector when this view has groups --%>
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div role="tablist" class="tabs tabs-box w-fit">
+            <button
+              :for={category <- @categories}
+              role="tab"
+              phx-click="category"
+              phx-value-category={category || ""}
+              class={["tab", @category == category && "tab-active"]}
+            >
+              {category_label(category)}
+            </button>
+          </div>
+
+          <.group_selector :if={@groups != []} groups={@groups} selected={@selected_group} />
         </div>
 
         <%!-- Claimable banner --%>
         <%= if @claimable_count > 0 do %>
           <div class="alert alert-success">
             <.icon name="hero-gift" class="w-5 h-5" />
-            <span>{gettext("You have %{count} quest(s) ready to claim!", count: @claimable_count)}</span>
+            <span>
+              {ngettext(
+                "You have %{count} quest ready to claim!",
+                "You have %{count} quests ready to claim!",
+                @claimable_count
+              )}
+            </span>
           </div>
         <% end %>
 
@@ -549,6 +643,37 @@ defmodule GamendWeb.QuestsLive do
       </div>
     </Layouts.app>
     """
+  end
+
+  # The host's selector when it registered one, else a plain select. Both send
+  # `"group"` with a `group` param; the host's decides its own look and labels
+  # — a game with a group per language draws a language picker, not "Group".
+  attr :groups, :list, required: true
+  attr :selected, :string, default: nil
+
+  defp group_selector(assigns) do
+    case host_selector() do
+      mod when is_atom(mod) and not is_nil(mod) ->
+        # What `<.component>` hands a function component: the assigns with the
+        # change-tracking key, so the host's `assign/3` accepts them.
+        mod.selector(assigns |> Map.take([:groups, :selected]) |> Map.put(:__changed__, nil))
+
+      nil ->
+        ~H"""
+        <form id="quest-groups" phx-change="group">
+          <select
+            name="group"
+            class="select select-bordered select-sm"
+            aria-label={gettext("Quest group")}
+          >
+            <option value="" selected={is_nil(@selected)}>{gettext("All")}</option>
+            <option :for={group <- @groups} value={group.key} selected={group.key == @selected}>
+              {ContentText.t(group.title)}
+            </option>
+          </select>
+        </form>
+        """
+    end
   end
 
   # Full prerequisite chain of one quest, shown when a chained card is clicked.
@@ -735,8 +860,10 @@ defmodule GamendWeb.QuestsLive do
     secret? = quest.hidden and not done?
     left = time_left(quest, assigns.now)
     # A card standing for more than itself is the group, not the member picked to
-    # represent it, so it takes the group's name and opens the whole list.
-    grouped? = is_binary(quest.group_key) and assigns.group_size > 1
+    # represent it, so it takes the group's name and opens the whole list. Only
+    # the collapsed entry stands for the group: a member listed because its
+    # group was picked carries the same `group_size` and is itself.
+    grouped? = Map.get(assigns.entry, :collapsed, false) and assigns.group_size > 1
 
     assigns =
       assigns
@@ -843,10 +970,11 @@ defmodule GamendWeb.QuestsLive do
         <div class="flex items-center gap-1.5 text-base-content/70">
           <.icon name="hero-clock" class="w-3.5 h-3.5" />
           <span class="text-xs">
-            <%= if @quest.ends_at do %>
-              {gettext("Ends in %{time}", time: format_duration(@left))}
-            <% else %>
-              {gettext("Resets in %{time}", time: format_duration(@left))}
+            <%= case @left do %>
+              <% {:ends, seconds} -> %>
+                {gettext("Ends in %{time}", time: format_duration(seconds))}
+              <% {:resets, seconds} -> %>
+                {gettext("Resets in %{time}", time: format_duration(seconds))}
             <% end %>
           </span>
         </div>

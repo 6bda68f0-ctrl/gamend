@@ -12,7 +12,7 @@ Clients obtain a token from their platform (FCM registration token or APNs devic
 
 ```text
 POST /api/v1/me/push_tokens
-token": "<platform token>", "platform": "android", "device_id": "<stable id>
+{ "token": "<platform token>", "platform": "android", "device_id": "<stable id>" }
 
 # platform: "android" | "ios" | "web"
 # provider defaults from the platform: ios → "apns", otherwise "fcm".

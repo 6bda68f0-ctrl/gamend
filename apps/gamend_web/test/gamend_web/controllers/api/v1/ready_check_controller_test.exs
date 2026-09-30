@@ -26,9 +26,11 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
     test "the host opens one over every member", ctx do
       conn = post(authed(ctx.host), "/api/v1/lobbies/ready_check", %{})
 
-      assert %{"kind" => "ready", "status" => "pending", "total" => 2} = json_response(conn, 201)
+      assert %{"kind" => "ready", "status" => "pending", "total" => 2} =
+               json_response(conn, 201)["data"]
+
       # The host answered by opening it.
-      assert json_response(conn, 201)["ready_count"] == 1
+      assert json_response(conn, 201)["data"]["ready_count"] == 1
     end
 
     test "a non-host member is refused", ctx do
@@ -64,7 +66,7 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
         Gamend.Signaling.configure(lobby, enabled: true, topology: :star, host_id: user.id)
 
       conn = post(authed(user), "/api/v1/lobbies/ready_check", %{})
-      assert %{"kind" => "ready", "status" => "pending"} = json_response(conn, 201)
+      assert %{"kind" => "ready", "status" => "pending"} = json_response(conn, 201)["data"]
     end
 
     # These endpoints take no lobby id, so they still resolve the room from the
@@ -85,10 +87,10 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
 
     test "a second open resets the board instead of refusing", ctx do
       first = post(authed(ctx.host), "/api/v1/lobbies/ready_check", %{})
-      first_id = json_response(first, 201)["id"]
+      first_id = json_response(first, 201)["data"]["id"]
 
       conn = post(authed(ctx.host), "/api/v1/lobbies/ready_check", %{})
-      second_id = json_response(conn, 201)["id"]
+      second_id = json_response(conn, 201)["data"]["id"]
 
       assert second_id != first_id
       # The replaced board is quietly cancelled with reason "reset".
@@ -99,7 +101,9 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
     test "honours an explicit timeout", ctx do
       conn = post(authed(ctx.host), "/api/v1/lobbies/ready_check", %{"timeout_ms" => 60_000})
 
-      deadline_at = json_response(conn, 201)["deadline_at"] |> NaiveDateTime.from_iso8601!()
+      deadline_at =
+        json_response(conn, 201)["data"]["deadline_at"] |> NaiveDateTime.from_iso8601!()
+
       assert NaiveDateTime.diff(deadline_at, NaiveDateTime.utc_now()) > 30
     end
 
@@ -161,20 +165,21 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
     test "answering ready passes the check once everyone has", ctx do
       conn = post(authed(ctx.member), "/api/v1/me/ready_check", %{"ready" => true})
 
-      assert %{"status" => "passed", "ready_count" => 2} = json_response(conn, 200)
+      assert %{"status" => "passed", "ready_count" => 2} = json_response(conn, 200)["data"]
     end
 
     test "answering not-ready keeps it open", ctx do
       conn = post(authed(ctx.member), "/api/v1/me/ready_check", %{"ready" => false})
 
-      assert %{"status" => "pending", "your_state" => "declined"} = json_response(conn, 200)
+      assert %{"status" => "pending", "your_state" => "declined"} =
+               json_response(conn, 200)["data"]
     end
 
-    test "answering with no open check is a conflict", ctx do
+    test "answering with no open check is not found", ctx do
       {:ok, _} = ReadyChecks.cancel(ctx.check)
 
       conn = post(authed(ctx.member), "/api/v1/me/ready_check", %{"ready" => true})
-      assert json_response(conn, 409)["error"] == "no_open_check"
+      assert json_response(conn, 404)["error"] == "no_open_check"
     end
 
     test "an accept answer cannot be revoked", ctx do
@@ -212,7 +217,7 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
           "scope" => "party"
         })
 
-      assert %{"status" => "passed"} = json_response(conn, 200)
+      assert %{"status" => "passed"} = json_response(conn, 200)["data"]
       assert ReadyChecks.get_check(party_check.id).status == "passed"
       # The lobby check is untouched.
       assert ReadyChecks.get_check(ctx.check.id).status == "pending"
@@ -224,7 +229,7 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
       {:ok, check} = ReadyChecks.open(ctx.lobby, [ctx.host.id, ctx.member.id])
 
       conn = delete(authed(ctx.host), "/api/v1/lobbies/ready_check")
-      assert json_response(conn, 200)
+      assert json_response(conn, 200) == %{"ok" => true}
 
       assert ReadyChecks.get_check(check.id).status == "cancelled"
     end
@@ -255,10 +260,12 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
     test "the leader opens one over every member", ctx do
       conn = post(authed(ctx.leader), "/api/v1/parties/ready_check", %{})
 
-      assert %{"kind" => "ready", "status" => "pending", "total" => 2} = json_response(conn, 201)
-      assert json_response(conn, 201)["party_id"] == ctx.party.id
+      assert %{"kind" => "ready", "status" => "pending", "total" => 2} =
+               json_response(conn, 201)["data"]
+
+      assert json_response(conn, 201)["data"]["party_id"] == ctx.party.id
       # The leader answered by opening it.
-      assert json_response(conn, 201)["ready_count"] == 1
+      assert json_response(conn, 201)["data"]["ready_count"] == 1
     end
 
     # A party board STANDS — it is "are you coming", asked once and left up, not
@@ -269,14 +276,14 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
     test "the board it opens has no deadline", ctx do
       conn = post(authed(ctx.leader), "/api/v1/parties/ready_check", %{})
 
-      assert json_response(conn, 201)["deadline_at"] == nil
-      assert ReadyChecks.get_check(json_response(conn, 201)["id"]).deadline_at == nil
+      assert json_response(conn, 201)["data"]["deadline_at"] == nil
+      assert ReadyChecks.get_check(json_response(conn, 201)["data"]["id"]).deadline_at == nil
     end
 
     test "a caller that wants a fuse still gets one", ctx do
       conn = post(authed(ctx.leader), "/api/v1/parties/ready_check", %{"timeout_ms" => 30_000})
 
-      assert json_response(conn, 201)["deadline_at"] != nil
+      assert json_response(conn, 201)["data"]["deadline_at"] != nil
     end
 
     test "a non-leader member is refused", ctx do
@@ -291,10 +298,10 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
 
     test "a second open resets the board", ctx do
       first = post(authed(ctx.leader), "/api/v1/parties/ready_check", %{})
-      first_id = json_response(first, 201)["id"]
+      first_id = json_response(first, 201)["data"]["id"]
 
       conn = post(authed(ctx.leader), "/api/v1/parties/ready_check", %{})
-      assert json_response(conn, 201)["id"] != first_id
+      assert json_response(conn, 201)["data"]["id"] != first_id
       assert ReadyChecks.get_check(first_id).status == "cancelled"
     end
 
@@ -307,7 +314,7 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
       {:ok, _} = Lobbies.join_lobby(ctx.mate, lobby.id)
 
       conn = post(authed(ctx.leader), "/api/v1/lobbies/ready_check", %{})
-      assert json_response(conn, 201)["lobby_id"] == lobby.id
+      assert json_response(conn, 201)["data"]["lobby_id"] == lobby.id
       # Both boards open at once, one per lane.
       assert %ReadyChecks.Check{} = ReadyChecks.pending_for_party(ctx.party.id)
       assert %ReadyChecks.Check{} = ReadyChecks.pending_for_lobby(lobby.id)
@@ -317,8 +324,13 @@ defmodule GamendWeb.Api.V1.ReadyCheckControllerTest do
       post(authed(ctx.leader), "/api/v1/parties/ready_check", %{})
 
       conn = delete(authed(ctx.leader), "/api/v1/parties/ready_check")
-      assert json_response(conn, 200)
+      assert json_response(conn, 200) == %{"ok" => true}
       assert ReadyChecks.pending_for_party(ctx.party.id) == nil
+    end
+
+    test "calling off with no open check is not found", ctx do
+      conn = delete(authed(ctx.leader), "/api/v1/parties/ready_check")
+      assert json_response(conn, 404)["error"] == "no_open_check"
     end
 
     test "a mate cannot call it off", ctx do

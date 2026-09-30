@@ -7,118 +7,26 @@ defmodule GamendWeb.Api.V1.GroupController do
   alias Gamend.Accounts.Scope
   alias Gamend.Accounts.User
   alias Gamend.Groups
+  alias GamendWeb.Schemas
+
+  alias GamendWeb.Schemas.{
+    GroupInviteOutcomeResponse,
+    GroupInvitePage,
+    GroupJoinRequestPage,
+    GroupJoinRequestResponse,
+    GroupMemberPage,
+    GroupMemberResponse,
+    GroupPage,
+    GroupResponse,
+    OkResponse,
+    UploadTicketResponse
+  }
+
   alias GamendWeb.Serializers
   alias GamendWeb.Uploads
   alias OpenApiSpex.Schema
 
   tags(["Groups"])
-
-  # ---------------------------------------------------------------------------
-  # Shared schemas
-  # ---------------------------------------------------------------------------
-
-  @group_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid, description: "Group ID"},
-      title: %Schema{type: :string, description: "Display title"},
-      description: %Schema{type: :string, description: "Description"},
-      icon_url: %Schema{type: :string, description: "Icon URL; empty when unset"},
-      type: %Schema{
-        type: :string,
-        enum: ["public", "private", "hidden"],
-        description: "Visibility type"
-      },
-      max_members: %Schema{type: :integer, description: "Maximum number of members"},
-      metadata: %Schema{type: :object, description: "Server-managed metadata"},
-      creator_id: %Schema{
-        type: :string,
-        format: :uuid,
-        description: "User ID of the creator, or -1 for system groups"
-      },
-      creator_name: %Schema{
-        type: :string,
-        description: "Display name of the creator"
-      },
-      member_count: %Schema{type: :integer, description: "Current member count"},
-      slowdown: %Schema{type: :integer, description: "Chat slowdown in seconds (0 = disabled)"},
-      inserted_at: %Schema{type: :string, format: :"date-time"},
-      updated_at: %Schema{type: :string, format: :"date-time"}
-    },
-    example: %{
-      id: "0198c0de-0001-7000-8000-000000000001",
-      title: "Awesome Guild",
-      description: "A group for awesome players",
-      type: "public",
-      max_members: 100,
-      metadata: %{"lang_tag" => "en"},
-      creator_id: "0198c0de-0002-7000-8000-000000000002",
-      creator_name: "AwesomePlayer",
-      member_count: 12,
-      slowdown: 0
-    }
-  }
-
-  @error_schema %Schema{
-    type: :object,
-    properties: %{error: %Schema{type: :string}}
-  }
-
-  @meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      count: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer},
-      has_more: %Schema{type: :boolean}
-    }
-  }
-
-  @member_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid, description: "Membership ID"},
-      user_id: %Schema{type: :string, format: :uuid},
-      group_id: %Schema{type: :string, format: :uuid},
-      role: %Schema{type: :string, enum: ["admin", "member"]},
-      username: %Schema{type: :string},
-      display_name: %Schema{type: :string},
-      profile_url: %Schema{type: :string, description: "Empty when unset"},
-      is_online: %Schema{type: :boolean},
-      last_seen_at: %Schema{type: :string, format: "date-time"},
-      inserted_at: %Schema{type: :string, format: :"date-time"}
-    }
-  }
-
-  @join_request_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid, description: "Join request ID"},
-      user_id: %Schema{type: :string, format: :uuid},
-      group_id: %Schema{type: :string, format: :uuid},
-      status: %Schema{type: :string, enum: ["pending", "accepted", "rejected"]},
-      username: %Schema{type: :string},
-      display_name: %Schema{type: :string},
-      inserted_at: %Schema{type: :string, format: :"date-time"}
-    }
-  }
-
-  @invitation_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid, description: "Invite ID"},
-      group_id: %Schema{type: :string, format: :uuid},
-      group_name: %Schema{type: :string},
-      sender_id: %Schema{type: :string, format: :uuid},
-      sender_name: %Schema{type: :string},
-      recipient_id: %Schema{type: :string, format: :uuid},
-      recipient_name: %Schema{type: :string},
-      status: %Schema{type: :string, description: "pending | accepted | declined | cancelled"},
-      inserted_at: %Schema{type: :string, format: :"date-time"}
-    }
-  }
 
   # ---------------------------------------------------------------------------
   # Operations
@@ -164,17 +72,13 @@ defmodule GamendWeb.Api.V1.GroupController do
       page_size: [in: :query, schema: %Schema{type: :integer}, description: "Page size"]
     ],
     responses: [
-      ok:
-        {"List of groups", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{data: %Schema{type: :array, items: @group_schema}, meta: @meta_schema}
-         }}
+      ok: {"List of groups", "application/json", GroupPage}
     ]
   )
 
   operation(:show,
     operation_id: "get_group",
+    security: [%{}, %{"authorization" => []}],
     summary: "Get group details",
     description: "Get a single group by ID including member count.",
     parameters: [
@@ -186,8 +90,8 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok: {"Group details", "application/json", @group_schema},
-      not_found: {"Group not found", "application/json", @error_schema}
+      ok: {"Group details", "application/json", GroupResponse},
+      not_found: Schemas.error("Group not found")
     ]
   )
 
@@ -223,9 +127,9 @@ defmodule GamendWeb.Api.V1.GroupController do
       }
     },
     responses: [
-      created: {"Group created", "application/json", @group_schema},
-      conflict: {"Title taken or validation error", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      created: {"Group created", "application/json", GroupResponse},
+      conflict: Schemas.error("Title taken or validation error"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -263,10 +167,10 @@ defmodule GamendWeb.Api.V1.GroupController do
       }
     },
     responses: [
-      ok: {"Group updated", "application/json", @group_schema},
-      forbidden: {"Not an admin", "application/json", @error_schema},
-      unprocessable_entity: {"Validation error", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Group updated", "application/json", GroupResponse},
+      forbidden: Schemas.error("Not an admin"),
+      unprocessable_entity: Schemas.error("Validation error"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -287,13 +191,12 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok: {"Joined successfully (public group)", "application/json", @member_schema},
-      created: {"Join request created (private group)", "application/json", @join_request_schema},
-      forbidden:
-        {"Cannot join (full, hidden, already member, already requested)", "application/json",
-         @error_schema},
-      not_found: {"Group not found", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Joined successfully (public group)", "application/json", GroupMemberResponse},
+      created:
+        {"Join request created (private group)", "application/json", GroupJoinRequestResponse},
+      forbidden: Schemas.error("Cannot join (full, hidden, already member, already requested)"),
+      not_found: Schemas.error("Group not found"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -311,9 +214,9 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok: {"Left successfully", "application/json", %Schema{type: :object}},
-      bad_request: {"Not a member", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Left successfully", "application/json", OkResponse},
+      bad_request: Schemas.error("Not a member"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -343,14 +246,15 @@ defmodule GamendWeb.Api.V1.GroupController do
       }
     },
     responses: [
-      ok: {"User kicked", "application/json", %Schema{type: :object}},
-      forbidden: {"Not admin or cannot kick", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"User kicked", "application/json", OkResponse},
+      forbidden: Schemas.error("Not admin or cannot kick"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
   operation(:members,
     operation_id: "list_group_members",
+    security: [%{}, %{"authorization" => []}],
     summary: "List group members",
     description: "Get paginated members of a group with their roles.",
     parameters: [
@@ -368,16 +272,8 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok:
-        {"Members list", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @member_schema},
-             meta: @meta_schema
-           }
-         }},
-      not_found: {"Group not found", "application/json", @error_schema}
+      ok: {"Members list", "application/json", GroupMemberPage},
+      not_found: Schemas.error("Group not found")
     ]
   )
 
@@ -406,9 +302,10 @@ defmodule GamendWeb.Api.V1.GroupController do
       }
     },
     responses: [
-      ok: {"Member promoted", "application/json", @member_schema},
-      forbidden: {"Not admin", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Member promoted", "application/json", GroupMemberResponse},
+      forbidden: Schemas.error("Not admin"),
+      conflict: Schemas.error("Already an admin"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -437,9 +334,10 @@ defmodule GamendWeb.Api.V1.GroupController do
       }
     },
     responses: [
-      ok: {"Member demoted", "application/json", @member_schema},
-      forbidden: {"Not admin", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Member demoted", "application/json", GroupMemberResponse},
+      forbidden: Schemas.error("Not admin"),
+      conflict: Schemas.error("Already a plain member"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -459,17 +357,9 @@ defmodule GamendWeb.Api.V1.GroupController do
       page_size: [in: :query, schema: %Schema{type: :integer}, description: "Page size"]
     ],
     responses: [
-      ok:
-        {"Join requests", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @join_request_schema},
-             meta: @meta_schema
-           }
-         }},
-      forbidden: {"Not admin", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Join requests", "application/json", GroupJoinRequestPage},
+      forbidden: Schemas.error("Not admin"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -493,10 +383,10 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok: {"Request approved", "application/json", @member_schema},
-      forbidden: {"Not admin or group full", "application/json", @error_schema},
-      not_found: {"Request not found", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Request approved", "application/json", GroupMemberResponse},
+      forbidden: Schemas.error("Not admin or group full"),
+      not_found: Schemas.error("Request not found"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -520,10 +410,10 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok: {"Request rejected", "application/json", @join_request_schema},
-      forbidden: {"Not admin", "application/json", @error_schema},
-      not_found: {"Request not found", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Request rejected", "application/json", GroupJoinRequestResponse},
+      forbidden: Schemas.error("Not admin"),
+      not_found: Schemas.error("Request not found"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -547,10 +437,10 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok: {"Request cancelled", "application/json", @join_request_schema},
-      forbidden: {"Not owner or not pending", "application/json", @error_schema},
-      not_found: {"Request not found", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Request cancelled", "application/json", GroupJoinRequestResponse},
+      forbidden: Schemas.error("Not owner or not pending"),
+      not_found: Schemas.error("Request not found"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -585,20 +475,12 @@ defmodule GamendWeb.Api.V1.GroupController do
     },
     responses: [
       ok:
-        {"Invitation sent or join request auto-approved", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             status: %Schema{
-               type: :string,
-               description:
-                 "\"invited\" if a new invite was created, \"request_approved\" if a pending join request was auto-approved"
-             }
-           }
-         }},
-      forbidden: {"Not admin or target already member", "application/json", @error_schema},
-      not_found: {"Group not found", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+        {"`invited` when an invite was created, `request_approved` when a pending join request was approved instead",
+         "application/json", GroupInviteOutcomeResponse},
+      forbidden: Schemas.error("Not admin, or blocked"),
+      conflict: Schemas.error("Target is already a member"),
+      not_found: Schemas.error("Group not found"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -617,11 +499,11 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok: {"Joined successfully", "application/json", @member_schema},
-      forbidden:
-        {"Cannot join (full, already member, no invite)", "application/json", @error_schema},
-      not_found: {"Invite not found", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Joined successfully", "application/json", GroupMemberResponse},
+      forbidden: Schemas.error("Cannot join (full, no invite)"),
+      conflict: Schemas.error("Already a member"),
+      not_found: Schemas.error("Invite not found"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -640,14 +522,9 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok:
-        {"Invite declined", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{status: %Schema{type: :string}}
-         }},
-      not_found: {"Invite not found", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Invite declined", "application/json", OkResponse},
+      not_found: Schemas.error("Invite not found"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -666,16 +543,8 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok:
-        {"Invitations list", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @invitation_schema},
-             meta: @meta_schema
-           }
-         }},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Invitations list", "application/json", GroupInvitePage},
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -693,16 +562,8 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok:
-        {"My groups", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @group_schema},
-             meta: @meta_schema
-           }
-         }},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"My groups", "application/json", GroupPage},
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -721,32 +582,8 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok:
-        {"Sent invitations list", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{
-               type: :array,
-               items: %Schema{
-                 type: :object,
-                 properties: %{
-                   id: %Schema{type: :string, format: :uuid},
-                   group_id: %Schema{type: :string, format: :uuid},
-                   group_name: %Schema{type: :string},
-                   sender_id: %Schema{type: :string, format: :uuid},
-                   sender_name: %Schema{type: :string},
-                   recipient_id: %Schema{type: :string, format: :uuid},
-                   recipient_name: %Schema{type: :string},
-                   status: %Schema{type: :string},
-                   inserted_at: %Schema{type: :string, format: :"date-time"}
-                 }
-               }
-             },
-             meta: @meta_schema
-           }
-         }},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Sent invitations list", "application/json", GroupInvitePage},
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -764,15 +601,10 @@ defmodule GamendWeb.Api.V1.GroupController do
       ]
     ],
     responses: [
-      ok:
-        {"Invitation cancelled", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{status: %Schema{type: :string}}
-         }},
-      forbidden: {"Not allowed", "application/json", @error_schema},
-      not_found: {"Invitation not found", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Invitation cancelled", "application/json", OkResponse},
+      forbidden: Schemas.error("Not allowed"),
+      not_found: Schemas.error("Invitation not found"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -808,24 +640,20 @@ defmodule GamendWeb.Api.V1.GroupController do
 
     member_counts = Groups.batch_member_counts(Enum.map(groups, & &1.id))
     serialized = Enum.map(groups, &serialize_group(&1, member_counts))
-    count = length(serialized)
     total_count = Groups.count_list_groups(filters)
 
-    json(conn, %{
-      data: serialized,
-      meta: GamendWeb.Pagination.meta(page, page_size, count, total_count)
-    })
+    reply_page(conn, serialized, page, page_size, total_count)
   end
 
   def show(conn, %{"id" => id}) do
     case parse_id(id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       group_id ->
         case visible_group(conn, group_id) do
-          nil -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
-          group -> json(conn, serialize_group(group))
+          nil -> reply_error(conn, :not_found, "not_found")
+          group -> reply_data(conn, serialize_group(group))
         end
     end
   end
@@ -854,15 +682,13 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       case Groups.create_group(user.id, params) do
         {:ok, group} ->
-          conn |> put_status(:created) |> json(serialize_group(group))
+          reply_data(conn, :created, serialize_group(group))
 
         {:error, %Ecto.Changeset{} = changeset} ->
-          conn
-          |> put_status(:conflict)
-          |> json(%{error: Ecto.Changeset.traverse_errors(changeset, fn {msg, _} -> msg end)})
+          uniqueness_conflict(conn, changeset)
 
         {:error, reason} when is_atom(reason) ->
-          conn |> put_status(:conflict) |> json(%{error: to_string(reason)})
+          reply_error(conn, :conflict, reason)
       end
     end)
   end
@@ -871,30 +697,24 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       case parse_id(id) do
         nil ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         group_id ->
           case Groups.update_group(user.id, group_id, params) do
             {:ok, group} ->
-              json(conn, serialize_group(group))
+              reply_data(conn, serialize_group(group))
 
             {:error, :not_admin} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_admin"})
+              reply_error(conn, :forbidden, "not_admin")
 
             {:error, :max_members_too_low} ->
-              conn
-              |> put_status(:unprocessable_entity)
-              |> json(%{error: "max_members_too_low"})
+              reply_error(conn, :unprocessable_entity, "max_members_too_low")
 
             {:error, %Ecto.Changeset{} = changeset} ->
-              conn
-              |> put_status(:unprocessable_entity)
-              |> json(%{
-                error: Ecto.Changeset.traverse_errors(changeset, fn {msg, _} -> msg end)
-              })
+              unprocessable(conn, changeset)
 
             {:error, reason} when is_atom(reason) ->
-              conn |> put_status(:unprocessable_entity) |> json(%{error: to_string(reason)})
+              reply_error(conn, :unprocessable_entity, reason)
           end
       end
     end)
@@ -926,11 +746,11 @@ defmodule GamendWeb.Api.V1.GroupController do
       }
     },
     responses: [
-      ok: {"Upload ticket", "application/json", %Schema{type: :object}},
-      bad_request: {"Unsupported content type", "application/json", @error_schema},
-      forbidden: {"Not a group admin", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      not_found: {"Group not found", "application/json", @error_schema}
+      ok: {"Upload ticket", "application/json", UploadTicketResponse},
+      bad_request: Schemas.error("Unsupported content type"),
+      forbidden: Schemas.error("Not a group admin"),
+      unauthorized: Schemas.error("Not authenticated"),
+      not_found: Schemas.error("Group not found")
     ]
   )
 
@@ -961,11 +781,11 @@ defmodule GamendWeb.Api.V1.GroupController do
       %Schema{type: :object, properties: %{key: %Schema{type: :string}}, required: [:key]}
     },
     responses: [
-      ok: {"Group with the new icon", "application/json", @group_schema},
-      bad_request: {"Object not found", "application/json", @error_schema},
-      forbidden: {"Not a group admin or key not owned", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      not_found: {"Group not found", "application/json", @error_schema}
+      ok: {"Group with the new icon", "application/json", GroupResponse},
+      bad_request: Schemas.error("Object not found"),
+      forbidden: Schemas.error("Not a group admin or key not owned"),
+      unauthorized: Schemas.error("Not authenticated"),
+      not_found: Schemas.error("Group not found")
     ]
   )
 
@@ -982,25 +802,25 @@ defmodule GamendWeb.Api.V1.GroupController do
   defp save_icon(conn, user, group_id, url) do
     case Groups.set_icon_url(user.id, group_id, url) do
       {:ok, group} ->
-        json(conn, serialize_group(group))
+        reply_data(conn, serialize_group(group))
 
       {:error, _reason} ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_data"})
+        reply_error(conn, :unprocessable_entity, "invalid_data")
     end
   end
 
   defp with_group_admin(conn, user, raw_id, fun) do
     case parse_id(raw_id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       group_id ->
         cond do
           Groups.get_group(group_id) == nil ->
-            conn |> put_status(:not_found) |> json(%{error: "not_found"})
+            reply_error(conn, :not_found, "not_found")
 
           not Groups.can_manage_group?(user.id, group_id) ->
-            conn |> put_status(:forbidden) |> json(%{error: "not_admin"})
+            reply_error(conn, :forbidden, "not_admin")
 
           true ->
             fun.(group_id)
@@ -1012,7 +832,7 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       case parse_id(id) do
         nil ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         group_id ->
           group = Groups.get_group(group_id)
@@ -1022,56 +842,56 @@ defmodule GamendWeb.Api.V1.GroupController do
   end
 
   defp do_join(conn, _user, nil, _group_id) do
-    conn |> put_status(:not_found) |> json(%{error: "not_found"})
+    reply_error(conn, :not_found, "not_found")
   end
 
   defp do_join(conn, user, %{type: "public"} = _group, group_id) do
     case Groups.join_group(user.id, group_id) do
       {:ok, member} ->
-        json(conn, serialize_member(member))
+        reply_data(conn, serialize_member(member))
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       {:error, reason} ->
-        conn |> put_status(:forbidden) |> json(%{error: to_string(reason)})
+        reply_error(conn, :forbidden, reason)
     end
   end
 
   defp do_join(conn, user, %{type: "private"} = _group, group_id) do
     case Groups.request_join(user.id, group_id) do
       {:ok, request} ->
-        conn |> put_status(:created) |> json(serialize_join_request(request))
+        reply_data(conn, :created, serialize_join_request(request))
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       {:error, reason} ->
-        conn |> put_status(:forbidden) |> json(%{error: to_string(reason)})
+        reply_error(conn, :forbidden, reason)
     end
   end
 
   defp do_join(conn, _user, _group, _group_id) do
     # hidden groups require an invite
-    conn |> put_status(:forbidden) |> json(%{error: "not_joinable"})
+    reply_error(conn, :forbidden, "not_joinable")
   end
 
   def leave(conn, %{"id" => id}) do
     with_auth(conn, fn user ->
       case parse_id(id) do
         nil ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         group_id ->
           case Groups.leave_group(user.id, group_id) do
             {:ok, _} ->
-              json(conn, %{})
+              reply_ok(conn)
 
             {:error, :not_member} ->
-              conn |> put_status(:bad_request) |> json(%{error: "not_member"})
+              reply_error(conn, :bad_request, "not_member")
 
             {:error, reason} ->
-              conn |> put_status(:unprocessable_entity) |> json(%{error: to_string(reason)})
+              reply_error(conn, :unprocessable_entity, reason)
           end
       end
     end)
@@ -1083,27 +903,27 @@ defmodule GamendWeb.Api.V1.GroupController do
 
       case {parse_id(id), parse_id(target_user_id)} do
         {nil, _} ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         {_, nil} ->
-          conn |> put_status(:bad_request) |> json(%{error: "missing_target_user_id"})
+          reply_error(conn, :bad_request, "missing_target_user_id")
 
         {group_id, tid} ->
           case Groups.kick_member(user.id, group_id, tid) do
             {:ok, _} ->
-              json(conn, %{})
+              reply_ok(conn)
 
             {:error, :not_admin} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_admin"})
+              reply_error(conn, :forbidden, "not_admin")
 
             {:error, :cannot_kick_self} ->
-              conn |> put_status(:forbidden) |> json(%{error: "cannot_kick_self"})
+              reply_error(conn, :forbidden, "cannot_kick_self")
 
             {:error, :not_member} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_member"})
+              reply_error(conn, :not_found, "not_member")
 
             {:error, reason} ->
-              conn |> put_status(:forbidden) |> json(%{error: to_string(reason)})
+              reply_error(conn, :forbidden, reason)
           end
       end
     end)
@@ -1112,12 +932,12 @@ defmodule GamendWeb.Api.V1.GroupController do
   def members(conn, %{"id" => id} = params) do
     case parse_id(id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       group_id ->
         case visible_group(conn, group_id) do
           nil ->
-            conn |> put_status(:not_found) |> json(%{error: "not_found"})
+            reply_error(conn, :not_found, "not_found")
 
           _group ->
             {page, page_size} = GamendWeb.Pagination.params(params)
@@ -1127,13 +947,9 @@ defmodule GamendWeb.Api.V1.GroupController do
               Groups.get_group_members_paginated(group_id, page: page, page_size: page_size)
 
             serialized = Enum.map(members, &serialize_member(&1, authenticated?))
-            count = length(serialized)
             total_count = Groups.count_group_members(group_id)
 
-            json(conn, %{
-              data: serialized,
-              meta: GamendWeb.Pagination.meta(page, page_size, count, total_count)
-            })
+            reply_page(conn, serialized, page, page_size, total_count)
         end
     end
   end
@@ -1144,30 +960,30 @@ defmodule GamendWeb.Api.V1.GroupController do
 
       case {parse_id(id), parse_id(target_user_id)} do
         {nil, _} ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         {_, nil} ->
-          conn |> put_status(:bad_request) |> json(%{error: "missing_target_user_id"})
+          reply_error(conn, :bad_request, "missing_target_user_id")
 
         {group_id, tid} ->
           case Groups.promote_member(user.id, group_id, tid) do
             {:ok, member} ->
-              json(conn, serialize_member(member))
+              reply_data(conn, serialize_member(member))
 
             {:error, :not_admin} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_admin"})
+              reply_error(conn, :forbidden, "not_admin")
 
             {:error, :cannot_promote_self} ->
-              conn |> put_status(:forbidden) |> json(%{error: "cannot_promote_self"})
+              reply_error(conn, :forbidden, "cannot_promote_self")
 
             {:error, :not_member} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_member"})
+              reply_error(conn, :not_found, "not_member")
 
             {:error, :already_admin} ->
-              conn |> put_status(:forbidden) |> json(%{error: "already_admin"})
+              reply_error(conn, :conflict, "already_admin")
 
             {:error, reason} ->
-              conn |> put_status(:forbidden) |> json(%{error: to_string(reason)})
+              reply_error(conn, :forbidden, reason)
           end
       end
     end)
@@ -1179,30 +995,30 @@ defmodule GamendWeb.Api.V1.GroupController do
 
       case {parse_id(id), parse_id(target_user_id)} do
         {nil, _} ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         {_, nil} ->
-          conn |> put_status(:bad_request) |> json(%{error: "missing_target_user_id"})
+          reply_error(conn, :bad_request, "missing_target_user_id")
 
         {group_id, tid} ->
           case Groups.demote_member(user.id, group_id, tid) do
             {:ok, member} ->
-              json(conn, serialize_member(member))
+              reply_data(conn, serialize_member(member))
 
             {:error, :not_admin} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_admin"})
+              reply_error(conn, :forbidden, "not_admin")
 
             {:error, :cannot_demote_self} ->
-              conn |> put_status(:forbidden) |> json(%{error: "cannot_demote_self"})
+              reply_error(conn, :forbidden, "cannot_demote_self")
 
             {:error, :not_member} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_member"})
+              reply_error(conn, :not_found, "not_member")
 
             {:error, :already_member} ->
-              conn |> put_status(:forbidden) |> json(%{error: "already_member"})
+              reply_error(conn, :conflict, "already_member")
 
             {:error, reason} ->
-              conn |> put_status(:forbidden) |> json(%{error: to_string(reason)})
+              reply_error(conn, :forbidden, reason)
           end
       end
     end)
@@ -1212,7 +1028,7 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       case parse_id(id) do
         nil ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         group_id ->
           {page, page_size} = GamendWeb.Pagination.params(params)
@@ -1220,16 +1036,12 @@ defmodule GamendWeb.Api.V1.GroupController do
           case Groups.list_join_requests(user.id, group_id, page: page, page_size: page_size) do
             {:ok, requests} ->
               serialized = Enum.map(requests, &serialize_join_request/1)
-              count = length(serialized)
               total_count = Groups.count_join_requests(group_id)
 
-              json(conn, %{
-                data: serialized,
-                meta: GamendWeb.Pagination.meta(page, page_size, count, total_count)
-              })
+              reply_page(conn, serialized, page, page_size, total_count)
 
             {:error, :not_admin} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_admin"})
+              reply_error(conn, :forbidden, "not_admin")
           end
       end
     end)
@@ -1239,27 +1051,27 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       case parse_id(request_id) do
         nil ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         rid ->
           case Groups.approve_join_request(user.id, rid) do
             {:ok, member} ->
-              json(conn, serialize_member(member))
+              reply_data(conn, serialize_member(member))
 
             {:error, :not_found} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_found"})
+              reply_error(conn, :not_found, "not_found")
 
             {:error, :not_pending} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_pending"})
+              reply_error(conn, :forbidden, "not_pending")
 
             {:error, :not_admin} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_admin"})
+              reply_error(conn, :forbidden, "not_admin")
 
             {:error, :full} ->
-              conn |> put_status(:forbidden) |> json(%{error: "full"})
+              reply_error(conn, :forbidden, "full")
 
             {:error, reason} ->
-              conn |> put_status(:forbidden) |> json(%{error: to_string(reason)})
+              reply_error(conn, :forbidden, reason)
           end
       end
     end)
@@ -1269,24 +1081,24 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       case parse_id(request_id) do
         nil ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         rid ->
           case Groups.reject_join_request(user.id, rid) do
             {:ok, request} ->
-              json(conn, serialize_join_request(request))
+              reply_data(conn, serialize_join_request(request))
 
             {:error, :not_found} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_found"})
+              reply_error(conn, :not_found, "not_found")
 
             {:error, :not_pending} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_pending"})
+              reply_error(conn, :forbidden, "not_pending")
 
             {:error, :not_admin} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_admin"})
+              reply_error(conn, :forbidden, "not_admin")
 
             {:error, reason} ->
-              conn |> put_status(:unprocessable_entity) |> json(%{error: to_string(reason)})
+              reply_error(conn, :unprocessable_entity, reason)
           end
       end
     end)
@@ -1296,24 +1108,24 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       case parse_id(request_id) do
         nil ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         rid ->
           case Groups.cancel_join_request(user.id, rid) do
             {:ok, request} ->
-              json(conn, serialize_join_request(request))
+              reply_data(conn, serialize_join_request(request))
 
             {:error, :not_found} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_found"})
+              reply_error(conn, :not_found, "not_found")
 
             {:error, :not_pending} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_pending"})
+              reply_error(conn, :forbidden, "not_pending")
 
             {:error, :not_owner} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_owner"})
+              reply_error(conn, :forbidden, "not_owner")
 
             {:error, reason} ->
-              conn |> put_status(:unprocessable_entity) |> json(%{error: to_string(reason)})
+              reply_error(conn, :unprocessable_entity, reason)
           end
       end
     end)
@@ -1325,33 +1137,33 @@ defmodule GamendWeb.Api.V1.GroupController do
 
       case {parse_id(id), parse_id(target_user_id)} do
         {nil, _} ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         {_, nil} ->
-          conn |> put_status(:bad_request) |> json(%{error: "missing_target_user_id"})
+          reply_error(conn, :bad_request, "missing_target_user_id")
 
         {group_id, tid} ->
           case Groups.invite_to_group(user.id, group_id, tid) do
             {:ok, :request_approved} ->
-              json(conn, %{status: "request_approved"})
+              reply_data(conn, %{status: "request_approved"})
 
             {:ok, _invite} ->
-              json(conn, %{status: "invited"})
+              reply_data(conn, %{status: "invited"})
 
             {:error, :not_found} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_found"})
+              reply_error(conn, :not_found, "not_found")
 
             {:error, :not_admin} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_admin"})
+              reply_error(conn, :forbidden, "not_admin")
 
             {:error, :already_member} ->
-              conn |> put_status(:forbidden) |> json(%{error: "already_member"})
+              reply_error(conn, :conflict, "already_member")
 
             {:error, :blocked} ->
-              conn |> put_status(:forbidden) |> json(%{error: "blocked"})
+              reply_error(conn, :forbidden, "blocked")
 
             {:error, reason} ->
-              conn |> put_status(:forbidden) |> json(%{error: to_string(reason)})
+              reply_error(conn, :forbidden, reason)
           end
       end
     end)
@@ -1361,27 +1173,27 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       case parse_id(invite_id_raw) do
         nil ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         invite_id ->
           case Groups.accept_invite(user.id, invite_id) do
             {:ok, member} ->
-              json(conn, serialize_member(member))
+              reply_data(conn, serialize_member(member))
 
             {:error, :not_found} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_found"})
+              reply_error(conn, :not_found, "not_found")
 
             {:error, :already_member} ->
-              json(conn, %{status: "already_member"})
+              reply_error(conn, :conflict, "already_member")
 
             {:error, :no_invite} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_found"})
+              reply_error(conn, :not_found, "not_found")
 
             {:error, :full} ->
-              conn |> put_status(:forbidden) |> json(%{error: "full"})
+              reply_error(conn, :forbidden, "full")
 
             {:error, reason} ->
-              conn |> put_status(:forbidden) |> json(%{error: to_string(reason)})
+              reply_error(conn, :forbidden, reason)
           end
       end
     end)
@@ -1391,15 +1203,15 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       case parse_id(invite_id_raw) do
         nil ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         invite_id ->
           case Groups.decline_invite(user.id, invite_id) do
             :ok ->
-              json(conn, %{status: "declined"})
+              reply_ok(conn)
 
             {:error, :not_found} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_found"})
+              reply_error(conn, :not_found, "not_found")
           end
       end
     end)
@@ -1409,13 +1221,9 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       {page, page_size} = GamendWeb.Pagination.params(params)
       invites = Groups.list_invitations(user.id, page: page, page_size: page_size)
-      count = length(invites)
       total_count = Groups.count_invitations(user.id)
 
-      json(conn, %{
-        data: invites,
-        meta: GamendWeb.Pagination.meta(page, page_size, count, total_count)
-      })
+      reply_page(conn, invites, page, page_size, total_count)
     end)
   end
 
@@ -1425,13 +1233,9 @@ defmodule GamendWeb.Api.V1.GroupController do
       groups = Groups.list_user_groups(user.id, page: page, page_size: page_size)
       member_counts = Groups.batch_member_counts(Enum.map(groups, & &1.id))
       serialized = Enum.map(groups, &serialize_group(&1, member_counts))
-      count = length(serialized)
       total_count = Groups.count_user_groups(user.id)
 
-      json(conn, %{
-        data: serialized,
-        meta: GamendWeb.Pagination.meta(page, page_size, count, total_count)
-      })
+      reply_page(conn, serialized, page, page_size, total_count)
     end)
   end
 
@@ -1439,13 +1243,9 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       {page, page_size} = GamendWeb.Pagination.params(params)
       invites = Groups.list_sent_invitations(user.id, page: page, page_size: page_size)
-      count = length(invites)
       total_count = Groups.count_sent_invitations(user.id)
 
-      json(conn, %{
-        data: invites,
-        meta: GamendWeb.Pagination.meta(page, page_size, count, total_count)
-      })
+      reply_page(conn, invites, page, page_size, total_count)
     end)
   end
 
@@ -1453,18 +1253,18 @@ defmodule GamendWeb.Api.V1.GroupController do
     with_auth(conn, fn user ->
       case parse_id(invite_id) do
         nil ->
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
 
         iid ->
           case Groups.cancel_invite(user.id, iid) do
             :ok ->
-              json(conn, %{status: "cancelled"})
+              reply_ok(conn)
 
             {:error, :not_found} ->
-              conn |> put_status(:not_found) |> json(%{error: "not_found"})
+              reply_error(conn, :not_found, "not_found")
 
             {:error, :not_owner} ->
-              conn |> put_status(:forbidden) |> json(%{error: "not_owner"})
+              reply_error(conn, :forbidden, "not_owner")
           end
       end
     end)
@@ -1477,7 +1277,7 @@ defmodule GamendWeb.Api.V1.GroupController do
   defp with_auth(conn, fun) do
     case Scope.user(conn.assigns[:current_scope]) do
       %User{} = user -> fun.(user)
-      _ -> conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+      _ -> reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 

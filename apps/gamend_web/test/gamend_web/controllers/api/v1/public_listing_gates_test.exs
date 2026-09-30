@@ -127,7 +127,9 @@ defmodule GamendWeb.Api.V1.PublicListingGatesTest do
 
       disable(:list_matchmaking)
 
-      assert authed |> get("/api/v1/matchmaking/tickets/me") |> json_response(200)
+      # Answered by the endpoint (no ticket), not refused by the gate.
+      assert authed |> get("/api/v1/matchmaking/tickets/me") |> json_response(404) ==
+               %{"error" => "not_queued"}
     end
   end
 

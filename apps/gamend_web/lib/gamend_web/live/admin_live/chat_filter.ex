@@ -8,7 +8,9 @@ defmodule GamendWeb.AdminLive.ChatFilter do
 
   alias Gamend.Chat.FilterWord
   alias Gamend.Chat.Moderation
+  alias Gamend.Chat.Moderation.Cache
   alias Gamend.Chat.Moderation.Normalizer
+  alias GamendWeb.LiveHelpers
 
   @blank_word %{
     "id" => nil,
@@ -34,10 +36,25 @@ defmodule GamendWeb.AdminLive.ChatFilter do
       |> assign(:word_form, @blank_word)
       |> assign(:import_form, %{"lang" => List.first(languages) || "", "severity" => "block"})
       |> assign(:phrase, "")
+      |> assign(:chat_guide_url, chat_guide_url(socket))
       |> reload()
 
     {:ok, socket}
   end
+
+  @public_chat_guide "https://gamend.org/docs/chat"
+
+  # Core's guides are routed only when the host mounts them
+  # (`gamend_current_user_routes docs: …`); on a host that does not, the
+  # in-app link 404'd. Link to the published guide instead.
+  defp chat_guide_url(%{router: router}) when is_atom(router) and not is_nil(router) do
+    case Phoenix.Router.route_info(router, "GET", "/docs/setup", nil) do
+      :error -> @public_chat_guide
+      _route -> "/docs/setup?guide=chat"
+    end
+  end
+
+  defp chat_guide_url(_socket), do: @public_chat_guide
 
   # `?word=` pre-fills the add form, so another admin page can link straight to
   # blocking a word it is showing.
@@ -73,7 +90,7 @@ defmodule GamendWeb.AdminLive.ChatFilter do
       "word" => String.trim(form["word"] || ""),
       "severity" => form["severity"],
       "match_mode" => form["match_mode"],
-      "lang" => presence(String.trim(form["lang"] || ""))
+      "lang" => Gamend.Parse.blank_to_nil(String.trim(form["lang"] || ""))
     }
 
     socket =
@@ -143,7 +160,12 @@ defmodule GamendWeb.AdminLive.ChatFilter do
           put_flash(
             socket,
             :info,
-            gettext("Imported %{count} words from the %{lang} list", count: count, lang: lang)
+            ngettext(
+              "Imported %{count} word from the %{lang} list",
+              "Imported %{count} words from the %{lang} list",
+              count,
+              lang: lang
+            )
           )
 
         {:error, :unknown_language} ->
@@ -167,7 +189,12 @@ defmodule GamendWeb.AdminLive.ChatFilter do
      socket
      |> put_flash(
        :info,
-       gettext("Removed %{count} words tagged %{lang}", count: count, lang: lang)
+       ngettext(
+         "Removed %{count} word tagged %{lang}",
+         "Removed %{count} words tagged %{lang}",
+         count,
+         lang: lang
+       )
      )
      |> reload()}
   end
@@ -179,19 +206,14 @@ defmodule GamendWeb.AdminLive.ChatFilter do
      |> assign_test_result()}
   end
 
-  def handle_event("prev_page", _params, socket) do
-    {:noreply, socket |> assign(:page, max(socket.assigns.page - 1, 1)) |> reload()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload()}
 
-  def handle_event("next_page", _params, socket) do
-    page = min(socket.assigns.page + 1, max(socket.assigns.total_pages, 1))
-    {:noreply, socket |> assign(:page, page) |> reload()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload()}
 
-  def handle_event("page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket |> assign(:page_size, String.to_integer(size)) |> assign(:page, 1) |> reload()}
-  end
+  def handle_event("page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload()}
 
   def handle_event("refresh", _params, socket), do: {:noreply, reload(socket)}
 
@@ -199,9 +221,9 @@ defmodule GamendWeb.AdminLive.ChatFilter do
 
   defp reload(socket) do
     filters = %{
-      "word" => presence(socket.assigns.word_filter),
-      "severity" => presence(socket.assigns.severity_filter),
-      "lang" => presence(socket.assigns.lang_filter)
+      "word" => Gamend.Parse.blank_to_nil(socket.assigns.word_filter),
+      "severity" => Gamend.Parse.blank_to_nil(socket.assigns.severity_filter),
+      "lang" => Gamend.Parse.blank_to_nil(socket.assigns.lang_filter)
     }
 
     words =
@@ -212,10 +234,20 @@ defmodule GamendWeb.AdminLive.ChatFilter do
 
     total = Moderation.count_filter_words(filters)
 
+    # The node's matcher holds the whole blocklist, so it is compared with the
+    # unfiltered count; against `total` any active filter read as a missed
+    # broadcast.
+    db_words =
+      if Enum.all?(filters, fn {_key, value} -> is_nil(value) end),
+        do: total,
+        else: Moderation.count_filter_words()
+
     socket
     |> assign(:words, words)
     |> assign(:count, total)
-    |> assign(:total_pages, ceil_div(total, socket.assigns.page_size))
+    |> assign(:db_words, db_words)
+    |> assign(:cached_words, Cache.word_count())
+    |> assign(:total_pages, LiveHelpers.total_pages(total, socket.assigns.page_size))
     |> assign_test_result()
   end
 
@@ -290,13 +322,6 @@ defmodule GamendWeb.AdminLive.ChatFilter do
     |> Enum.map_join("; ", fn {field, messages} -> "#{field} #{Enum.join(messages, ", ")}" end)
   end
 
-  defp presence(nil), do: nil
-  defp presence(""), do: nil
-  defp presence(value), do: value
-
-  defp ceil_div(_num, 0), do: 0
-  defp ceil_div(num, den), do: div(num + den - 1, den)
-
   defp severity_badge("block"), do: "badge-error"
   defp severity_badge("mask"), do: "badge-warning"
   defp severity_badge("flag"), do: "badge-info"
@@ -368,12 +393,14 @@ defmodule GamendWeb.AdminLive.ChatFilter do
           </form>
 
           <p :if={@languages == []} class="text-sm text-base-content/60">
-            {gettext("No bundled lists are available. Drop one at priv/chat_filter/<lang>.txt.")}
+            {gettext(
+              "No bundled lists are available. Drop one at apps/gamend_core/priv/chat_filter/<lang>.txt."
+            )}
           </p>
 
           <p class="text-sm text-base-content/60 mt-2">
             {gettext("Gamend ships no word list of its own; en.txt holds two placeholders.")}
-            <a href="/docs/setup?guide=chat" class="link">
+            <a href={@chat_guide_url} class="link">
               {gettext("The Chat guide lists public sources and how to install one.")}
             </a>
           </p>
@@ -445,7 +472,22 @@ defmodule GamendWeb.AdminLive.ChatFilter do
       <div class="card bg-base-200">
         <div class="card-body">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <h2 class="card-title">{gettext("Blocklist")} ({@count})</h2>
+            <div class="flex flex-wrap items-baseline gap-2">
+              <h2 class="card-title">{gettext("Blocklist")} ({@count})</h2>
+              <span
+                class={[
+                  "badge badge-sm",
+                  if(@cached_words == @db_words, do: "badge-ghost", else: "badge-warning")
+                ]}
+                title={
+                  gettext(
+                    "Words loaded into this node's in-memory matcher. A number that differs from the database count means this node missed a change broadcast."
+                  )
+                }
+              >
+                {gettext("%{n} on this node", n: @cached_words)}
+              </span>
+            </div>
             <button phx-click="refresh" class="btn btn-ghost btn-sm">{gettext("Refresh")}</button>
           </div>
 

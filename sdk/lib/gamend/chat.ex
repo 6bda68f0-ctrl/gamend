@@ -309,6 +309,9 @@ defmodule Gamend.Chat do
   @doc ~S"""
     Every blocklist entry matching `content`, as `[{word, severity, match_mode}]`.
     
+    Exposed for the admin "test a phrase" box so it reports exactly what the
+    runtime path would do.
+    
   """
   @spec filter_hits(String.t()) :: [{String.t(), String.t(), String.t()}]
   def filter_hits(_content) do
@@ -416,7 +419,9 @@ defmodule Gamend.Chat do
   end
 
   @doc ~S"""
-    List mutes. Filters: `:user_id`, `:scope`, `:scope_ref_id`, `:active`.
+    List mutes. Filters: `:user_id`, `:scope`, `:scope_ref_id`, `:active` (when
+    true, only unexpired mutes).
+    
   """
   @spec list_mutes(
           map(),
@@ -433,7 +438,9 @@ defmodule Gamend.Chat do
   end
 
   @doc ~S"""
-    List reports. Filters: `:status`, `:reported_user_id`, `:reporter_id`.
+    List reports, newest first. Filters: `:status`, `:reported_user_id`,
+    `:reporter_id`.
+    
   """
   @spec list_reports(
           map(),
@@ -468,10 +475,14 @@ defmodule Gamend.Chat do
   end
 
   @doc ~S"""
-    Mute `user_id` in `scope` (`"global"`, `"lobby"`, `"group"` or `"party"`).
+    Mute `user_id`.
     
-    `scope_ref_id` is the room id, or `nil` for a global mute. `attrs` may carry
+    `scope` is `"global"` (every chat, `scope_ref_id` nil) or one of `"lobby"`,
+    `"group"`, `"party"` with the room id as `scope_ref_id`. `attrs` may carry
     `expires_at` (nil means permanent), `reason` and `muted_by`.
+    
+    Re-muting an already-muted user replaces the existing mute, so a moderator
+    can extend or shorten one without unmuting first.
     
   """
   @spec mute_user(Ecto.UUID.t(), String.t(), Ecto.UUID.t() | nil, map()) ::
@@ -498,7 +509,8 @@ defmodule Gamend.Chat do
   end
 
   @doc ~S"""
-    Whether `user_id` is currently muted for the given chat.
+    Whether `user_id` is currently muted for the given chat (ETS read).
+    
   """
   @spec muted?(Ecto.UUID.t(), String.t(), Ecto.UUID.t() | nil) :: boolean()
   def muted?(_user_id, _chat_type, _chat_ref_id) do
@@ -512,7 +524,18 @@ defmodule Gamend.Chat do
   end
 
   @doc ~S"""
-    File a report about a message on behalf of `reporter_id`.
+    File a report about `message_id` on behalf of `reporter_id`.
+    
+    Returns `{:error, :not_found}` for an unknown message, `{:error, :own_message}`
+    when a player reports themselves, `{:error, :already_reported}` when they have
+    already reported that message, and `{:error, :report_daily_limit}` once they
+    are over `max_chat_reports_per_user_per_day`.
+    
+    The daily cap is enforced here rather than only at the HTTP edge so that a
+    plugin calling this directly is bounded too. The edge keeps its own rate-limit
+    check: that one is a cheap in-memory gate, while this counts committed rows,
+    so it survives a restart and is shared by every instance. Either can reject.
+    
   """
   @spec report_message(Ecto.UUID.t(), Ecto.UUID.t(), String.t() | nil) ::
           {:ok, Gamend.Chat.Report.t()} | {:error, term()}
@@ -541,7 +564,10 @@ defmodule Gamend.Chat do
   end
 
   @doc ~S"""
-    Resolve a report: set its status, with an optional note and resolver.
+    Resolve a report: set its status, note who resolved it and when.
+    
+    `status` is one of `Gamend.Chat.Report.statuses/0` other than `"open"`.
+    
   """
   @spec resolve_report(Gamend.Chat.Report.t() | Ecto.UUID.t(), String.t(), map()) ::
           {:ok, Gamend.Chat.Report.t()} | {:error, term()}
@@ -570,7 +596,12 @@ defmodule Gamend.Chat do
   end
 
   @doc ~S"""
-    Claim a report for review, moving it from open to reviewing.
+    Claim a report for review (`"open"` → `"reviewing"`).
+    
+    Purely a signal to other moderators that someone has picked this one up; it
+    sets no resolution, so the report stays in the queue until it is dismissed or
+    actioned.
+    
   """
   @spec review_report(Gamend.Chat.Report.t() | Ecto.UUID.t()) ::
           {:ok, Gamend.Chat.Report.t()} | {:error, term()}
@@ -686,7 +717,7 @@ defmodule Gamend.Chat do
   end
 
   @doc ~S"""
-    Lift a mute. Returns `{:ok, count}` — 0 when the user was not muted.
+    Remove a mute. Returns `{:ok, count}` — 0 when the user was not muted.
   """
   @spec unmute_user(Ecto.UUID.t(), String.t(), Ecto.UUID.t() | nil) :: {:ok, non_neg_integer()}
   def unmute_user(_user_id, _scope, _scope_ref_id \\ nil) do

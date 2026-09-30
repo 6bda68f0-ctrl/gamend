@@ -87,14 +87,14 @@ Two rules that look like details and are not:
    Leaving the cap is what starts the clock.
 
 `balance/2` folds **without writing** — reads stay reads. A write path
-(`debit/credit`) folds first, then applies its own delta, inside the existing
+(`spend/grant`) folds first, then applies its own delta, inside the existing
 atomic update, so the persisted row is always consistent with the last write.
 
 ## API
 
 ```elixir
 Economy.balance(user_id, "lives")        # folded, no write
-Economy.debit(user_id, "lives", 1, ...)  # folds, then the existing atomic spend
+Economy.spend(user_id, "lives", 1, ...)  # folds, then the existing atomic spend
 Economy.regen_state(user_id, "lives")
 #=> %{balance: 3, cap: 5, amount: 1, interval_sec: 900,
 #     next_at: ~U[…], full_at: ~U[…], server_now: ~U[…]}
@@ -105,12 +105,12 @@ Economy.regen_state(user_id, "lives")
 the client correct its own clock skew (see
 the rejected netcode-sync spec, same field, same meaning - see README.md).
 
-Overspend safety is unchanged: `debit/4` keeps its atomic
+Overspend safety is unchanged: `spend/4` keeps its atomic
 `balance = balance - x WHERE balance >= x`, applied to the folded value in the
 same statement, so concurrent spends cannot mint a life between the fold and the
 write.
 
-Admin grants (`credit/4`) may exceed the cap — a support grant of 10 lives on a
+Admin grants (`grant/4`) may exceed the cap — a support grant of 10 lives on a
 cap of 5 should not silently vanish. Overflow simply sits above the cap and does
 not regenerate until it falls below; the fold's `min(_, cap - balance)` already
 yields 0 there. This is stated in the docs because the alternative (clamping a
@@ -132,7 +132,7 @@ support grant) is the more surprising behaviour.
 
 Economy page shows the folded balance, the cap and the next-tick time per regen
 currency; the currency list shows regen parameters from the declaration. The
-existing grant/deduct actions work unchanged (they go through `credit`/`debit`,
+existing grant/deduct actions work unchanged (they go through `grant`/`spend`,
 so they fold first).
 
 ## What this deliberately does not do
@@ -140,7 +140,7 @@ so they fold first).
 - **No timers, no jobs, no scheduled refills.** State resolves on read. A server
   that is down for an hour returns players' lives correctly on the next request.
 - **No per-currency cooldown UI, no "watch an ad to refill", no purchase
-  bridge.** Buying a life is `credit/4` with an idempotency key — the game's
+  bridge.** Buying a life is `grant/4` with an idempotency key — the game's
   call, through the existing payments/economy path.
 - **No regen on inventory items.** Items are counted, not accrued; a game that
   wants a regenerating item wants a currency.
@@ -168,7 +168,7 @@ so they fold first).
       `GAMEND_DB_ADAPTER=postgres`.
 - [ ] `currencies/0` declaration registered in `Hooks.Declarations`, surfaced on
       the admin runtime page, published to clients via `/config`.
-- [ ] `balance/2` folds without writing; `debit`/`credit` fold inside the
+- [ ] `balance/2` folds without writing; `spend`/`grant` fold inside the
       existing atomic update; no ledger rows for regen.
 - [ ] Partial-progress and at-cap anchor rules covered by tests, including the
       "reading often must not slow regen" case and the "sitting at cap must not

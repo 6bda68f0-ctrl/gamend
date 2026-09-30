@@ -22,8 +22,14 @@ defmodule Gamend.Chat.Reports do
   File a report about `message_id` on behalf of `reporter_id`.
 
   Returns `{:error, :not_found}` for an unknown message, `{:error, :own_message}`
-  when a player reports themselves, and `{:error, :already_reported}` when they
-  have already reported that message.
+  when a player reports themselves, `{:error, :already_reported}` when they have
+  already reported that message, and `{:error, :report_daily_limit}` once they
+  are over `max_chat_reports_per_user_per_day`.
+
+  The daily cap is enforced here rather than only at the HTTP edge so that a
+  plugin calling this directly is bounded too. The edge keeps its own rate-limit
+  check: that one is a cheap in-memory gate, while this counts committed rows,
+  so it survives a restart and is shared by every instance. Either can reject.
   """
   @spec report_message(Ecto.UUID.t(), Ecto.UUID.t(), String.t() | nil) ::
           {:ok, Report.t()} | {:error, term()}
@@ -36,13 +42,28 @@ defmodule Gamend.Chat.Reports do
         {:error, :own_message}
 
       %Message{} = message ->
-        insert_report(%{
-          "reporter_id" => reporter_id,
-          "message_id" => message.id,
-          "reported_user_id" => message.sender_id,
-          "content_snapshot" => message.content,
-          "reason" => reason
-        })
+        if over_daily_cap?(reporter_id) do
+          {:error, :report_daily_limit}
+        else
+          insert_report(%{
+            "reporter_id" => reporter_id,
+            "message_id" => message.id,
+            "reported_user_id" => message.sender_id,
+            "content_snapshot" => message.content,
+            "reason" => reason
+          })
+        end
+    end
+  end
+
+  # 0 or nil disables the cap, matching how the other limits read.
+  defp over_daily_cap?(reporter_id) do
+    case Gamend.Limits.get(:max_chat_reports_per_user_per_day) do
+      limit when is_integer(limit) and limit > 0 ->
+        count_recent_by_reporter(reporter_id) >= limit
+
+      _ ->
+        false
     end
   end
 
@@ -95,14 +116,10 @@ defmodule Gamend.Chat.Reports do
   """
   @spec list_reports(map(), keyword()) :: [Report.t()]
   def list_reports(filters \\ %{}, opts \\ []) do
-    page = Keyword.get(opts, :page, 1)
-    page_size = Keyword.get(opts, :page_size, 25)
-
     filters
     |> reports_query()
     |> order_by([r], desc: r.inserted_at, desc: r.id)
-    |> limit(^page_size)
-    |> offset(^((page - 1) * page_size))
+    |> Gamend.Query.page(opts)
     |> preload([:reporter, :reported_user, :resolved_by_user])
     |> Repo.all()
   end
@@ -197,28 +214,26 @@ defmodule Gamend.Chat.Reports do
     query = from(r in Report)
 
     query =
-      case blank_to_nil(Map.get(filters, :status) || Map.get(filters, "status")) do
+      case Gamend.Parse.blank_to_nil(Map.get(filters, :status) || Map.get(filters, "status")) do
         nil -> query
         value -> where(query, [r], r.status == ^value)
       end
 
     query =
-      case blank_to_nil(
+      case Gamend.Parse.blank_to_nil(
              Map.get(filters, :reported_user_id) || Map.get(filters, "reported_user_id")
            ) do
         nil -> query
         value -> where(query, [r], r.reported_user_id == ^to_string(value))
       end
 
-    case blank_to_nil(Map.get(filters, :reporter_id) || Map.get(filters, "reporter_id")) do
+    case Gamend.Parse.blank_to_nil(
+           Map.get(filters, :reporter_id) || Map.get(filters, "reporter_id")
+         ) do
       nil -> query
       value -> where(query, [r], r.reporter_id == ^to_string(value))
     end
   end
-
-  defp blank_to_nil(nil), do: nil
-  defp blank_to_nil(""), do: nil
-  defp blank_to_nil(value), do: value
 
   # Hooks never run inside the write — they are queued and flushed after it.
   defp dispatch(hook, args) do

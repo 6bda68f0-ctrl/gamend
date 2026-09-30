@@ -80,7 +80,7 @@ defmodule Gamend.Groups.JoinRequests do
 
   defp notify_admins_of_join_request(user_id, group_id, group) do
     user = Gamend.Accounts.get_user(user_id)
-    user_name = (user && user.display_name) || ""
+    user_name = Gamend.Accounts.display_name(user)
 
     admins =
       from(m in GroupMember,
@@ -99,7 +99,7 @@ defmodule Gamend.Groups.JoinRequests do
           "metadata" => %{
             "type" => "group_join_request",
             "group_id" => group_id,
-            "group_name" => group.title,
+            "group_title" => group.title,
             "user_id" => user_id,
             "user_name" => user_name
           }
@@ -196,7 +196,7 @@ defmodule Gamend.Groups.JoinRequests do
             role: "member"
           })
         end)
-        |> Repo.transaction()
+        |> Gamend.AfterCommit.transaction()
         |> case do
           {:ok, %{membership: member}} ->
             _ = Shared.invalidate_group_cache(group_id)
@@ -206,7 +206,7 @@ defmodule Gamend.Groups.JoinRequests do
 
             # Notify the user that their join request was approved
             admin = Gamend.Accounts.get_user(admin_id)
-            admin_name = (admin && admin.display_name) || ""
+            admin_name = Gamend.Accounts.display_name(admin)
 
             Gamend.Notifications.admin_create_notification(
               admin_id,
@@ -217,15 +217,14 @@ defmodule Gamend.Groups.JoinRequests do
                 "metadata" => %{
                   "type" => "group_join_request_approved",
                   "group_id" => group_id,
-                  "group_name" => group.title,
+                  "group_title" => group.title,
                   "admin_id" => admin_id,
                   "admin_name" => admin_name
                 }
               }
             )
 
-            Phoenix.PubSub.broadcast(
-              Gamend.PubSub,
+            Gamend.Broadcast.publish(
               "user:#{user_id}",
               {:group_join_request_approved, %{group_id: group_id}}
             )
@@ -282,13 +281,12 @@ defmodule Gamend.Groups.JoinRequests do
                   "metadata" => %{
                     "type" => "group_join_request_rejected",
                     "group_id" => group_id,
-                    "group_name" => group_title
+                    "group_title" => group_title
                   }
                 }
               )
 
-              Phoenix.PubSub.broadcast(
-                Gamend.PubSub,
+              Gamend.Broadcast.publish(
                 "user:#{updated.user_id}",
                 {:group_join_request_rejected, %{group_id: group_id}}
               )

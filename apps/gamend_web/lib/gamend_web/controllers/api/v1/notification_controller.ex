@@ -8,40 +8,10 @@ defmodule GamendWeb.Api.V1.NotificationController do
   alias Gamend.Accounts.User
   alias Gamend.Notifications
   alias GamendWeb.Pagination
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{DeletedCountResponse, NotificationPage, NotificationResponse}
   alias GamendWeb.Serializers
   alias OpenApiSpex.Schema
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
-
-  @notification_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid, description: "Notification ID"},
-      sender_id: %Schema{type: :string, format: :uuid, description: "User ID of the sender"},
-      sender_name: %Schema{type: :string, description: "Display name of the sender"},
-      recipient_id: %Schema{type: :string, format: :uuid, description: "User ID of the recipient"},
-      title: %Schema{type: :string, description: "Notification title"},
-      content: %Schema{type: :string, description: "Notification body text"},
-      icon_url: %Schema{type: :string, description: "Icon URL; empty when unset"},
-      metadata: %Schema{type: :object, description: "Arbitrary metadata"},
-      inserted_at: %Schema{
-        type: :string,
-        format: "date-time",
-        description: "Timestamp (UTC) when the notification was created"
-      }
-    },
-    example: %{
-      id: "0198c0de-0001-7000-8000-000000000001",
-      sender_id: "0198c0de-0002-7000-8000-000000000002",
-      sender_name: "SomePlayer",
-      recipient_id: 7,
-      title: "Game invite",
-      content: "Join my lobby!",
-      icon_url: "",
-      metadata: %{"lobby_id" => 10},
-      inserted_at: "2026-02-22T12:00:00Z"
-    }
-  }
 
   tags(["Notifications"])
 
@@ -66,26 +36,8 @@ defmodule GamendWeb.Api.V1.NotificationController do
       ]
     ],
     responses: [
-      ok:
-        {"Paginated list of notifications", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @notification_schema},
-             meta: %Schema{
-               type: :object,
-               properties: %{
-                 page: %Schema{type: :integer},
-                 page_size: %Schema{type: :integer},
-                 count: %Schema{type: :integer},
-                 total_count: %Schema{type: :integer},
-                 total_pages: %Schema{type: :integer},
-                 has_more: %Schema{type: :boolean}
-               }
-             }
-           }
-         }},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Paginated list of notifications", "application/json", NotificationPage},
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -127,10 +79,10 @@ defmodule GamendWeb.Api.V1.NotificationController do
       }
     },
     responses: [
-      created: {"Notification created", "application/json", @notification_schema},
-      bad_request: {"Bad request", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      created: {"Notification created", "application/json", NotificationResponse},
+      bad_request: Schemas.error("Bad request"),
+      unprocessable_entity: Schemas.error("Validation failed"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -156,21 +108,9 @@ defmodule GamendWeb.Api.V1.NotificationController do
       }
     },
     responses: [
-      ok:
-        {"Deleted count", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{
-               type: :object,
-               properties: %{
-                 deleted: %Schema{type: :integer, description: "Number of notifications deleted"}
-               }
-             }
-           }
-         }},
-      bad_request: {"Bad request", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Deleted count", "application/json", DeletedCountResponse},
+      bad_request: Schemas.error("Bad request"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -181,25 +121,23 @@ defmodule GamendWeb.Api.V1.NotificationController do
   def index(conn, params) do
     case Scope.user(conn.assigns.current_scope) do
       %User{} = user ->
-        {page, page_size} = GamendWeb.Pagination.params(params)
+        {page, page_size} = Pagination.params(params)
 
         notifications =
           Notifications.list_notifications(user.id, page: page, page_size: page_size)
 
         total_count = Notifications.count_notifications(user.id)
 
-        json(
+        reply_page(
           conn,
-          Pagination.envelope(
-            Enum.map(notifications, &Serializers.serialize_notification/1),
-            page,
-            page_size,
-            total_count
-          )
+          Enum.map(notifications, &Serializers.serialize_notification/1),
+          page,
+          page_size,
+          total_count
         )
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -208,38 +146,26 @@ defmodule GamendWeb.Api.V1.NotificationController do
       %User{} = user ->
         case Notifications.send_notification(user.id, params) do
           {:ok, notification} ->
-            conn
-            |> put_status(:created)
-            |> json(Serializers.serialize_notification(notification))
+            reply_data(conn, :created, Serializers.serialize_notification(notification))
 
           {:error, :missing_recipient} ->
-            conn |> put_status(:bad_request) |> json(%{error: "missing_recipient"})
+            reply_error(conn, :bad_request, "missing_recipient")
 
           {:error, :cannot_notify_self} ->
-            conn |> put_status(:bad_request) |> json(%{error: "cannot_notify_self"})
+            reply_error(conn, :bad_request, "cannot_notify_self")
 
           {:error, :not_friends} ->
-            conn |> put_status(:bad_request) |> json(%{error: "not_friends"})
+            reply_error(conn, :bad_request, "not_friends")
 
           {:error, %Ecto.Changeset{} = cs} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: "validation_failed",
-              errors:
-                Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
-                  Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-                    opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-                  end)
-                end)
-            })
+            unprocessable(conn, cs)
 
           {:error, reason} ->
-            conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
+            reply_error(conn, :bad_request, reason)
         end
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -252,15 +178,15 @@ defmodule GamendWeb.Api.V1.NotificationController do
           |> Enum.reject(&is_nil/1)
 
         {deleted, _} = Notifications.delete_notifications(user.id, int_ids)
-        json(conn, %{data: %{deleted: deleted}})
+        reply_data(conn, %{deleted: deleted})
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
   def delete(conn, _params) do
-    conn |> put_status(:bad_request) |> json(%{error: "ids parameter required (array)"})
+    reply_error(conn, :bad_request, "missing_param", "ids is required (an array)")
   end
 
   # ---------------------------------------------------------------------------

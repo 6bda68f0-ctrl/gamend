@@ -28,7 +28,7 @@ defmodule GamendWeb.Api.V1.Admin.EconomyControllerTest do
         amount: 100
       })
 
-    assert json_response(grant, 200)["balance"] == 100
+    assert json_response(grant, 200)["data"]["balance"] == 100
     assert Economy.balance(target.id, "gold") == 100
 
     spend =
@@ -38,14 +38,14 @@ defmodule GamendWeb.Api.V1.Admin.EconomyControllerTest do
         amount: 30
       })
 
-    assert json_response(spend, 200)["balance"] == 70
+    assert json_response(spend, 200)["data"]["balance"] == 70
   end
 
   test "admin spend refuses to overspend", %{conn: conn, target: target} do
     conn =
       post(conn, "/api/v1/admin/economy/spend", %{user_id: target.id, currency: "gold", amount: 5})
 
-    assert json_response(conn, 400)["error"] == "insufficient_funds"
+    assert json_response(conn, 403)["error"] == "insufficient_funds"
   end
 
   test "admin lists wallets and ledger", %{conn: conn, target: target} do
@@ -66,7 +66,7 @@ defmodule GamendWeb.Api.V1.Admin.EconomyControllerTest do
         quantity: 5
       })
 
-    assert json_response(g, 200)["quantity"] == 5
+    assert json_response(g, 200)["data"]["quantity"] == 5
 
     c =
       post(conn, "/api/v1/admin/economy/consume_item", %{
@@ -75,7 +75,7 @@ defmodule GamendWeb.Api.V1.Admin.EconomyControllerTest do
         quantity: 2
       })
 
-    assert json_response(c, 200)["quantity"] == 3
+    assert json_response(c, 200)["data"]["quantity"] == 3
 
     items = json_response(get(conn, "/api/v1/admin/economy/items?user_id=#{target.id}"), 200)
     assert [%{"item" => "potion", "quantity" => 3}] = items["data"]
@@ -89,6 +89,6 @@ defmodule GamendWeb.Api.V1.Admin.EconomyControllerTest do
         quantity: 1
       })
 
-    assert json_response(conn, 400)["error"] == "insufficient_items"
+    assert json_response(conn, 403)["error"] == "insufficient_items"
   end
 end

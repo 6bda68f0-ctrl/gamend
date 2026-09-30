@@ -14,7 +14,7 @@ defmodule Gamend.Groups.Shared do
 
   @doc false
   def broadcast_group(group_id, event) do
-    Phoenix.PubSub.broadcast(Gamend.PubSub, "group:#{group_id}", event)
+    Gamend.Broadcast.publish("group:#{group_id}", event)
   end
 
   # -- Group cache (version-based, keyed by group_id) --
@@ -80,7 +80,7 @@ defmodule Gamend.Groups.Shared do
       invalidate_invite_cache_sync(user_id)
 
       user = Gamend.Accounts.get_user(user_id)
-      user_name = (user && user.display_name) || ""
+      user_name = Gamend.Accounts.display_name(user)
       group = Groups.get_group(group_id)
       group_title = (group && group.title) || ""
 
@@ -98,15 +98,14 @@ defmodule Gamend.Groups.Shared do
             "metadata" => %{
               "type" => "group_invite_accepted",
               "group_id" => group_id,
-              "group_name" => group_title,
+              "group_title" => group_title,
               "user_id" => user_id,
               "user_name" => user_name
             }
           }
         )
 
-        Phoenix.PubSub.broadcast(
-          Gamend.PubSub,
+        Gamend.Broadcast.publish(
           "user:#{sender_id}",
           {:group_invite_accepted, %{group_id: group_id}}
         )
@@ -137,10 +136,9 @@ defmodule Gamend.Groups.Shared do
   # Broadcast a group_deleted event to each user who had a pending invite.
   def notify_invite_users_group_deleted(user_ids, group) do
     for uid <- user_ids do
-      Phoenix.PubSub.broadcast(
-        Gamend.PubSub,
+      Gamend.Broadcast.publish(
         "user:#{uid}",
-        {:group_invite_cancelled, %{group_id: group.id, group_name: group.title}}
+        {:group_invite_cancelled, %{group_id: group.id, group_title: group.title}}
       )
     end
 
@@ -161,7 +159,7 @@ defmodule Gamend.Groups.Shared do
             "actor_user_id" => actor_user_id,
             "joining_user_id" => user_id,
             "group_id" => group.id,
-            "group_name" => group.title,
+            "group_title" => group.title,
             "group_type" => group.type,
             "group_metadata" => group.metadata || %{}
           })
@@ -175,25 +173,37 @@ defmodule Gamend.Groups.Shared do
     end
   end
 
-  # Shared helper: acquire advisory lock, check capacity, run hook, insert member.
+  # Shared helper: check capacity, run the hook, then lock, re-check and insert.
+  #
+  # The hook runs before the lock, as join-request approval already does: it
+  # may take up to its timeout, and inside the lock it held the group and, on
+  # SQLite, the only database connection. The capacity checks run first too,
+  # so a full group is refused without calling it, and again under the lock,
+  # where a concurrent join could have taken the last place.
   @doc false
   def do_add_group_member(user_id, group_id, group, source) do
-    Lock.serialize(:group, group_id, fn ->
-      if Groups.count_group_members(group_id) >= group.max_members do
-        Repo.rollback(:full)
-      end
+    with :ok <- check_room(user_id, group_id, group),
+         :ok <- run_before_group_join_hook(user_id, group, %{"source" => source}) do
+      Lock.serialize(:group, group_id, fn ->
+        case check_room(user_id, group_id, group) do
+          :ok -> insert_group_member(group_id, user_id)
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+    end
+  end
 
-      max_groups = Gamend.Limits.get(:max_groups_per_user)
+  defp check_room(user_id, group_id, group) do
+    cond do
+      Groups.count_group_members(group_id) >= group.max_members ->
+        {:error, :full}
 
-      if Groups.count_user_group_memberships(user_id) >= max_groups do
-        Repo.rollback(:too_many_groups)
-      end
+      Groups.count_user_group_memberships(user_id) >= Gamend.Limits.get(:max_groups_per_user) ->
+        {:error, :too_many_groups}
 
-      case run_before_group_join_hook(user_id, group, %{"source" => source}) do
-        :ok -> insert_group_member(group_id, user_id)
-        {:error, reason} -> Repo.rollback(reason)
-      end
-    end)
+      true ->
+        :ok
+    end
   end
 
   defp insert_group_member(group_id, user_id) do

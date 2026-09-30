@@ -13,13 +13,14 @@ defmodule GamendWeb.SerializerProtoDriftTest do
   """
   use ExUnit.Case, async: true
 
-  @serializers_src Enum.map_join(
+  # Scanned one file at a time: a file's last function otherwise ran on into
+  # the next file's module body and collected its schema fields as keys.
+  @serializer_srcs Enum.map(
                      [
                        "../../lib/gamend_web/serializers.ex",
-                       "../../../gamend_core/lib/gamend/accounts.ex",
+                       "../../../gamend_core/lib/gamend/accounts/broadcasts.ex",
                        "../../../gamend_core/lib/gamend/accounts/user.ex"
                      ],
-                     "\n",
                      &File.read!(Path.expand(&1, __DIR__))
                    )
   @proto_src File.read!(Path.expand("../../../../proto/gamend_realtime.proto", __DIR__))
@@ -38,7 +39,11 @@ defmodule GamendWeb.SerializerProtoDriftTest do
   ]
 
   test "every Serializers payload key is representable in its proto message" do
-    keys = keys_by_function()
+    keys =
+      Enum.reduce(@serializer_srcs, %{}, fn src, acc ->
+        Map.merge(acc, keys_by_function(src), fn _name, a, b -> MapSet.union(a, b) end)
+      end)
+
     fields = fields_by_message()
 
     problems =
@@ -67,12 +72,12 @@ defmodule GamendWeb.SerializerProtoDriftTest do
   # literals plus bare `:key` atoms threaded through maybe_put/Map.put. A
   # body ends at the next def OR the next @doc/@spec, so a following
   # function's typespec never leaks its keys into the previous body.
-  defp keys_by_function do
+  defp keys_by_function(src) do
     bounds =
-      Regex.scan(~r/^  (?:defp? (\w+)|@spec|@doc)/m, @serializers_src, return: :index)
+      Regex.scan(~r/^  (?:defp? (\w+)|@spec|@doc)/m, src, return: :index)
       |> Enum.map(fn
         [{start, _}, {ns, nl}] when nl > 0 ->
-          {binary_part(@serializers_src, ns, nl), start}
+          {binary_part(src, ns, nl), start}
 
         [{start, _} | _] ->
           {nil, start}
@@ -86,7 +91,7 @@ defmodule GamendWeb.SerializerProtoDriftTest do
       bounds
       |> Enum.drop(1)
       |> Enum.map(&elem(&1, 1))
-      |> Stream.concat([byte_size(@serializers_src)])
+      |> Stream.concat([byte_size(src)])
 
     bounds
     |> Enum.zip(nexts)
@@ -95,7 +100,7 @@ defmodule GamendWeb.SerializerProtoDriftTest do
         acc
 
       {{name, start}, next}, acc ->
-        body = binary_part(@serializers_src, start, next - start)
+        body = binary_part(src, start, next - start)
 
         keys =
           (Regex.scan(~r/^\s+(\w+): /m, body) ++ Regex.scan(~r/:(\w+),$/m, body))

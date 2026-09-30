@@ -2,6 +2,7 @@ defmodule GamendWeb.AdminLive.Translations do
   use GamendWeb, :live_view
 
   alias GamendWeb.Gettext.Stats, as: TranslationStats
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -252,21 +253,18 @@ defmodule GamendWeb.AdminLive.Translations do
   end
 
   @impl true
-  def handle_event("prev_page", _params, socket) do
-    {:noreply, assign(socket, :page, max(socket.assigns.page - 1, 1))}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, LiveHelpers.prev_page(socket)}
 
+  # The strings are all in memory, so the page count is derived here rather
+  # than stored by a reload.
   @impl true
   def handle_event("next_page", _params, socket) do
-    total_pages = max(ceil(length(socket.assigns.strings) / socket.assigns.page_size), 1)
-    {:noreply, assign(socket, :page, min(socket.assigns.page + 1, total_pages))}
+    total_pages = ceil(length(socket.assigns.strings) / socket.assigns.page_size)
+    {:noreply, socket |> assign(:total_pages, total_pages) |> LiveHelpers.next_page()}
   end
 
   @impl true
-  def handle_event("translations_page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:page_size, String.to_integer(size))
-     |> assign(:page, 1)}
-  end
+  def handle_event("translations_page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size)}
 end

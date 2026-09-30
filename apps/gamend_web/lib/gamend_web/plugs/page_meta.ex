@@ -12,14 +12,10 @@ defmodule GamendWeb.Plugs.PageMeta do
 
       config :gamend_web, page_meta_provider: MyHost.PageMeta
 
-  The provider implements:
-
-    * `describe(path) :: String.t() | nil` — the meta description
-    * `title(path) :: String.t() | nil` — an optional SEO `<title>`, used when
-      the in-page `:page_title` is a short UI label ("Learn") rather than
-      something anyone searches for ("Vocabulary Lists for 50 Languages")
-    * `json_ld(path) :: [map()]` — schema.org objects for the page, rendered
-      as `application/ld+json`
+  The provider implements `GamendWeb.PageMeta.Provider`, whose callbacks are
+  all optional: `describe/1`, `title/1`, `json_ld/1`, `image/1` (the page's
+  own `og:image`, in place of the theme's banner), `breadcrumbs/1` and
+  `robots/1`.
     * `breadcrumbs(path) :: [{String.t(), String.t() | nil}]` — the trail, as
       `{label, path}` pairs ending with the current page (whose path may be
       `nil`). The layout renders it and the provider should build its
@@ -54,6 +50,7 @@ defmodule GamendWeb.Plugs.PageMeta do
     |> maybe_assign(:meta_description, provider_call(:describe, path))
     |> maybe_assign(:seo_title, title_for(path))
     |> maybe_assign(:json_ld, provider_call(:json_ld, path))
+    |> maybe_assign(:meta_image, provider_call(:image, path))
     |> maybe_assign(:breadcrumbs, provider_call(:breadcrumbs, path))
     # A page can still override this by assigning `:robots` itself — the
     # vocabulary pages do, to mark a filtered view noindex.

@@ -27,7 +27,12 @@ services:
       - web
 
   app:
-    build: .
+    build:
+      context: .
+      # The Repo adapter is fixed at compile time; without this the image is
+      # SQLite while the environment below points it at Postgres.
+      args:
+        GAMEND_DB_ADAPTER: postgres
     # Enable this to set custom env values
     #env_file:
     #  - .env

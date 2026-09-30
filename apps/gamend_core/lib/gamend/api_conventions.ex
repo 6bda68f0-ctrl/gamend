@@ -53,9 +53,13 @@ defmodule Gamend.ApiConventions do
        nullable_string_schemas() ++
        hand_rolled_meta() ++
        hand_rolled_page_params() ++
+       hand_rolled_changeset_errors() ++
+       hand_rolled_context_paging() ++
+       inline_display_name_fallback() ++
        stale_documented_routes() ++
        role_named_predicates() ++
-       inline_ownership_checks())
+       inline_ownership_checks() ++
+       unnamed_responses())
     |> Enum.sort_by(&{&1.rule, &1.file, &1.line})
   end
 
@@ -142,12 +146,16 @@ defmodule Gamend.ApiConventions do
 
   # ── R5: route paths use underscores ────────────────────────────────────────
 
+  # A path that names a file is spelled the way the world spells that file:
+  # `sitemap.xml`, `llms-full.txt`, `.well-known`. The rule is about the
+  # paths this app coins.
   defp hyphenated_route_paths do
     for {file, line, text} <- source_lines(source_dirs()),
         String.contains?(file, "router"),
         [_, verb, path] <-
           [Regex.run(~r/^\s*(get|post|put|patch|delete|live) "(\/[^"]*)"/, text)],
-        String.contains?(path, "-") do
+        String.contains?(path, "-"),
+        not Regex.match?(~r/\.[a-z0-9]+$/, path) do
       %{
         rule: "R5-path-underscore",
         file: file,
@@ -167,7 +175,7 @@ defmodule Gamend.ApiConventions do
     for {file, line, text} <- source_lines(source_dirs()),
         String.contains?(text, "nullable: true"),
         String.contains?(text, "type: :string"),
-        not String.contains?(text, "format:"),
+        not Regex.match?(~r/format: :?"?date/, text),
         [_, field] <- [Regex.run(~r/^\s*(\w+): %Schema\{/, text)] do
       %{
         rule: "R6-schema-nullable",
@@ -194,6 +202,78 @@ defmodule Gamend.ApiConventions do
         file: file,
         line: line,
         message: "build pagination meta with GamendWeb.Pagination.meta/4"
+      }
+    end
+  end
+
+  # ── R14: one way to name a user ───────────────────────────────────────────
+  #
+  # Four inline fallbacks were in use at once. Parties wrote
+  # `display_name || ""`, so an invite from a player who had set no display
+  # name arrived from nobody; group invites wrote `display_name || username`;
+  # three admin views fell through to the email and then the raw id.
+
+  defp inline_display_name_fallback do
+    for {file, line, text} <- source_lines(schema_dirs() ++ source_dirs()),
+        not String.ends_with?(file, "accounts.ex"),
+        # `display_name: user.display_name || ""` is R1's null coalescing on the
+        # field itself, not a name fallback. Only a fallback to *another* value
+        # is one.
+        Regex.match?(~r/\.display_name\s*\|\|\s*[^\s"]/, text) do
+      %{
+        rule: "R14-display-name",
+        file: file,
+        line: line,
+        message:
+          "name a user with Gamend.Accounts.display_name/1, " <>
+            "or display_label/1 where the handle disambiguates"
+      }
+    end
+  end
+
+  # ── R13: contexts window queries through Gamend.Query ─────────────────────
+  #
+  # Seven contexts each had a private `paginate/2`, in four behaviours. Three
+  # applied `:page_size` unclamped, so a plugin calling the context directly
+  # could ask for a million rows; two clamped to a hard-coded 1000 that ignored
+  # the configurable `max_page_size`. R8 covers the controller layer, which is
+  # not the layer a plugin calls.
+
+  defp hand_rolled_context_paging do
+    for {file, line, text} <- source_lines(schema_dirs()),
+        not String.ends_with?(file, "query.ex"),
+        # Mix tasks are not context listings; a sampling `limit` is theirs to set.
+        not String.contains?(file, "/mix/tasks/"),
+        Regex.match?(~r/^\s*\|>\s*(limit|offset)\(\^/, text) do
+      %{
+        rule: "R13-context-paging",
+        file: file,
+        line: line,
+        message:
+          "window a listing with Gamend.Query.page/2 or maybe_page/2, " <>
+            "or clamp with Gamend.Limits.clamp_page/1 and clamp_page_size/2"
+      }
+    end
+  end
+
+  # ── R12: changeset errors go through GamendWeb.ChangesetErrors ────────────
+  #
+  # Forty-six sites serialized them by hand in three payload shapes under three
+  # envelope keys. Seventeen left the raw `{msg, opts}` tuple in the map, which
+  # Jason cannot encode — those endpoints answered 500 where their own OpenAPI
+  # operation documented a 422.
+
+  defp hand_rolled_changeset_errors do
+    for {file, line, text} <- source_lines(source_dirs()),
+        controller?(file),
+        String.contains?(text, "Ecto.Changeset.traverse_errors") do
+      %{
+        rule: "R12-changeset-errors",
+        file: file,
+        line: line,
+        message:
+          "answer a failed changeset with unprocessable/2, or " <>
+            "GamendWeb.ChangesetErrors.errors/1 when the status must differ"
       }
     end
   end
@@ -305,7 +385,13 @@ defmodule Gamend.ApiConventions do
   """
   @spec declared_route_paths() :: [String.t()]
   def declared_route_paths do
-    [GamendHost.Router, GamendWeb.Router]
+    # The router the endpoint dispatches to, first: a host names its own in
+    # `config :gamend_web, :router`, and reading only the two known module
+    # names here reported every host-declared route as undocumented — the
+    # same drift `GamendWeb.ApiSpec` had before it resolved the router the way
+    # `dispatch_router/2` does.
+    [Application.get_env(:gamend_web, :router), GamendHost.Router, GamendWeb.Router]
+    |> Enum.reject(&is_nil/1)
     |> Enum.find(&Code.ensure_loaded?/1)
     |> case do
       nil ->
@@ -436,6 +522,88 @@ defmodule Gamend.ApiConventions do
       }
     end
   end
+
+  # ── R15: an API controller answers in one of the four shapes ───────────────
+  #
+  # `GamendWeb.Reply` writes them; `GamendWeb.ApiShapeTest` holds the document
+  # to them and `GamendWeb.ResponseContract` every response a test provokes.
+  # Both see only documented operations, so this catches what slips past them
+  # in source: an API controller calling `json/2` itself (the upload target
+  # and the API 404 are undocumented, and kept their own shapes that way), and
+  # a response documented with an inline schema instead of a named
+  # `GamendWeb.Schemas` module.
+
+  defp unnamed_responses do
+    for path <- ex_files(source_dirs()),
+        String.contains?(path, "/controllers/api/"),
+        text = File.read!(path),
+        violation <- direct_json(path, text) ++ inline_response_schemas(path, text),
+        do: violation
+  end
+
+  defp direct_json(path, text) do
+    for {line_text, line} <- Enum.with_index(String.split(text, "\n"), 1),
+        not String.starts_with?(String.trim_leading(line_text), "#"),
+        Regex.match?(~r/(?<![\w.])json\(/, line_text) do
+      %{
+        rule: "R15-response-shape",
+        file: path,
+        line: line,
+        message: "answer through GamendWeb.Reply (reply_data, reply_page, reply_ok, reply_error)"
+      }
+    end
+  end
+
+  defp inline_response_schemas(path, text) do
+    for {start, _len} <- responses_blocks(text),
+        [{offset, _}] <-
+          Regex.scan(~r/"application\/json",\s*%(OpenApiSpex\.)?Schema\{/, block_at(text, start),
+            return: :index
+          ) do
+      %{
+        rule: "R15-response-shape",
+        file: path,
+        line: line_of(text, start + offset),
+        message:
+          "document the response with a named GamendWeb.Schemas module, not an inline schema"
+      }
+    end
+  end
+
+  # Where each `responses: [...]` or `responses: %{...}` value starts.
+  defp responses_blocks(text) do
+    Regex.scan(~r/responses:\s*(?=\[|%\{)/, text, return: :index)
+    |> Enum.map(fn [{index, length}] -> {index + length, 0} end)
+  end
+
+  # The bracketed value starting at `start`, up to its matching close. Only
+  # the opening bracket's own kind is counted, so a brace in a description
+  # string cannot end a list early.
+  defp block_at(text, start) do
+    rest = binary_part(text, start, byte_size(text) - start)
+    {open, close} = if String.starts_with?(rest, "["), do: {"[", "]"}, else: {"{", "}"}
+
+    rest
+    |> String.graphemes()
+    |> Enum.reduce_while({0, []}, fn char, {depth, acc} ->
+      depth =
+        cond do
+          char == open -> depth + 1
+          char == close -> depth - 1
+          true -> depth
+        end
+
+      if depth == 0 and char == close,
+        do: {:halt, {depth, [char | acc]}},
+        else: {:cont, {depth, [char | acc]}}
+    end)
+    |> elem(1)
+    |> Enum.reverse()
+    |> Enum.join()
+  end
+
+  defp line_of(text, offset),
+    do: text |> binary_part(0, offset) |> String.split("\n") |> length()
 
   defp decision_site?(file),
     do: String.contains?(file, "/controllers/") or String.contains?(file, "/channels/")

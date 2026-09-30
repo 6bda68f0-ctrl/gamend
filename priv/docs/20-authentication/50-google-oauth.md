@@ -15,14 +15,6 @@ Go to the [Google Cloud Console](https://console.cloud.google.com/)
 3. Enter a project name (e.g., "Gamend")
 4. Click "Create"
 
-## Enable People API
-
-In your Google Cloud project:
-
-1. Go to "APIs & Services" → "Library"
-2. Search for "Google People API"
-3. Click on it and click "Enable"
-
 ## Configure the OAuth consent screen
 
 Go to "APIs & Services" → "OAuth consent screen":
@@ -46,7 +38,10 @@ Go to "APIs & Services" → "Credentials":
 2. Select "Web application"
 3. Enter a name (e.g., "Gamend Web")
 4. Add authorized redirect URIs:
- Development: http://localhost:4000/auth/google/callback Production: https://example.com/auth/google/callback
+   ```text
+   Development: http://localhost:4000/auth/google/callback
+   Production:  https://example.com/auth/google/callback
+   ```
 5. Click "Create"
 6. Copy the Client ID and Client Secret
 
@@ -64,6 +59,6 @@ GAMEND_OAUTH_GOOGLE_CLIENT_SECRET="your_client_secret"
 After deploying with the secrets:
 
 1. Go to your app's login page
-2. Click "Sign in with Google"
+2. Click "Log in with Google"
 3. Choose your Google account
 4. You should be redirected back and logged in

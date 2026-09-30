@@ -2,6 +2,7 @@ defmodule GamendWeb.AdminLive.Groups do
   use GamendWeb, :live_view
 
   alias Gamend.Groups
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -36,7 +37,13 @@ defmodule GamendWeb.AdminLive.Groups do
               <button
                 type="button"
                 phx-click="bulk_delete"
-                data-confirm={"Delete #{MapSet.size(@selected_ids)} selected groups?"}
+                data-confirm={
+                  ngettext(
+                    "Delete %{count} selected group?",
+                    "Delete %{count} selected groups?",
+                    MapSet.size(@selected_ids)
+                  )
+                }
                 class="btn btn-sm btn-outline btn-error"
                 disabled={MapSet.size(@selected_ids) == 0}
               >
@@ -130,16 +137,16 @@ defmodule GamendWeb.AdminLive.Groups do
                           type="number"
                           name="min_members"
                           value={@filters["min_members"]}
-                          class="input input-bordered input-xs w-16"
-                          placeholder="Min"
+                          class="input input-bordered input-xs w-20"
+                          placeholder="Min cap"
                           phx-debounce="300"
                         />
                         <input
                           type="number"
                           name="max_members"
                           value={@filters["max_members"]}
-                          class="input input-bordered input-xs w-16"
-                          placeholder="Max"
+                          class="input input-bordered input-xs w-20"
+                          placeholder="Max cap"
                           phx-debounce="300"
                         />
                       </th>
@@ -344,7 +351,7 @@ defmodule GamendWeb.AdminLive.Groups do
                         phx-click="kick_member"
                         phx-value-group-id={m.group_id}
                         phx-value-user-id={m.user_id}
-                        data-confirm={"Kick #{user_display(m.user)} from group?"}
+                        data-confirm={"Kick #{user_display(m.user)} from the group?"}
                         class="btn btn-xs btn-outline btn-error"
                       >
                         Kick
@@ -442,13 +449,26 @@ defmodule GamendWeb.AdminLive.Groups do
     socket =
       cond do
         failed == 0 ->
-          put_flash(socket, :info, "Deleted #{deleted} groups")
+          put_flash(
+            socket,
+            :info,
+            ngettext("Deleted %{count} group", "Deleted %{count} groups", deleted)
+          )
 
         deleted == 0 ->
           put_flash(socket, :error, "Failed to delete selected groups")
 
         true ->
-          put_flash(socket, :error, "Deleted #{deleted} groups; failed #{failed}")
+          put_flash(
+            socket,
+            :error,
+            ngettext(
+              "Deleted %{count} group; %{failed} failed",
+              "Deleted %{count} groups; %{failed} failed",
+              deleted,
+              failed: failed
+            )
+          )
       end
 
     {:noreply, reload_groups(socket)}
@@ -480,35 +500,11 @@ defmodule GamendWeb.AdminLive.Groups do
   def handle_event("save_group", %{"group" => params}, socket) do
     group = socket.assigns.selected_group
 
-    params =
-      case Map.get(params, "metadata") do
-        nil ->
-          params
-
-        "" ->
-          Map.put(params, "metadata", %{})
-
-        s when is_binary(s) ->
-          case Jason.decode(s) do
-            {:ok, map} when is_map(map) -> Map.put(params, "metadata", map)
-            _ -> Map.put(params, "metadata", %{})
-          end
-
-        other ->
-          Map.put(params, "metadata", other)
-      end
-
-    case Groups.admin_update_group(group, params) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Group updated")
-         |> assign(:selected_group, nil)
-         |> assign(:form, nil)
-         |> reload_groups()}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :form, to_form(changeset, as: "group"))}
+    # Text that is not a JSON object is refused rather than saved as %{},
+    # which would wipe the group's metadata behind a success flash.
+    case normalize_metadata(params) do
+      {:ok, params} -> do_save_group(socket, group, params)
+      :error -> {:noreply, put_flash(socket, :error, "Metadata must be a JSON object")}
     end
   end
 
@@ -551,66 +547,31 @@ defmodule GamendWeb.AdminLive.Groups do
 
   @impl true
   def handle_event("promote_member", %{"group-id" => gid, "user-id" => uid}, socket) do
-    group_id = to_string(gid)
-    user_id = to_string(uid)
-
-    # Admin promote (use creator_id as the acting admin)
-    group = Groups.get_group!(group_id)
-
-    case Groups.promote_member(group.creator_id, group_id, user_id) do
-      {:ok, _} ->
-        members = Groups.get_group_members(group_id)
-
-        {:noreply,
-         socket
-         |> assign(:members, members)
-         |> put_flash(:info, "User promoted to admin")}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Promote failed: #{reason}")}
-    end
+    run_member_action(
+      socket,
+      gid,
+      uid,
+      &Groups.promote_member/3,
+      "User promoted to admin",
+      "Promote failed"
+    )
   end
 
   @impl true
   def handle_event("demote_member", %{"group-id" => gid, "user-id" => uid}, socket) do
-    group_id = to_string(gid)
-    user_id = to_string(uid)
-
-    group = Groups.get_group!(group_id)
-
-    case Groups.demote_member(group.creator_id, group_id, user_id) do
-      {:ok, _} ->
-        members = Groups.get_group_members(group_id)
-
-        {:noreply,
-         socket
-         |> assign(:members, members)
-         |> put_flash(:info, "User demoted to member")}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Demote failed: #{reason}")}
-    end
+    run_member_action(
+      socket,
+      gid,
+      uid,
+      &Groups.demote_member/3,
+      "User demoted to member",
+      "Demote failed"
+    )
   end
 
   @impl true
   def handle_event("kick_member", %{"group-id" => gid, "user-id" => uid}, socket) do
-    group_id = to_string(gid)
-    user_id = to_string(uid)
-
-    group = Groups.get_group!(group_id)
-
-    case Groups.kick_member(group.creator_id, group_id, user_id) do
-      {:ok, _} ->
-        members = Groups.get_group_members(group_id)
-
-        {:noreply,
-         socket
-         |> assign(:members, members)
-         |> put_flash(:info, "User kicked")}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Kick failed: #{reason}")}
-    end
+    run_member_action(socket, gid, uid, &Groups.kick_member/3, "User kicked", "Kick failed")
   end
 
   @impl true
@@ -627,13 +588,14 @@ defmodule GamendWeb.AdminLive.Groups do
 
   @impl true
   def handle_event("admin_groups_page_size", %{"size" => size}, socket) do
-    size = size |> String.to_integer() |> min(200) |> max(25)
+    socket =
+      LiveHelpers.put_page_size(socket, size,
+        min: 25,
+        size_key: :groups_page_size,
+        page_key: :groups_page
+      )
 
-    {:noreply,
-     socket
-     |> assign(:groups_page_size, size)
-     |> assign(:groups_page, 1)
-     |> reload_groups()}
+    {:noreply, reload_groups(socket)}
   end
 
   # ---------------------------------------------------------------------------
@@ -669,9 +631,7 @@ defmodule GamendWeb.AdminLive.Groups do
     total_count = Groups.count_all_groups(filters)
 
     total_pages =
-      if page_size > 0,
-        do: div(total_count + page_size - 1, page_size),
-        else: 0
+      LiveHelpers.total_pages(total_count, page_size)
 
     socket
     |> assign(:groups, groups)
@@ -688,4 +648,88 @@ defmodule GamendWeb.AdminLive.Groups do
     allowed = MapSet.new(ids)
     assign(socket, :selected_ids, MapSet.intersection(selected, allowed))
   end
+
+  defp normalize_metadata(params) do
+    case Map.get(params, "metadata") do
+      nil ->
+        {:ok, params}
+
+      s when is_binary(s) ->
+        case String.trim(s) do
+          "" ->
+            {:ok, Map.put(params, "metadata", %{})}
+
+          trimmed ->
+            case Jason.decode(trimmed) do
+              {:ok, map} when is_map(map) -> {:ok, Map.put(params, "metadata", map)}
+              _ -> :error
+            end
+        end
+
+      other ->
+        {:ok, Map.put(params, "metadata", other)}
+    end
+  end
+
+  defp do_save_group(socket, group, params) do
+    case Groups.admin_update_group(group, params) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Group updated")
+         |> assign(:selected_group, nil)
+         |> assign(:form, nil)
+         |> reload_groups()}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, :form, to_form(changeset, as: "group"))}
+    end
+  end
+
+  # The Groups member commands authorise an acting group admin, and the console
+  # has none of its own. It used to pass `creator_id` unconditionally, which
+  # crashed on a group whose creator was deleted (nil id), failed with
+  # `:not_admin` once the creator was demoted, and reported "cannot kick self"
+  # when the target WAS the creator. Act as the creator while they are still an
+  # admin, else as any other admin, and never as the target.
+  defp run_member_action(socket, gid, uid, command, success, failure) do
+    group_id = to_string(gid)
+    user_id = to_string(uid)
+    group = Groups.get_group!(group_id)
+
+    case acting_admin_id(group, Groups.get_group_members(group_id), user_id) do
+      nil ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "#{failure}: the group has no other admin to act as"
+         )}
+
+      admin_id ->
+        case command.(admin_id, group_id, user_id) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> assign(:members, Groups.get_group_members(group_id))
+             |> put_flash(:info, success)}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "#{failure}: #{member_error(reason)}")}
+        end
+    end
+  end
+
+  defp acting_admin_id(group, members, target_id) do
+    admins = for %{role: "admin", user_id: id} <- members, id != target_id, do: id
+
+    if group.creator_id in admins, do: group.creator_id, else: List.first(admins)
+  end
+
+  defp member_error(:last_admin), do: "this is the group's last admin"
+  defp member_error(:not_member), do: "the user is not a member of this group"
+  defp member_error(:already_admin), do: "the user is already an admin"
+  defp member_error(:already_member), do: "the user is already a member"
+  defp member_error(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp member_error(reason), do: inspect(reason)
 end

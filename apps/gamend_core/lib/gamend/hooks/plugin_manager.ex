@@ -32,8 +32,47 @@ defmodule Gamend.Hooks.PluginManager do
   @type plugin_name :: String.t()
   @type plugin_app :: atom()
 
+  # Plugin lifecycle calls (reload, `after_startup`). Hook calls take the
+  # declared `call_timeout_ms` instead.
   @timeout_ms 60_000
-  @default_slow_hook_threshold_ms 200.0
+
+  use Gamend.Settings.Provider,
+    app: :gamend_core,
+    group: :hooks,
+    label: "Hooks"
+
+  setting(:call_timeout_ms, :integer,
+    default: 60_000,
+    doc:
+      "How long a plugin hook or RPC may run before it is killed, in ms. The caller's " <>
+        "request waits that long."
+  )
+
+  setting(:call_timeout_in_transaction_ms, :integer,
+    default: 5_000,
+    doc:
+      "The same, for a hook called inside a database transaction: on SQLite that " <>
+        "transaction holds the only write connection while the hook runs."
+  )
+
+  setting(:slow_threshold_ms, :integer,
+    default: 200,
+    doc: "Log a hook call as slow when it takes longer than this, in ms."
+  )
+
+  @doc """
+  How long a hook call may run, in ms: `call_timeout_in_transaction_ms` inside a
+  `Repo` transaction, `call_timeout_ms` otherwise.
+  """
+  @spec call_timeout_ms() :: pos_integer()
+  def call_timeout_ms do
+    key =
+      if Gamend.Repo.in_transaction?(),
+        do: :call_timeout_in_transaction_ms,
+        else: :call_timeout_ms
+
+    max(Gamend.Settings.get(__MODULE__, key), 1)
+  end
 
   defmodule Plugin do
     @moduledoc """
@@ -102,6 +141,36 @@ defmodule Gamend.Hooks.PluginManager do
   @spec reload_and_after_startup() :: %{plugins: [Plugin.t()], after_startup: map()}
   def reload_and_after_startup do
     GenServer.call(__MODULE__, :reload_and_after_startup, @timeout_ms)
+  end
+
+  @doc """
+  Stops and unloads one plugin, leaving the others running. Returns `true`
+  when the manager had it (loaded or failed), `false` when it did not or the
+  manager is not running.
+
+  The in-process build (`Gamend.Hooks.PluginBuilder`) calls this before it
+  compiles the plugin in this VM. The compiler treats a module that is already
+  loaded as available, so a module compiled against a sibling that is still
+  loaded would take that sibling's *old* macros and structs; unloading the
+  plugin first makes the build see only its own new code. `resume/1` loads it
+  back.
+  """
+  @spec suspend(plugin_name()) :: boolean()
+  def suspend(name) when is_binary(name) do
+    if GenServer.whereis(__MODULE__),
+      do: GenServer.call(__MODULE__, {:suspend, name}, @timeout_ms),
+      else: false
+  end
+
+  @doc """
+  Loads one plugin from disk again and runs its `after_startup/0`, the
+  counterpart of `suspend/1`. Returns the plugin (its `status` says whether it
+  started), or `nil` when the manager is not running or skips the name.
+  """
+  @spec resume(plugin_name()) :: Plugin.t() | nil
+  def resume(name) when is_binary(name) do
+    if GenServer.whereis(__MODULE__),
+      do: GenServer.call(__MODULE__, {:resume, name}, @timeout_ms)
   end
 
   @spec call_rpc(plugin_name(), String.t(), list(), keyword()) :: {:ok, any()} | {:error, term()}
@@ -193,7 +262,7 @@ defmodule Gamend.Hooks.PluginManager do
   defp do_call_rpc(plugin, fn_name, args, opts) do
     case lookup(plugin) do
       {:ok, %Plugin{status: :ok, hooks_module: mod}} when is_atom(mod) and not is_nil(mod) ->
-        timeout = Keyword.get(opts, :timeout_ms, @timeout_ms)
+        timeout = Keyword.get_lazy(opts, :timeout_ms, &call_timeout_ms/0)
 
         case resolve_function_atom(mod, fn_name, length(args)) do
           {:ok, fun_atom} ->
@@ -250,6 +319,35 @@ defmodule Gamend.Hooks.PluginManager do
     state = do_reload(state)
     results = do_after_startup(state)
     {:reply, %{plugins: state_to_list(state), after_startup: results}, state}
+  end
+
+  def handle_call({:suspend, name}, _from, state) do
+    case Map.pop(state, name) do
+      {nil, _state} ->
+        {:reply, false, state}
+
+      {plugin, rest} ->
+        stop_unload_plugin(plugin)
+        _ = DynamicRpcs.reset_plugin(name)
+        {:reply, true, publish_snapshot(rest)}
+    end
+  end
+
+  def handle_call({:resume, name}, _from, state) do
+    # A full reload may have loaded it again while it was suspended.
+    {previous, rest} = Map.pop(state, name)
+    if previous, do: stop_unload_plugin(previous)
+    _ = DynamicRpcs.reset_plugin(name)
+
+    case load_plugin(plugins_dir(), name) do
+      %Plugin{} = plugin ->
+        state = publish_snapshot(Map.put(rest, name, plugin))
+        _ = do_after_startup(%{name => plugin})
+        {:reply, plugin, state}
+
+      nil ->
+        {:reply, nil, publish_snapshot(rest)}
+    end
   end
 
   # Internals
@@ -314,7 +412,7 @@ defmodule Gamend.Hooks.PluginManager do
   end
 
   defp cast_plugin_setting(definition, value) do
-    case Gamend.Settings.cast(value, definition.type) do
+    case Gamend.Settings.cast(value, definition.type, Map.get(definition, :values, [])) do
       {:ok, _cast} = ok ->
         ok
 
@@ -377,13 +475,7 @@ defmodule Gamend.Hooks.PluginManager do
     |> :erlang.float_to_binary(decimals: 3)
   end
 
-  defp slow_hook_threshold_ms do
-    Application.get_env(
-      :gamend_core,
-      :slow_hook_threshold_ms,
-      @default_slow_hook_threshold_ms
-    )
-  end
+  defp slow_hook_threshold_ms, do: Gamend.Settings.get(__MODULE__, :slow_threshold_ms)
 
   defp do_reload(prev_state) when is_map(prev_state) do
     # Dynamic RPC exports are derived from the currently loaded plugins.
@@ -499,7 +591,8 @@ defmodule Gamend.Hooks.PluginManager do
 
     plugin = %Plugin{name: plugin_name, app: app, ebin_paths: ebin_paths, loaded_at: now}
 
-    with :ok <- safe_load_app(app),
+    with :ok <- load_beams(ebin_paths, :code.get_mode()),
+         :ok <- safe_load_app(app),
          {:ok, vsn} <- app_vsn(app),
          {:ok, modules} <- app_modules(app),
          {:ok, hooks_mod} <- app_hooks_module(app),
@@ -518,6 +611,37 @@ defmodule Gamend.Hooks.PluginManager do
   defp load_plugin(_root, plugin_name) do
     Logger.warning("plugin=#{plugin_name} skipped: name exceeds #{@max_plugin_name_length} chars")
     nil
+  end
+
+  @doc false
+  # A release runs the code server in embedded mode: nothing loads on first
+  # call, and `Code.ensure_loaded/1` answers `{:error, :embedded}` for any
+  # module the boot script did not load. A plugin is never in the boot
+  # script, so without this every one of its modules — the hooks module, its
+  # application callback, its deps — is unreachable, and the plugin fails
+  # with `failed to load module=… {:error, :embedded}` in a release while
+  # working under `mix phx.server`. Explicit loading is allowed in embedded
+  # mode, so each beam on the plugin's own paths is loaded here. Interactive
+  # mode loads on demand and needs none of it.
+  def load_beams(_ebin_paths, :interactive), do: :ok
+
+  def load_beams(ebin_paths, :embedded) do
+    ebin_paths
+    |> Enum.flat_map(&Path.wildcard(Path.join(&1, "*.beam")))
+    |> Enum.reduce_while(:ok, fn beam, :ok ->
+      mod = beam |> Path.basename(".beam") |> String.to_atom()
+
+      case :code.is_loaded(mod) do
+        {:file, _} ->
+          {:cont, :ok}
+
+        false ->
+          case :code.load_abs(String.to_charlist(Path.rootname(beam))) do
+            {:module, ^mod} -> {:cont, :ok}
+            {:error, reason} -> {:halt, {:error, {:module_load_failed, mod, reason}}}
+          end
+      end
+    end)
   end
 
   # True when the app's code is already reachable on the code path from

@@ -2,7 +2,7 @@
 
 Ok so I started to **stress test** my game server (Using k6, a great server stress tool).
 
-I wanted to see where are the limits of the system right now. In this article I will talk how I solved the issues with:
+I wanted to see where are the limits of the system right now. In this article I will talk about how I solved the issues with:
 - **Out of Memory**
 - **Database Timeouts**
 
@@ -22,7 +22,7 @@ But first, the architecture. Clients call into:
 
 ## Out of Memory Problems
 
-Immediately a lot of the calls errored out and hanged after few seconds. Looking at Graphana metrics (image below), I saw that the app went **Out of Memory** (the red dotted line).
+Immediately a lot of the calls errored out and hung after a few seconds. Looking at Grafana metrics (image below), I saw that the app went **Out of Memory** (the red dotted line).
 
 ![first result](gamend_stress/first_results.png)
 
@@ -44,7 +44,7 @@ Now that the crashes were out of the way, I got to a **77% success rate** on the
 
 ![failures](gamend_stress/failures.png)
 
-I investigated a bit, and the issue was the **database writes and reads**. I have a queue for the database, and any database operation that waits for more than few seconds gets imediately cancelled and results in a 5xx error (this is to ensure queued calls don't cascade into errors one after another).
+I investigated a bit, and the issue was the **database writes and reads**. I have a queue for the database, and any database operation that waits for more than a few seconds gets immediately cancelled and results in a 5xx error (this is to ensure queued calls don't cascade into errors one after another).
 
 For context, as I try to minimise costs, I use **SQLite** (I only pay less than 1$ per month for the disk), but the server supports **PostgreSQL** also, which handles parallel writes and reads better.
 

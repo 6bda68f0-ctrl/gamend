@@ -11,6 +11,7 @@ defmodule GamendWeb.UserLive.Settings.AccountTab do
   alias Gamend.Accounts
   alias Gamend.OAuth.Providers
   alias Gamend.Storage
+  alias GamendWeb.LiveHelpers
   alias GamendWeb.UserLive.Settings.Shared
 
   def assign_defaults(socket, user) do
@@ -173,7 +174,7 @@ defmodule GamendWeb.UserLive.Settings.AccountTab do
             <.input
               field={@password_form[:password_confirmation]}
               type="password"
-              label={gettext("Confirm")}
+              label={gettext("Confirm password")}
               autocomplete="new-password"
             />
             <.button variant="primary" phx-disable-with={gettext("Saving...")}>
@@ -193,6 +194,7 @@ defmodule GamendWeb.UserLive.Settings.AccountTab do
                 @user.apple_id,
                 @user.google_id,
                 @user.facebook_id,
+                @user.github_id,
                 @user.steam_id
               ],
               fn v ->
@@ -205,9 +207,9 @@ defmodule GamendWeb.UserLive.Settings.AccountTab do
             class="flex items-center justify-between"
           >
             <div>
-              <strong>{provider |> Atom.to_string() |> String.capitalize()}</strong>
+              <strong>{provider_name(provider)}</strong>
               <div class="text-sm text-base-content/70">
-                {gettext("Log in")}
+                {if linked_id, do: gettext("Linked"), else: gettext("Not linked")}
               </div>
             </div>
             <div class="flex items-center gap-2">
@@ -253,9 +255,10 @@ defmodule GamendWeb.UserLive.Settings.AccountTab do
         </div>
         <div class="mt-4">
           <button
+            id="delete-account-button"
             phx-click="delete_user"
             class="btn btn-error"
-            data-confirm={gettext("Delete?")}
+            data-confirm={delete_confirmation(Accounts.deletion_grace_days())}
           >
             {gettext("Delete account")}
           </button>
@@ -290,7 +293,12 @@ defmodule GamendWeb.UserLive.Settings.AccountTab do
           &url(~p"/users/settings/confirm_email/#{&1}")
         )
 
-        {:noreply, put_flash(socket, :info, gettext("Success."))}
+        {:noreply,
+         put_flash(
+           socket,
+           :info,
+           gettext("Check your new email address for a link to confirm the change.")
+         )}
 
       changeset ->
         {:noreply, assign(socket, :email_form, to_form(changeset, action: :insert))}
@@ -356,9 +364,15 @@ defmodule GamendWeb.UserLive.Settings.AccountTab do
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign(socket, username_form: to_form(changeset, action: :insert))}
 
+      # Anything else is the `before_user_update` hook refusing: its own words
+      # when it gave a string, a plain refusal otherwise.
       {:error, reason} ->
         {:noreply,
-         put_flash(socket, :error, gettext("Not allowed: %{reason}", reason: inspect(reason)))}
+         put_flash(
+           socket,
+           :error,
+           LiveHelpers.failure_message(gettext("Not allowed"), {:hook_rejected, reason})
+         )}
     end
   end
 
@@ -422,11 +436,26 @@ defmodule GamendWeb.UserLive.Settings.AccountTab do
   def handle_event("delete_user", _params, socket) do
     user = Shared.current_user(socket)
 
-    case Accounts.delete_user(user) do
-      {:ok, _deleted_user} ->
+    case Accounts.request_deletion(user) do
+      {:ok, :deleted} ->
         {:noreply,
          socket
          |> put_flash(:info, gettext("Success."))
+         |> redirect(external: ~p"/")}
+
+      {:ok, {:scheduled, _user, expired_tokens}} ->
+        GamendWeb.UserAuth.disconnect_sessions(expired_tokens)
+
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           ngettext(
+             "Your account will be deleted in %{count} day. Sign in before then to keep it.",
+             "Your account will be deleted in %{count} days. Sign in before then to keep it.",
+             Accounts.deletion_grace_days()
+           )
+         )
          |> redirect(external: ~p"/")}
 
       {:error, _changeset} ->
@@ -577,8 +606,24 @@ defmodule GamendWeb.UserLive.Settings.AccountTab do
     end
   end
 
+  defp delete_confirmation(0),
+    do: gettext("Delete your account permanently? This cannot be undone.")
+
+  defp delete_confirmation(days) do
+    ngettext(
+      "Delete your account? It will be deleted in %{count} day, and signing in before then keeps it.",
+      "Delete your account? It will be deleted in %{count} days, and signing in before then keeps it.",
+      days
+    )
+  end
+
   # Rows in the Account card: every linked provider (a disabled one must stay
   # unlinkable) plus every enabled one.
+  # Brand names: never translated. `capitalize/1` covers every provider but
+  # the one with a capital in the middle.
+  defp provider_name(:github), do: "GitHub"
+  defp provider_name(provider), do: provider |> Atom.to_string() |> String.capitalize()
+
   defp provider_rows(user) do
     Providers.all()
     |> Enum.map(&{&1, linked_provider_id(user, &1)})

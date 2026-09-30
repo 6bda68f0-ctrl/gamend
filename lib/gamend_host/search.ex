@@ -12,9 +12,17 @@ defmodule GamendHost.Search do
   that happens to share the path.
 
   Only destinations, no query actions: every answerable thing on this host is
-  a page, and a page is small enough to send in the index. A host whose
-  content is too large to enumerate — a dictionary, a product catalogue —
-  implements `c:GamendWeb.SearchIndex.Provider.search/2` as well.
+  a page or a section of one, and together they are small enough to send in
+  the index (about 600 rows). A host whose content is too large to enumerate —
+  a dictionary, a product catalogue — implements
+  `c:GamendWeb.SearchIndex.Provider.search/2` as well.
+
+  ## Cost
+
+  The content rows are built once per locale and kept by
+  `Gamend.Content.memoize/2` until the content reloads, so opening the
+  palette costs a cache read plus the navigation, which depends on who is
+  asking. The browser fetches the index once and filters it in memory.
   """
 
   @behaviour GamendWeb.SearchIndex.Provider
@@ -26,7 +34,18 @@ defmodule GamendHost.Search do
 
   @impl true
   def entries(context) do
-    SearchIndex.navigation_entries(context) ++ doc_entries() ++ blog_entries()
+    SearchIndex.navigation_entries(context) ++ content_entries()
+  end
+
+  # Keyed by locale because the group labels are translated. Sections come
+  # last: at an equal rank the palette keeps the host's order, so a guide
+  # whose title matches stays above its own sections.
+  defp content_entries do
+    locale = Gettext.get_locale(GamendHost.Gettext)
+
+    Content.memoize({__MODULE__, :entries, locale}, fn ->
+      doc_entries() ++ blog_entries() ++ section_entries()
+    end)
   end
 
   # One heading for every guide rather than one per category. A category title
@@ -45,10 +64,29 @@ defmodule GamendHost.Search do
           href: "/docs/#{doc.slug}",
           group: group,
           subtitle: doc.summary,
-          keywords: [category]
+          keywords: [category | doc.keywords]
         }
       end)
     end)
+  end
+
+  # Every `##` and `###` of every guide, linking to its anchor, so a word that
+  # names a section ("Usernames") finds it rather than the guide that holds
+  # it. The subtitle says which guide, then the section's first sentence: the
+  # palette matches its words too, below titles and keywords.
+  defp section_entries do
+    group = gettext("Documentation")
+
+    for %{guides: guides} <- Content.list_doc_categories(),
+        doc <- guides,
+        section <- Content.doc_sections(doc.slug) do
+      %{
+        title: section.text,
+        href: "/docs/#{doc.slug}##{section.id}",
+        group: group,
+        subtitle: Enum.join(Enum.reject([doc.title, section.lede], &is_nil/1), " · ")
+      }
+    end
   end
 
   # The date and not the excerpt: the subtitle is the truncated right-hand half
@@ -58,7 +96,13 @@ defmodule GamendHost.Search do
     group = gettext("Blog")
 
     Enum.map(Content.list_blog_posts(), fn post ->
-      %{title: post.title, href: "/blog/#{post.slug}", group: group, subtitle: blog_date(post)}
+      %{
+        title: post.title,
+        href: "/blog/#{post.slug}",
+        group: group,
+        subtitle: blog_date(post),
+        keywords: post.keywords
+      }
     end)
   end
 

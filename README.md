@@ -2,7 +2,7 @@
 
 # Gamend
 
-**Open source Elixir game server with authentication, users, lobbies, groups, parties, friends, chat, notifications, quests, leaderboards, tournaments, payments, server scripting and an admin portal with HTTP, WebSocket, and WebRTC support and SDK for JS and Godot.**
+**Open source Elixir game server with authentication, users, lobbies, groups, parties, friends, chat, notifications, quests, leaderboards, tournaments, payments, server scripting and an admin portal with HTTP, WebSocket, and WebRTC support and SDKs for Godot, Rune (Balaur), C++ and JS.**
 
 Game + Backend = Gamend
 
@@ -16,8 +16,8 @@ everything else players expect around the game itself.
 Your game still renders and simulates, but server-side scripting means real logic runs on the
 server: hooks in Elixir fire on your events, so scoring, rewards, matchmaking
 rules and validation are decided somewhere the player cannot edit. Background and
-scheduled jobs run there too. Connect from Godot, from JavaScript, or over plain
-HTTP.
+scheduled jobs run there too. Connect from Godot, Rune (Balaur), C++ or
+JavaScript, or over plain HTTP.
 
 It is written in Elixir — the language behind Discord's messaging — which is why
 one small server holds tens of thousands of connections. **You run it on your
@@ -29,7 +29,7 @@ own server**; there is no hosted service to buy.
 
 Measured on Fly, one machine at a time, hardware read back off the machine
 before load was applied. **37,854 concurrent idle players on one core with
-3 GB**, against Nakama's published 20,277 on the hardware.
+3 GB**, against Nakama's published 20,277 on the same 1 vCPU / 3 GB configuration.
 
 Full per-size tables, the operations breakdown, and how to reproduce any of it:
 [Performance](https://gamend.org/docs/performance), 
@@ -37,11 +37,11 @@ Full per-size tables, the operations breakdown, and how to reproduce any of it:
 
 ## Features
 
-- **Auth** — Email/password, magic link, OAuth (Discord, Google, Apple, Facebook, Steam), JWT API tokens
+- **Auth** — Email/password, magic link, OAuth (Discord, Google, Apple, Facebook, GitHub, Steam), JWT API tokens
 - **Users** — Profiles, metadata, device tokens, account lifecycle
 - **Lobbies** — Host-managed, max users, hidden/locked, passwords, real-time updates
 - **Groups** — Public / private / hidden communities, roles, join requests, invites
-- **Parties** — Ephemeral groups (2–10 players), invite-based, lobby integration
+- **Parties** — Ephemeral groups (2–32 players by default), invite-based, lobby integration
 - **Friends** — Requests, accept/reject, blocking
 - **Chat** — Lobby, group, party, and friend DMs with read cursors and unread counts
 - **Notifications** — Typed notifications for all social events, read/unread, real-time delivery
@@ -58,9 +58,27 @@ Full per-size tables, the operations breakdown, and how to reproduce any of it:
 
 ## Client SDKs
 
+The Godot, Balaur and C++ SDKs are rebuilt on every change to `main` and
+attached to the [`latest` release](https://github.com/appsinacup/gamend/releases/tag/latest).
+
+- [Godot SDK](https://gamend.org/docs/godot-sdk) — also on the [Godot Asset Library](https://godotengine.org/asset-library/asset/4510)
+- [Rune SDK (Balaur)](https://github.com/appsinacup/gamend/releases/download/latest/balaur_addons.zip) — Rune scripts for the Balaur engine, one module per API area
+- [C++ SDK](https://gamend.org/docs/cpp-sdk) — C++17, pluggable transports, no exceptions or RTTI required
 - [JavaScript SDK](https://www.npmjs.com/package/@ughuuu/gamend)
-- [Godot SDK](https://godotengine.org/asset-library/asset/4510)
 - [Elixir SDK](sdk/) — Stub modules for IDE autocomplete in custom hooks
+
+## Download and run
+
+No Elixir needed: install the server, then start it from a project folder (macOS on Apple silicon, Linux x86_64 and arm64).
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/appsinacup/gamend/main/rel/install.sh | sh
+mkdir my-game && cd my-game
+gamend starter   # an example site to edit: theme, pages, a post, a guide
+gamend start     # http://localhost:4000
+```
+
+`gamend starter website` gives you the gamend.org site instead. For end-to-end tests in CI, `uses: appsinacup/gamend/actions/setup-gamend@main` starts a server and sets `GAMEND_URL`. Guide: [Download and run](https://gamend.org/docs/standalone).
 
 ## Run Locally
 
@@ -68,7 +86,7 @@ Full per-size tables, the operations breakdown, and how to reproduce any of it:
 
 - **Elixir 1.20 & Erlang/OTP 29** — see [`.tool-versions`](.tool-versions); with [asdf](https://asdf-vm.com/) just run `asdf install`
 - **Rust** ([rustup](https://rustup.rs/)) — required to build the WebRTC native dependency (`ex_sctp`)
-- **PostgreSQL** — optional. Dev uses SQLite by default; set `POSTGRES_*` or `DATABASE_URL` in `.env` to use Postgres instead. The adapter is chosen at compile time, so after changing these run `mix deps.clean gamend_core gamend_web --build` and recompile. (Docker: use the `-postgres` image tag or build with `GAMEND_DB_ADAPTER=postgres`.)
+- **PostgreSQL** — optional. Dev uses SQLite by default; set `GAMEND_DB_URL` or `GAMEND_DB_POSTGRES_*` in `.env` to use Postgres instead. The adapter is chosen at compile time, so after changing these run `mix deps.clean gamend_core gamend_web --build` and recompile. (Docker: use the `-postgres` image tag or build with `GAMEND_DB_ADAPTER=postgres`.)
 
 ### First run
 
@@ -96,9 +114,7 @@ See the [Deployment Tutorial](https://appsinacup.com/gamend-deploy/) and [Starte
 
 ## AI instructions file
 
-This project has a [.github/copilot-instructions.md](.github/copilot-instructions.md) file you can use.
-
-## Star History
+This project has an [AGENTS.md](AGENTS.md) file you can use.
 
 ## Star History
 

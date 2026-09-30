@@ -22,29 +22,31 @@ defmodule GamendWeb.Api.V1.ClientLogController do
 
   alias Gamend.Accounts.Scope
   alias Gamend.ClientLogs
+  alias GamendWeb.Schemas
   alias GamendWeb.Schemas.ClientLogBatch
-  alias GamendWeb.Schemas.ClientLogPolicy
-  alias GamendWeb.Schemas.ClientLogResult
-  alias GamendWeb.Schemas.ErrorResponse
+  alias GamendWeb.Schemas.ClientLogPolicyResponse
+  alias GamendWeb.Schemas.ClientLogResultResponse
 
   tags(["Client logs"])
 
   operation(:policy,
     operation_id: "get_client_log_policy",
+    security: [%{}, %{"authorization" => []}],
     summary: "Client log capture policy",
     description:
       "What the client should collect and upload: whether collection is on at all, the " <>
         "lowest level to send, and per-category overrides. Fetch at startup and on resume; " <>
         "a client that cannot reach this should collect nothing.",
     responses: [
-      ok: {"Capture policy", "application/json", ClientLogPolicy}
+      ok: {"Capture policy", "application/json", ClientLogPolicyResponse}
     ]
   )
 
-  def policy(conn, _params), do: json(conn, ClientLogs.capture_policy())
+  def policy(conn, _params), do: reply_data(conn, ClientLogs.capture_policy())
 
   operation(:create,
     operation_id: "upload_client_logs",
+    security: [%{}, %{"authorization" => []}],
     summary: "Upload a batch of client log entries",
     description:
       "Entries are re-emitted into the server's own log stream, so a search for the " <>
@@ -52,10 +54,10 @@ defmodule GamendWeb.Api.V1.ClientLogController do
         "per call; the surplus is discarded and counted as dropped.",
     request_body: {"Log batch", "application/json", ClientLogBatch},
     responses: [
-      accepted: {"Batch accepted", "application/json", ClientLogResult},
-      bad_request: {"Malformed batch", "application/json", ErrorResponse},
-      forbidden: {"Session belongs to another user", "application/json", ErrorResponse},
-      service_unavailable: {"Collection is disabled", "application/json", ErrorResponse}
+      accepted: {"Batch accepted", "application/json", ClientLogResultResponse},
+      bad_request: Schemas.error("Malformed batch (invalid_batch)"),
+      forbidden: Schemas.error("The session belongs to another user (session_forbidden)"),
+      service_unavailable: Schemas.error("Collection is disabled (collection_disabled)")
     ]
   )
 
@@ -64,19 +66,19 @@ defmodule GamendWeb.Api.V1.ClientLogController do
 
     case ClientLogs.ingest(body(conn, params), user_id: user_id) do
       {:ok, summary} ->
-        conn |> put_status(:accepted) |> json(summary)
+        reply_data(conn, :accepted, summary)
 
       {:error, :disabled} ->
         # 503 rather than 404: the route exists and the client is doing the
         # right thing, so it should back off and retry later rather than treat
         # collection as permanently gone.
-        error(conn, :service_unavailable, "Client log collection is disabled")
+        reply_error(conn, :service_unavailable, "collection_disabled")
 
       {:error, :forbidden} ->
-        error(conn, :forbidden, "Session belongs to another user")
+        reply_error(conn, :forbidden, "session_forbidden")
 
       {:error, :invalid} ->
-        error(conn, :bad_request, "Malformed log batch")
+        reply_error(conn, :bad_request, "invalid_batch")
     end
   end
 
@@ -98,8 +100,4 @@ defmodule GamendWeb.Api.V1.ClientLogController do
 
   defp stringify(list) when is_list(list), do: Enum.map(list, &stringify/1)
   defp stringify(other), do: other
-
-  defp error(conn, status, message) do
-    conn |> put_status(status) |> json(%{error: message})
-  end
 end

@@ -2,6 +2,7 @@
   "title": "Gamend",
   "tagline": "Game + Backend",
   "description": "Open source Elixir game server for real-time multiplayer games.",
+  "contact_email": "contact@gamend.org",
   "theme_color": {
     "light": "#ffffff",
     "dark": "#292f37"
@@ -79,6 +80,11 @@
               "label": "Godot SDK",
               "href": "/docs/godot-sdk",
               "icon": "hero-puzzle-piece-solid"
+            },
+            {
+              "label": "C++ SDK",
+              "href": "/docs/cpp-sdk",
+              "icon": "hero-cpu-chip-solid"
             }
           ]
         },

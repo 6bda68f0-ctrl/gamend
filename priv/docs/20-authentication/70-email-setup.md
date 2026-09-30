@@ -10,11 +10,11 @@ icon: hero-envelope
 
 Recommended providers:
 
-| Provider | Free tier |
-|---|---|
-| [Resend](https://resend.com) | 3,000 emails/month |
-| [SendGrid](https://sendgrid.com) | 100 emails/day |
-| [Mailgun](https://mailgun.com) | 5,000 emails/month |
+- [Resend](https://resend.com)
+- [SendGrid](https://sendgrid.com)
+- [Mailgun](https://mailgun.com)
+
+Free tiers change often; check the provider's current free tier before you pick one.
 
 ## Configure email secrets
 
@@ -37,8 +37,8 @@ GAMEND_MAIL_SMTP_FROM_EMAIL="no-reply@yourdomain.com"
 
 Many email providers require that the "From" address or sending domain be verified in your SMTP provider dashboard before they'll accept or relay mail (you may see errors like "450 domain not verified"). Configure `GAMEND_MAIL_SMTP_FROM_NAME` and `GAMEND_MAIL_SMTP_FROM_EMAIL` so that your messages use a verified sender and avoid delivery rejections.
 
-If you're not sure what to use, set `GAMEND_MAIL_SMTP_FROM_EMAIL` to an address in a domain you control (eg. `no-reply@yourdomain.com` ) and verify that domain with your provider.
+If you're not sure what to use, set `GAMEND_MAIL_SMTP_FROM_EMAIL` to an address in a domain you control (e.g. `no-reply@yourdomain.com`) and verify that domain with your provider.
 
-Tip: you can review and test the current runtime SMTP settings in the admin [Admin Configuration](/admin/config) page.
+Tip: the [Admin Configuration](/admin/config) page shows the current SMTP settings and has a "Send test email" button.
 
 For other providers, adjust the SMTP settings accordingly. The app will automatically detect when email is configured.

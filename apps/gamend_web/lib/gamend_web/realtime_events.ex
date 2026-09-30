@@ -32,8 +32,8 @@ defmodule GamendWeb.RealtimeEvents do
     # ── user:* ──────────────────────────────────────────────────────────
     {@user, "updated", true, "full user", "The user's own profile changed"},
     {@user, "notification_created", true, "notification", "New notification for the user"},
-    {@user, "friend_updated", true, "friendship + users",
-     "Friend request/accept/block state changed"},
+    {@user, "friend_updated", true, "friends: id => brief user",
+     "A friend's profile or presence changed"},
     {@user, "kv_updated", true, "kv entry", "A subscribed KV key was written"},
     {@user, "kv_deleted", true, "kv entry ref", "A subscribed KV key was deleted"},
     {@user, "wallet_updated", true, "currency + balance + delta",

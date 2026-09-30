@@ -153,28 +153,8 @@ defmodule Mix.Tasks.Gamend.Theme.MigrateLocales do
   defp entry(source, target) do
     """
 
-    msgid #{quote_po(source)}
-    msgstr #{quote_po(target)}
+    msgid #{Gamend.Codegen.quote_po(source)}
+    msgstr #{Gamend.Codegen.quote_po(target)}
     """
-  end
-
-  defp quote_po(string) do
-    escaped = string |> String.replace("\\", "\\\\") |> String.replace("\"", "\\\"")
-
-    case String.split(escaped, "\n") do
-      [single] ->
-        ~s("#{single}")
-
-      lines ->
-        body =
-          lines
-          |> Enum.with_index()
-          |> Enum.map_join("\n", fn {line, index} ->
-            suffix = if index == length(lines) - 1, do: "", else: "\\n"
-            ~s("#{line}#{suffix}")
-          end)
-
-        ~s("") <> "\n" <> body
-    end
   end
 end

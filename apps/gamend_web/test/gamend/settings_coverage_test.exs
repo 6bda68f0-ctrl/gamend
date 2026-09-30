@@ -138,6 +138,15 @@ defmodule Gamend.SettingsCoverageTest do
   defp sample(%{type: :string}), do: {"sample-value", "sample-value"}
   defp sample(%{type: :integer}), do: {"4242", 4242}
   defp sample(%{type: :float}), do: {"1.5", 1.5}
+  # An `:atom` setting that declares `:values` accepts only those, so sample a
+  # declared one — preferring any that is not the default, so the assertion
+  # still cannot pass by accident. This is now the check that would have caught
+  # `GAMEND_PAYMENTS_ENVIRONMENT=sandbox` resolving to `:production`.
+  defp sample(%{type: :atom, values: [_ | _] = values, default: default}) do
+    value = Enum.find(values, List.first(values), &(&1 != default))
+    {Atom.to_string(value), value}
+  end
+
   defp sample(%{type: :atom}), do: {"sample", :sample}
   defp sample(%{type: :list}), do: {"alpha, beta", ["alpha", "beta"]}
   defp sample(%{type: :log_level}), do: {"warning", :warning}

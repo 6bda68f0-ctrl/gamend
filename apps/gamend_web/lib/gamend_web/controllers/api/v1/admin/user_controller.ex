@@ -5,29 +5,11 @@ defmodule GamendWeb.Api.V1.Admin.UserController do
   alias Gamend.Accounts
   alias Gamend.Accounts.User
   alias Gamend.Async
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{AdminUserResponse, OkResponse}
   alias OpenApiSpex.Schema
 
   tags(["Admin – Users"])
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
-
-  @user_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      email: %Schema{type: :string},
-      username: %Schema{type: :string},
-      display_name: %Schema{type: :string},
-      is_admin: %Schema{type: :boolean},
-      is_activated: %Schema{type: :boolean},
-      metadata: %Schema{type: :object},
-      lobby_id: %Schema{type: :string, format: :uuid, nullable: true},
-      is_online: %Schema{type: :boolean},
-      last_seen_at: %Schema{type: :string, format: "date-time"},
-      inserted_at: %Schema{type: :string, format: "date-time"},
-      updated_at: %Schema{type: :string, format: "date-time"}
-    }
-  }
 
   operation(:update,
     operation_id: "admin_update_user",
@@ -50,18 +32,18 @@ defmodule GamendWeb.Api.V1.Admin.UserController do
       }
     },
     responses: [
-      ok: {"User", "application/json", %Schema{type: :object, properties: %{data: @user_schema}}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", %Schema{type: :object}}
+      ok: {"User", "application/json", AdminUserResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required, or would demote the last admin (last_admin)"),
+      not_found: Schemas.error("Not found"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
   def update(conn, %{"id" => id} = params) do
     case Accounts.get_user(id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       user ->
         attrs =
@@ -70,7 +52,7 @@ defmodule GamendWeb.Api.V1.Admin.UserController do
           |> ensure_is_admin_present(user)
 
         if demoting_last_admin?(user, attrs) do
-          conn |> put_status(:unprocessable_entity) |> json(%{error: "last_admin"})
+          reply_error(conn, :forbidden, "last_admin")
         else
           do_update(conn, user, attrs)
         end
@@ -91,15 +73,10 @@ defmodule GamendWeb.Api.V1.Admin.UserController do
     case Accounts.update_user(user, attrs) do
       {:ok, updated} ->
         maybe_notify_activation(user, updated)
-        json(conn, %{data: serialize_user(updated)})
+        reply_data(conn, serialize_user(updated))
 
       {:error, %Ecto.Changeset{} = cs} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{
-          error: "validation_failed",
-          errors: Ecto.Changeset.traverse_errors(cs, & &1)
-        })
+        unprocessable(conn, cs)
     end
   end
 
@@ -120,30 +97,25 @@ defmodule GamendWeb.Api.V1.Admin.UserController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
   def delete(conn, %{"id" => id}) do
     case Accounts.get_user(id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       user ->
         case Accounts.delete_user(user) do
           {:ok, _} ->
-            json(conn, %{})
+            reply_ok(conn)
 
           {:error, %Ecto.Changeset{} = cs} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: "validation_failed",
-              errors: Ecto.Changeset.traverse_errors(cs, & &1)
-            })
+            unprocessable(conn, cs)
         end
     end
   end
@@ -164,7 +136,7 @@ defmodule GamendWeb.Api.V1.Admin.UserController do
       display_name: user.display_name || "",
       is_admin: user.is_admin,
       is_activated: user.is_activated,
-      metadata: user.metadata,
+      metadata: user.metadata || %{},
       lobby_id: user.lobby_id || "",
       party_id: user.party_id || "",
       is_online: user.is_online,

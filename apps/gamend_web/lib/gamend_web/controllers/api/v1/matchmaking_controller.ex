@@ -4,34 +4,17 @@ defmodule GamendWeb.Api.V1.MatchmakingController do
 
   alias Gamend.Accounts.Scope
   alias Gamend.Matchmaking
+  alias GamendWeb.Schemas
+
+  alias GamendWeb.Schemas.{
+    CancelledCountResponse,
+    MatchmakingStatsResponse,
+    MatchmakingTicketResponse
+  }
+
   alias OpenApiSpex.Schema
 
   tags(["Matchmaking"])
-
-  @ticket_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      status: %Schema{type: :string, enum: ["queued", "matched", "cancelled"]},
-      match_params: %Schema{
-        type: :object,
-        description: "String key/value pairs; only identical params match together"
-      },
-      min_players: %Schema{type: :integer},
-      max_players: %Schema{type: :integer},
-      timeout_ms: %Schema{type: :integer},
-      queued_at: %Schema{type: :string, format: "date-time"},
-      matched_at: %Schema{type: :string, format: "date-time", nullable: true},
-      match_id: %Schema{
-        type: :string,
-        format: :uuid,
-        nullable: true,
-        description: "Lobby the ticket was matched into"
-      }
-    }
-  }
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
 
   operation(:create,
     operation_id: "matchmaking_join",
@@ -44,12 +27,13 @@ defmodule GamendWeb.Api.V1.MatchmakingController do
     past the grace period is dropped from the queue by the sweep.
 
     A caller in a party queues the whole party: one ticket per member, matched
-    as an indivisible unit. Returns `409` with `not_party_leader` when a member
-    rather than the leader calls this, `party_too_large` when the party cannot
-    fit in `max_players`, and `already_queued` when the caller or any member is
-    already in the queue.
+    as an indivisible unit. Refusals: `already_queued` (409) when the caller or
+    any member is already in the queue; `not_party_leader` (403) when a member
+    rather than the leader calls this; `party_has_blocked_pair` (403) when two
+    members have blocked each other; `party_too_large` (400) when the party
+    cannot fit in `max_players`.
     """,
-    security: [%{"bearer" => []}],
+    security: [%{"authorization" => []}],
     request_body:
       {"Ticket", "application/json",
        %Schema{
@@ -61,12 +45,12 @@ defmodule GamendWeb.Api.V1.MatchmakingController do
          }
        }},
     responses: [
-      created:
-        {"Ticket", "application/json",
-         %Schema{type: :object, properties: %{data: @ticket_schema}}},
-      conflict: {"Cannot queue right now", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", %Schema{type: :object}}
+      created: {"Ticket", "application/json", MatchmakingTicketResponse},
+      bad_request: Schemas.error("The party cannot fit in max_players"),
+      forbidden: Schemas.error("Not the party leader, or two members blocked each other"),
+      conflict: Schemas.error("Already queued"),
+      unauthorized: Schemas.error("Not authenticated"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
@@ -80,17 +64,13 @@ defmodule GamendWeb.Api.V1.MatchmakingController do
            parse_optional_int(params["max_players"])
          ) do
       {:ok, ticket} ->
-        conn
-        |> put_status(:created)
-        |> json(%{data: serialize(ticket)})
+        reply_data(conn, :created, serialize(ticket))
 
       {:error, reason} when is_atom(reason) ->
-        conn
-        |> put_status(:conflict)
-        |> json(%{error: Atom.to_string(reason)})
+        reply_error(conn, join_status(reason), reason)
 
       {:error, changeset} ->
-        changeset_error(conn, changeset)
+        unprocessable(conn, changeset)
     end
   end
 
@@ -98,40 +78,34 @@ defmodule GamendWeb.Api.V1.MatchmakingController do
     operation_id: "matchmaking_cancel",
     summary: "Leave the matchmaking queue",
     description: "Cancels all of the caller's queued tickets.",
-    security: [%{"bearer" => []}],
+    security: [%{"authorization" => []}],
     responses: [
-      ok:
-        {"Cancelled", "application/json",
-         %Schema{type: :object, properties: %{data: %Schema{type: :object}}}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Tickets cancelled", "application/json", CancelledCountResponse},
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
   def delete(conn, _params) do
     cancelled = Matchmaking.cancel(conn.assigns.current_scope.user_id)
-    json(conn, %{data: %{cancelled: cancelled}})
+    reply_data(conn, %{cancelled: cancelled})
   end
 
   operation(:me,
     operation_id: "matchmaking_my_ticket",
     summary: "Get my current ticket",
-    description: "The caller's queued ticket, or null when not in the queue.",
-    security: [%{"bearer" => []}],
+    description: "The caller's queued ticket; 404 `not_queued` when not in the queue.",
+    security: [%{"authorization" => []}],
     responses: [
-      ok:
-        {"Ticket", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{data: %Schema{@ticket_schema | nullable: true}}
-         }},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Ticket", "application/json", MatchmakingTicketResponse},
+      not_found: Schemas.error("Not in the queue"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
   def me(conn, _params) do
     case Matchmaking.current_ticket(conn.assigns.current_scope.user_id) do
-      nil -> json(conn, %{data: nil})
-      ticket -> json(conn, %{data: serialize(ticket)})
+      nil -> reply_error(conn, :not_found, "not_queued")
+      ticket -> reply_data(conn, serialize(ticket))
     end
   end
 
@@ -139,37 +113,13 @@ defmodule GamendWeb.Api.V1.MatchmakingController do
     operation_id: "matchmaking_stats",
     summary: "Queue statistics",
     description: "Waiting-player depth per match_params group. Public.",
-    responses: [
-      ok:
-        {"Stats", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{
-               type: :object,
-               properties: %{
-                 queued: %Schema{type: :integer},
-                 queues: %Schema{
-                   type: :array,
-                   items: %Schema{
-                     type: :object,
-                     properties: %{
-                       params: %Schema{type: :object},
-                       waiting: %Schema{type: :integer}
-                     }
-                   }
-                 }
-               }
-             }
-           }
-         }}
-    ]
+    responses: [ok: {"Stats", "application/json", MatchmakingStatsResponse}]
   )
 
   def stats(conn, _params) do
     stats = Matchmaking.stats()
     # Public view: queue depths only, not lifetime matched/cancelled counters.
-    json(conn, %{data: %{queued: stats.queued, queues: stats.queues}})
+    reply_data(conn, %{queued: stats.queued, queues: stats.queues})
   end
 
   # ── helpers ───────────────────────────────────────────────────────────────
@@ -178,15 +128,22 @@ defmodule GamendWeb.Api.V1.MatchmakingController do
     %{
       id: ticket.id,
       status: ticket.status,
-      match_params: ticket.match_params,
+      match_params: ticket.match_params || %{},
       min_players: ticket.min_players,
       max_players: ticket.max_players,
       timeout_ms: ticket.timeout_ms,
       queued_at: ticket.queued_at,
       matched_at: ticket.matched_at,
-      match_id: ticket.match_id
+      match_id: ticket.match_id || ""
     }
   end
+
+  # Already in the queue is a state that holds (409); the party rules are
+  # refusals (403); a party bigger than the requested match is a request that
+  # cannot be met as asked (400).
+  defp join_status(:already_queued), do: :conflict
+  defp join_status(:party_too_large), do: :bad_request
+  defp join_status(_refusal), do: :forbidden
 
   defp parse_optional_int(value) when is_integer(value), do: value
 
@@ -198,13 +155,4 @@ defmodule GamendWeb.Api.V1.MatchmakingController do
   end
 
   defp parse_optional_int(_value), do: nil
-
-  defp changeset_error(conn, changeset) do
-    conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{
-      error: "invalid_data",
-      errors: Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
-    })
-  end
 end

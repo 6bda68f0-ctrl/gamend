@@ -36,11 +36,10 @@ defmodule GamendWeb.LobbyChannel do
   alias Gamend.Chat
   alias Gamend.Lobbies
   alias Gamend.Lobbies.SpectatorTracker
+  alias GamendWeb.ChannelEvents
   alias GamendWeb.ChannelUpdates
   alias GamendWeb.Plugs.ClientSession
   alias GamendWeb.Serializers
-
-  require Logger
 
   @impl true
   def join("lobby:" <> lobby_id_str, _payload, socket) do
@@ -106,13 +105,8 @@ defmodule GamendWeb.LobbyChannel do
   # channel a player's word data rides on, so the cost of one stray push was the
   # rest of the session going quiet. A client that pushes something we do not
   # know is a client to answer, not to hang up on.
-  def handle_in(event, _payload, socket) do
-    Logger.debug(fn ->
-      "LobbyChannel: unknown event=#{truncate_event(event)} lobby=#{socket.assigns[:lobby_id] || "nil"}"
-    end)
-
-    {:reply, {:error, %{error: "unknown_event"}}, socket}
-  end
+  def handle_in(event, _payload, socket),
+    do: ChannelEvents.unknown(event, socket, lobby: :lobby_id)
 
   # Handle PubSub messages and forward them to WebSocket clients
 
@@ -217,44 +211,19 @@ defmodule GamendWeb.LobbyChannel do
   end
 
   @impl true
+  # Internal atom is shared with group/party; on the lobby topic occupants are
+  # "users", so the wire event is user_online/user_offline.
   def handle_info({event, user_id}, socket) when event in [:member_online, :member_offline] do
-    user = Accounts.get_user(user_id)
-    # Internal atom is shared with group/party; on the lobby topic occupants are
-    # "users", so the wire event is user_online/user_offline.
-    ws_event = if event == :member_online, do: "user_online", else: "user_offline"
-
-    payload =
-      if user do
-        User.serialize_brief(user) |> Map.put(:user_id, user_id)
-      else
-        %{user_id: user_id, display_name: "", is_online: event == :member_online}
-      end
-
-    push_event(socket, ws_event, payload)
-    {:noreply, socket}
+    wire = if event == :member_online, do: "user_online", else: "user_offline"
+    {:noreply, ChannelEvents.push_presence(socket, event, user_id, wire)}
   end
 
   @impl true
-  def handle_info({:member_updated, user_id}, socket) do
-    user = Accounts.get_user(user_id)
-
-    if user do
-      payload = User.serialize_brief(user) |> Map.put(:user_id, user_id)
-      {:noreply, ChannelUpdates.push(socket, "user_updated", user_id, payload)}
-    else
-      {:noreply, socket}
-    end
-  end
+  def handle_info({:member_updated, user_id}, socket),
+    do: {:noreply, ChannelEvents.push_member_updated(socket, user_id, "user_updated")}
 
   @impl true
-  def handle_info({:channel_updates_flush, _}, socket),
-    do: {:noreply, ChannelUpdates.flush(socket)}
-
-  # Ignore other messages
-  @impl true
-  def handle_info(_msg, socket) do
-    {:noreply, socket}
-  end
+  def handle_info(msg, socket), do: {:noreply, ChannelEvents.other_info(msg, socket)}
 
   defp serialize_ready_check(check, socket) do
     viewer_id = get_in(socket.assigns, [:current_scope, Access.key(:user_id)])
@@ -304,8 +273,4 @@ defmodule GamendWeb.LobbyChannel do
   # 128 KB event name, so one socket could drive unbounded warning-level volume
   # made of attacker-controlled text into the rotating log and the admin buffer.
   # Client-chosen, so never logged whole.
-  defp truncate_event(event) when is_binary(event),
-    do: binary_part(event, 0, min(byte_size(event), 64))
-
-  defp truncate_event(event), do: inspect(event)
 end

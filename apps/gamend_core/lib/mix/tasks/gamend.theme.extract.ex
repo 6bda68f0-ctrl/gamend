@@ -45,20 +45,12 @@ defmodule Mix.Tasks.Gamend.Theme.Extract do
         generated = render(strings)
 
         if Keyword.get(opts, :check, false) do
-          check(path, generated)
+          Gamend.Codegen.check!(path, generated, "gamend.theme.extract")
         else
           File.mkdir_p!(Path.dirname(path))
           File.write!(path, generated)
           Mix.shell().info("wrote #{path} (#{length(strings)} strings)")
         end
-    end
-  end
-
-  defp check(path, generated) do
-    case File.read(path) do
-      {:ok, ^generated} -> Mix.shell().info("#{path} is up to date")
-      {:ok, _stale} -> Mix.raise("#{path} is out of date. Run: mix gamend.theme.extract")
-      {:error, _} -> Mix.raise("#{path} does not exist. Run: mix gamend.theme.extract")
     end
   end
 

@@ -59,13 +59,18 @@ defmodule GamendWeb.AdminLogBuffer do
   """
   def list(opts \\ []) do
     entries()
+    |> apply_filters(opts)
+    |> Enum.take(Keyword.get(opts, :limit, @max_entries))
+  end
+
+  defp apply_filters(entries, opts) do
+    entries
     |> maybe_filter_source(Keyword.get(opts, :source))
     |> maybe_filter_module(Keyword.get(opts, :module))
     |> maybe_filter_level(Keyword.get(opts, :level))
     |> maybe_filter_meta(:client_session, Keyword.get(opts, :session))
     |> maybe_filter_user(Keyword.get(opts, :user))
     |> maybe_filter_query(Keyword.get(opts, :query))
-    |> Enum.take(Keyword.get(opts, :limit, @max_entries))
   end
 
   @doc "How many buffered entries came from game clients rather than the server."
@@ -81,9 +86,21 @@ defmodule GamendWeb.AdminLogBuffer do
     [session: session_id, limit: limit] |> list() |> Enum.reverse()
   end
 
-  @doc "Returns a map of level => count for all buffered entries."
-  def count_by_level do
+  @doc """
+  A map of level => count.
+
+  With no options, every buffered entry — "what is in the buffer".
+
+  With `opts`, the same filters `list/1` takes, **except** `:level`, which is
+  ignored: the answer is then "how many would I see at each level if I picked
+  it", which is what a level chip beside a live filter has to say. Counting the
+  whole buffer there is what let the admin page offer `error(7)` and then list
+  one — the other six were client entries, and the source filter defaults to
+  server-only.
+  """
+  def count_by_level(opts \\ []) do
     entries()
+    |> apply_filters(Keyword.delete(opts, :level))
     |> Enum.group_by(& &1.level)
     |> Map.new(fn {level, entries} -> {level, length(entries)} end)
   end

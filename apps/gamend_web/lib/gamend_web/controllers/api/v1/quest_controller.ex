@@ -3,146 +3,12 @@ defmodule GamendWeb.Api.V1.QuestController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.Quests
-  alias Gamend.Quests.Quest
   alias GamendWeb.Pagination
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{QuestClaimResponse, QuestPage, QuestStatsResponse}
   alias OpenApiSpex.Schema
 
   tags(["Quests"])
-
-  @objective_schema %Schema{
-    type: :object,
-    properties: %{
-      event: %Schema{type: :string, description: "Event name the objective counts"},
-      target: %Schema{type: :integer, description: "Occurrences required"},
-      params: %Schema{type: :object, description: "Event meta constraints (all must match)"}
-    }
-  }
-
-  @reward_schema %Schema{
-    type: :object,
-    properties: %{
-      type: %Schema{type: :string, enum: ["currency", "item"], description: "Reward type"},
-      code: %Schema{type: :string, description: "Currency or item code"},
-      amount: %Schema{type: :integer, description: "Amount granted"}
-    }
-  }
-
-  @progress_schema %Schema{
-    type: :object,
-    nullable: true,
-    properties: %{
-      period_key: %Schema{
-        type: :string,
-        description: "Reset bucket (\"static\", date or ISO week)"
-      },
-      objective_progress: %Schema{
-        type: :object,
-        description: "Objective index (string) to current count"
-      },
-      status: %Schema{type: :string, enum: ["active", "completed", "claimed"]},
-      completed_at: %Schema{type: :string, format: "date-time", nullable: true},
-      claimed_at: %Schema{type: :string, format: "date-time", nullable: true},
-      claim_count: %Schema{
-        type: :integer,
-        description: "Finished runs of a repeat quest; 0 until the first claim"
-      }
-    }
-  }
-
-  @quest_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid, description: "Quest ID"},
-      key: %Schema{type: :string, description: "Unique slug"},
-      title: %Schema{type: :string, description: "Display title"},
-      description: %Schema{type: :string, description: "Description"},
-      icon_url: %Schema{type: :string, description: "Icon URL"},
-      sort_order: %Schema{type: :integer, description: "Display order"},
-      hidden: %Schema{type: :boolean, description: "Whether hidden until completed"},
-      reset: %Schema{
-        type: :string,
-        enum: Quest.resets(),
-        description: "When progress starts over"
-      },
-      reset_interval_days: %Schema{
-        type: :integer,
-        nullable: true,
-        description: "Cadence in days when reset is \"interval\" (biweekly = 14)"
-      },
-      category: %Schema{
-        type: :string,
-        nullable: true,
-        description: "Free-form grouping label for your UI (no engine behavior)"
-      },
-      group_key: %Schema{
-        type: :string,
-        description: "Quests sharing this list as one entry; pass ?group= to open it"
-      },
-      group_size: %Schema{
-        type: :integer,
-        description: "How many quests the entry stands for (1 when ungrouped)"
-      },
-      group_title: %Schema{
-        type: :string,
-        description: "What the collapsed group entry is called"
-      },
-      objectives: %Schema{type: :array, items: @objective_schema},
-      rewards: %Schema{type: :array, items: @reward_schema},
-      auto_claim: %Schema{type: :boolean, description: "Rewards grant on completion"},
-      prerequisite_quest_key: %Schema{
-        type: :string,
-        nullable: true,
-        description: "Quest key that must be completed first"
-      },
-      starts_at: %Schema{type: :string, format: "date-time", nullable: true},
-      ends_at: %Schema{type: :string, format: "date-time", nullable: true},
-      metadata: %Schema{type: :object, description: "Arbitrary metadata"},
-      progress: @progress_schema,
-      claimable: %Schema{type: :boolean, description: "Completed and waiting to be claimed"}
-    },
-    example: %{
-      id: "0198c0de-0001-7000-8000-000000000001",
-      key: "daily_win_3",
-      title: "Win 3 matches",
-      description: "Win three matches today",
-      icon_url: "",
-      sort_order: 0,
-      hidden: false,
-      reset: "daily",
-      reset_interval_days: nil,
-      category: "daily",
-      group_key: "",
-      group_size: 1,
-      group_title: "",
-      objectives: [%{event: "match_won", target: 3, params: %{}}],
-      rewards: [%{type: "currency", code: "gold", amount: 100}],
-      auto_claim: false,
-      prerequisite_quest_key: nil,
-      starts_at: nil,
-      ends_at: nil,
-      metadata: %{},
-      progress: %{
-        period_key: "2026-07-24",
-        objective_progress: %{"0" => 1},
-        status: "active",
-        completed_at: nil,
-        claimed_at: nil
-      },
-      claimable: false
-    }
-  }
-
-  @meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      count: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer},
-      has_more: %Schema{type: :boolean}
-    }
-  }
 
   # ---------------------------------------------------------------------------
   # GET /api/v1/me/quests
@@ -150,6 +16,7 @@ defmodule GamendWeb.Api.V1.QuestController do
 
   operation(:me,
     operation_id: "my_quests",
+    security: [%{"authorization" => []}],
     summary: "List my quests",
     description:
       "List active quests with the authenticated user's progress for the current " <>
@@ -163,18 +30,10 @@ defmodule GamendWeb.Api.V1.QuestController do
       page: [in: :query, schema: %Schema{type: :integer}, required: false],
       page_size: [in: :query, schema: %Schema{type: :integer}, required: false]
     ],
-    responses: %{
-      200 =>
-        {"Quest list", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @quest_schema},
-             meta: @meta_schema
-           }
-         }},
-      401 => {"Unauthorized", "application/json", %Schema{type: :object}}
-    }
+    responses: [
+      ok: {"Quest list", "application/json", QuestPage},
+      unauthorized: Schemas.error("Not authenticated")
+    ]
   )
 
   def me(conn, params) do
@@ -188,13 +47,10 @@ defmodule GamendWeb.Api.V1.QuestController do
         entries = Quests.list_user_quests(user_id, opts)
         total_count = Quests.count_user_quests(user_id, category: category, group: group)
 
-        json(conn, %{
-          data: Enum.map(entries, &serialize_entry/1),
-          meta: Pagination.meta(page, page_size, length(entries), total_count)
-        })
+        reply_page(conn, Enum.map(entries, &serialize_entry/1), page, page_size, total_count)
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -204,33 +60,24 @@ defmodule GamendWeb.Api.V1.QuestController do
 
   operation(:claim,
     operation_id: "claim_quest",
+    security: [%{"authorization" => []}],
     summary: "Claim a completed quest",
     description:
       "Claim the rewards of a completed quest for the current reset period. " <>
-        "Claiming is exactly-once: a repeated or concurrent claim returns " <>
-        "already_claimed and never double-pays.",
+        "Claiming is exactly-once: a repeated or concurrent claim answers 409 " <>
+        "`already_claimed` and never double-pays. A quest not yet completed answers " <>
+        "403 `not_completed`; a `before_quest_claim` hook's veto 403 `rejected`, its " <>
+        "reason in `message`.",
     parameters: [
       key: [in: :path, schema: %Schema{type: :string}, required: true]
     ],
-    responses: %{
-      200 =>
-        {"Claimed", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{
-               type: :object,
-               properties: %{
-                 progress: @progress_schema,
-                 rewards: %Schema{type: :array, items: @reward_schema}
-               }
-             }
-           }
-         }},
-      401 => {"Unauthorized", "application/json", %Schema{type: :object}},
-      404 => {"Not found", "application/json", %Schema{type: :object}},
-      409 => {"Not claimable", "application/json", %Schema{type: :object}}
-    }
+    responses: [
+      ok: {"Claimed", "application/json", QuestClaimResponse},
+      forbidden: Schemas.error("Not completed, or vetoed by a hook"),
+      not_found: Schemas.error("No quest with that key"),
+      conflict: Schemas.error("Already claimed"),
+      unauthorized: Schemas.error("Not authenticated")
+    ]
   )
 
   def claim(conn, %{"key" => key}) do
@@ -238,30 +85,28 @@ defmodule GamendWeb.Api.V1.QuestController do
       %{user_id: user_id} ->
         case Quests.claim(user_id, key) do
           {:ok, %{progress: progress, rewards: rewards}} ->
-            json(conn, %{
-              data: %{
-                progress: serialize_progress(progress),
-                rewards: Enum.map(rewards, &serialize_reward/1)
-              }
+            reply_data(conn, %{
+              progress: serialize_progress(progress),
+              rewards: Enum.map(rewards, &serialize_reward/1)
             })
 
           {:error, :quest_not_found} ->
-            conn |> put_status(:not_found) |> json(%{error: "quest_not_found"})
+            reply_error(conn, :not_found, "not_found")
 
           {:error, :not_completed} ->
-            conn |> put_status(:conflict) |> json(%{error: "not_completed"})
+            reply_error(conn, :forbidden, "not_completed")
 
           {:error, :already_claimed} ->
-            conn |> put_status(:conflict) |> json(%{error: "already_claimed"})
+            reply_error(conn, :conflict, "already_claimed")
 
+          # Anything else is the `before_quest_claim` hook's veto, in its words.
           {:error, reason} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: "claim_rejected", reason: inspect(reason)})
+            message = if is_binary(reason), do: reason, else: inspect(reason)
+            reply_error(conn, :forbidden, "rejected", message)
         end
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -271,6 +116,7 @@ defmodule GamendWeb.Api.V1.QuestController do
 
   operation(:index,
     operation_id: "list_quests",
+    security: [%{}, %{"authorization" => []}],
     summary: "List quests",
     description:
       "Public quest catalog: active, in-window quest definitions. If authenticated, " <>
@@ -280,17 +126,7 @@ defmodule GamendWeb.Api.V1.QuestController do
       page: [in: :query, schema: %Schema{type: :integer}, required: false],
       page_size: [in: :query, schema: %Schema{type: :integer}, required: false]
     ],
-    responses: %{
-      200 =>
-        {"Quest list", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @quest_schema},
-             meta: @meta_schema
-           }
-         }}
-    }
+    responses: [ok: {"Quest list", "application/json", QuestPage}]
   )
 
   operation(:stats,
@@ -298,17 +134,10 @@ defmodule GamendWeb.Api.V1.QuestController do
     summary: "Quest progress counts",
     description:
       "Aggregate quest progress. Public, and cached — treat the numbers as up to a minute old.",
-    responses: [
-      ok:
-        GamendWeb.ApiStatsSchema.response("Quest stats", [
-          :quests_total,
-          :completed,
-          :claimed
-        ])
-    ]
+    responses: [ok: {"Quest stats", "application/json", QuestStatsResponse}]
   )
 
-  def stats(conn, _params), do: json(conn, %{data: Quests.stats()})
+  def stats(conn, _params), do: reply_data(conn, Quests.stats())
 
   def index(conn, params) do
     case conn.assigns[:current_scope] do
@@ -333,10 +162,7 @@ defmodule GamendWeb.Api.V1.QuestController do
           |> Enum.take(page_size)
           |> Enum.map(fn quest -> %{quest: quest, progress: nil, claimable: false} end)
 
-        json(conn, %{
-          data: Enum.map(entries, &serialize_entry/1),
-          meta: Pagination.meta(page, page_size, length(entries), length(visible))
-        })
+        reply_page(conn, Enum.map(entries, &serialize_entry/1), page, page_size, length(visible))
     end
   end
 
@@ -367,6 +193,7 @@ defmodule GamendWeb.Api.V1.QuestController do
 
   operation(:user_quests,
     operation_id: "user_quests",
+    security: [%{}, %{"authorization" => []}],
     summary: "List a user's completed quests",
     description:
       "Publicly visible completions for a specific user, newest first — " <>
@@ -378,18 +205,10 @@ defmodule GamendWeb.Api.V1.QuestController do
       page: [in: :query, schema: %Schema{type: :integer}, required: false],
       page_size: [in: :query, schema: %Schema{type: :integer}, required: false]
     ],
-    responses: %{
-      200 =>
-        {"Completed quests", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @quest_schema},
-             meta: @meta_schema
-           }
-         }},
-      400 => {"Invalid user id", "application/json", %Schema{type: :object}}
-    }
+    responses: [
+      ok: {"Completed quests", "application/json", QuestPage},
+      bad_request: Schemas.error("`user_id` is not a UUID (invalid_id)")
+    ]
   )
 
   def user_quests(conn, %{"user_id" => user_id_str} = params) do
@@ -402,16 +221,15 @@ defmodule GamendWeb.Api.V1.QuestController do
         entries = Quests.list_user_completions(user_id, opts)
         total_count = Quests.count_user_completions(user_id, category: category)
 
-        json(conn, %{
-          data:
-            Enum.map(entries, fn %{quest: quest, progress: progress} ->
-              serialize_entry(%{quest: quest, progress: progress, claimable: false})
-            end),
-          meta: Pagination.meta(page, page_size, length(entries), total_count)
-        })
+        rows =
+          Enum.map(entries, fn %{quest: quest, progress: progress} ->
+            serialize_entry(%{quest: quest, progress: progress, claimable: false})
+          end)
+
+        reply_page(conn, rows, page, page_size, total_count)
 
       _ ->
-        conn |> put_status(:bad_request) |> json(%{error: "invalid_user_id"})
+        reply_error(conn, :bad_request, "invalid_id")
     end
   end
 
@@ -494,8 +312,8 @@ defmodule GamendWeb.Api.V1.QuestController do
 
   defp serialize_progress(progress) do
     %{
-      period_key: progress.period_key,
-      objective_progress: progress.objective_progress,
+      period_key: progress.period_key || "",
+      objective_progress: progress.objective_progress || %{},
       status: progress.status,
       completed_at: progress.completed_at,
       claimed_at: progress.claimed_at,

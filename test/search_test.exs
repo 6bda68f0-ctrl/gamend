@@ -30,7 +30,7 @@ defmodule GamendHost.SearchTest do
   # every path ever written — so a hit on it only counts when the theme really
   # declares that page.
   defp resolves?("/" <> _ = href) do
-    path = href |> String.split("?") |> hd()
+    path = href |> String.split(["?", "#"]) |> hd()
 
     case Phoenix.Router.route_info(GamendHost.Router, "GET", path, "") do
       %{plug: GamendWeb.PageController, plug_opts: :configured_page} -> configured_page?(path)
@@ -83,10 +83,58 @@ defmodule GamendHost.SearchTest do
     end
 
     test "every guide, under one heading", %{entries: entries} do
-      docs = group(entries, "Documentation")
+      guides = entries |> group("Documentation") |> Enum.reject(&String.contains?(&1.href, "#"))
 
-      assert length(docs) == length(Gamend.Content.list_docs())
-      assert Enum.any?(docs, &(&1.href == "/docs/theme"))
+      assert length(guides) == length(Gamend.Content.list_docs())
+      assert Enum.any?(guides, &(&1.href == "/docs/theme"))
+    end
+
+    test "every section of a guide, linking to its heading", %{entries: entries} do
+      usernames = Enum.find(entries, &(&1.href == "/docs/authentication#usernames"))
+
+      assert usernames.title == "Usernames"
+      assert usernames.group == "Documentation"
+      assert String.starts_with?(usernames.subtitle, "Authentication · ")
+    end
+
+    # The anchor is only worth linking if the rendered guide has that id.
+    test "every section anchor exists in its guide", %{entries: entries} do
+      missing =
+        for %{href: "/docs/" <> rest} <- entries,
+            [slug, id] <- [String.split(rest, "#", parts: 2)],
+            not String.contains?(Gamend.Content.doc_html(slug), ~s(id="#{id}")),
+            do: rest
+
+      assert missing == []
+    end
+
+    # A word only the body of a section holds, found through the section's
+    # opening sentence.
+    test "a section is found by the words it opens with", %{entries: entries} do
+      assert Enum.any?(entries, &(&1[:subtitle] && &1.subtitle =~ "utf8"))
+    end
+
+    test "sections come after the pages, so a guide stays above its own sections",
+         %{entries: entries} do
+      hrefs = Enum.map(entries, & &1.href)
+      first_section = Enum.find_index(hrefs, &String.contains?(&1, "#"))
+      last_page = hrefs |> Enum.reject(&String.contains?(&1, "#")) |> List.last()
+
+      assert first_section > Enum.find_index(hrefs, &(&1 == last_page))
+    end
+
+    test "the content rows are built once, not per palette open" do
+      assert entries() == entries()
+
+      calls = :counters.new(1, [])
+
+      Gamend.Content.memoize({__MODULE__, :probe}, fn ->
+        :counters.add(calls, 1, 1)
+        [:built]
+      end)
+
+      assert Gamend.Content.memoize({__MODULE__, :probe}, fn -> [:rebuilt] end) == [:built]
+      assert :counters.get(calls, 1) == 1
     end
 
     test "a guide carries its category as a keyword, so the category is searchable" do

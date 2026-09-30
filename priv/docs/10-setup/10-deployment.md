@@ -4,10 +4,11 @@ icon: hero-cloud-arrow-up
 
 # Deployment
 
-Deploy your own gamend instance using the starter repository. The quickest path is Docker Compose: clone, configure, and run. If you want a full Elixir host app that you can edit directly, see the Elixir App Starter guide below.
+Deploy your own gamend instance using the starter repository. The quickest path is Docker Compose: clone, configure, and run. If you want a full Elixir host app that you can edit directly, see the [Elixir App Starter](/docs/elixir-app-starter) guide.
 
-Two supported starting paths
+There are three supported starting paths:
 
+- [Download and run](/docs/standalone): one download and a project folder of your theme, pages and plugins, with nothing else to install (macOS on Apple silicon, Linux)
 - Docker starter: fastest path to running a server with minimal code changes
 - Elixir app starter: best path when you want to own the host app, routes, branding, and runtime policy in code
 
@@ -26,16 +27,16 @@ The repository is split by responsibility. Treat host as the runtime shell you c
 Put upstream shared schema changes in gamend_core, but put host-specific tables or columns in priv/repo/migrations at the repository root. The host migration command runs both core and host paths together.
 
 ```bash
-mix ecto.gen.migration add_custom_host_table
+mix ecto.gen.migration add_custom_host_table --migrations-path priv/repo/migrations
 
-mix ecto.migrate
+mix db.migrate
 ```
 
 Migration versions from core and host are sorted together, so give host migrations a normal timestamp and keep host-only schema/modules in the host project unless you intentionally want to upstream them into core.
 
 ## Clone the Docker starter repository
 
-The starter repo contains a pre-configured Docker Compose setup with the game server, PostgreSQL, and optional Redis for caching.
+The starter repo contains a pre-configured Docker Compose setup. The default `docker-compose.yml` runs one app service on SQLite, with the database file kept in `./db`. PostgreSQL and Redis are in `docker-compose.multi.yml`; see [PostgreSQL setup](/docs/postgresql-setup) and [Cache setup](/docs/cache-setup).
 
 ```bash
 git clone https://github.com/appsinacup/gamend_starter.git
@@ -54,8 +55,8 @@ Key variables to set:
 
 | Variable | Description |
 |---|---|
-| GAMEND_AUTH_SECRET_KEY_BASE | 64-byte hex secret for session signing. Generate with: mix phx.gen.secret |
-| GAMEND_DB_URL | PostgreSQL connection string (pre-configured for the Docker Compose DB) |
+| GAMEND_AUTH_SECRET_KEY_BASE | Secret of at least 64 characters for session signing. Generate with: mix phx.gen.secret |
+| GAMEND_DB_URL | PostgreSQL connection string. Only for a Postgres build (`GAMEND_DB_ADAPTER=postgres` build arg); the default SQLite compose needs none |
 | GAMEND_HTTP_HOST | Your public hostname (e.g. play.example.com) |
 | GAMEND_AUTH_GUARDIAN_SECRET_KEY | Secret for signing JWT API tokens |
 
@@ -85,9 +86,9 @@ docker compose logs -f app
 
 - Enable HTTPS with automatic certificate renewal (see below)
 - Set GAMEND_HTTP_HOST to your actual domain
-- Configure OAuth providers for social login (see provider guides above)
+- Configure OAuth providers for social login (see the [Authentication](/docs/authentication) guides)
 - Enable email delivery via SMTP for password resets and notifications
-- Set up Redis for distributed caching when running multiple instances (see Scaling guide)
+- Set up Redis for distributed caching when running multiple instances (see [Scaling](/docs/scaling))
 - Review rate limiting settings for your expected traffic
 
 ## Data retention
@@ -96,7 +97,7 @@ A sweep runs every 6 hours and prunes tables that would otherwise grow forever.
 Each class has its own window; `0` keeps that class forever. The current values
 and their variables are in the [Settings](/docs/settings) guide
 under **Retention**; the last run and its per-class counts are on
-Admin -> System, which can also sweep on demand.
+Admin -> Retention, which can also sweep on demand.
 
 Two rules worth knowing before you tune them:
 
@@ -122,10 +123,12 @@ provider) are only swept if you opt in with
 `GAMEND_RETENTION_INACTIVE_USERS_DAYS`, which defaults to `0`. If you turn it
 on, `730` matches what Google and Microsoft use for consumer accounts. A warning
 email goes out `GAMEND_RETENTION_INACTIVE_USERS_WARN_DAYS` (default `30`) before
-the deletion date, and an account is never deleted until that warning has
-actually been delivered - a mail outage postpones the deletion rather than
-performing a silent one. Signing in resets the clock and invalidates the
-warning.
+the deletion date, and an account with an email address is never deleted until
+that warning has actually been delivered - a mail outage postpones the deletion
+rather than performing a silent one. Signing in resets the clock and invalidates
+the warning. An account with no email address (a linked provider only) cannot be
+warned, so it is deleted at the cutoff with no notice. A warn window of `0` does
+the same for every account.
 
 Two kinds of account are never swept on either window: admins, and anyone
 holding a purchase or entitlement. Deleting an account also deletes its
@@ -135,19 +138,22 @@ to cascade.
 ## HTTPS
 
 Gamend terminates TLS itself through Bandit, with no nginx or reverse proxy. Point
-it at a certificate and it serves HTTPS on 443, keeping HTTP on 4000 for ACME
-challenges. Erlang's `:ssl` re-reads the files from disk, so a renewal takes
-effect without a restart.
+it at a certificate and it serves HTTPS on 443. The plain HTTP listener
+(`GAMEND_HTTP_PORT`, default 4000) stays up to answer ACME challenges. Let's Encrypt only
+ever connects on port 80, so port 80 must reach that listener: set
+`GAMEND_HTTP_PORT=80`, or forward port 80 to 4000. Erlang's `:ssl` re-reads the
+files from disk, so a renewal takes effect without a restart.
 
 | Variable | Purpose |
 |---|---|
 | `GAMEND_TLS_CERTFILE` | Path to `fullchain.pem` (certificate + CA chain) |
 | `GAMEND_TLS_KEYFILE` | Path to `privkey.pem` |
-| `GAMEND_TLS_FORCE` | `true` redirects HTTP to HTTPS and enables HSTS |
+| `GAMEND_TLS_FORCE` | `true` redirects HTTP to HTTPS. Off unless set. HSTS is sent on every HTTPS response either way |
 | `GAMEND_TLS_ACME_WEBROOT` | Directory the ACME challenge is served from |
 
-Get a certificate with the server already running on HTTP, so certbot can
-validate over the webroot:
+Get a certificate with the server already running on HTTP and
+`GAMEND_TLS_ACME_WEBROOT=/var/www/acme` set (the challenge is only served when
+that or `GAMEND_TLS_CERTFILE` is set), so certbot can validate over the webroot:
 
 ```bash
 sudo mkdir -p /var/www/acme
@@ -177,7 +183,7 @@ When running in Docker, mount the certificate directory and ACME challenge direc
 services:
   app:
     ports:
-      - "4000:4000"
+      - "80:4000"
       - "443:443"
     environment:
       GAMEND_HTTP_HOST: play.example.com
@@ -209,7 +215,7 @@ sudo certbot certonly \
   --logs-dir ./certbot/logs
 
 # 4. Restart to enable HTTPS (cert files now exist)
-docker compose up -d
+docker compose restart app
 
 # 5. Set up auto-renewal cron on the host (every 12 hours)
 (crontab -l 2>/dev/null; echo "0 */12 * * * certbot renew --config-dir $(pwd)/certbot/conf --work-dir $(pwd)/certbot/work --logs-dir $(pwd)/certbot/logs --quiet") | crontab -
@@ -224,9 +230,16 @@ Renewed certs are picked up automatically, with no container restart needed.
 | GAMEND_TLS_CERTFILE | Path to fullchain.pem (certificate + CA chain) | — |
 | GAMEND_TLS_KEYFILE | Path to privkey.pem | — |
 | GAMEND_TLS_PORT | Port for HTTPS listener | 443 |
-| GAMEND_TLS_FORCE | Redirect HTTP → HTTPS and enable HSTS | true when GAMEND_TLS_CERTFILE is set |
-| GAMEND_TLS_ACME_WEBROOT | Webroot directory for Let's Encrypt HTTP-01 challenges (same as certbot --webroot-path) | /var/www/acme |
+| GAMEND_TLS_FORCE | Redirect HTTP → HTTPS. HSTS is sent on every HTTPS response whether or not this is set | off |
+| GAMEND_TLS_ACME_WEBROOT | Webroot directory for Let's Encrypt HTTP-01 challenges (same as certbot --webroot-path) | /var/www/acme when GAMEND_TLS_CERTFILE is set |
 
-Port 443 access
+### Port 443 access
 
-Binding to port 443 requires root access or Linux capabilities. In Docker this works by default. On bare metal, use: sudo setcap 'cap_net_bind_service=+ep' $(which beam.smp), or use iptables to redirect port 443 to a higher port.
+Binding to a port below 1024 (443, or 80 for ACME) requires root access or Linux capabilities. In Docker this works by default. On bare metal, grant the capability to `beam.smp`. It is not on `PATH`, so `which` does not find it; it lives under `erts-*/bin/` in the Erlang root (for a release, in the release directory):
+
+```bash
+ERL_ROOT=$(erl -noshell -eval 'io:format("~s", [code:root_dir()]), halt().')
+sudo setcap 'cap_net_bind_service=+ep' "$ERL_ROOT"/erts-*/bin/beam.smp
+```
+
+Or use iptables to redirect port 443 to a higher port.

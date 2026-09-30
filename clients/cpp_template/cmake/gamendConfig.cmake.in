@@ -1,0 +1,31 @@
+# find_package(gamend): the SDK as it was built, and the libraries it was
+# built against.
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+find_dependency(nlohmann_json 3.11)
+if(@GAMEND_WITH_CURL@)
+  find_dependency(CURL)
+endif()
+if(@GAMEND_WITH_IXWEBSOCKET@)
+  if(@GAMEND_FETCHED_MBEDTLS@)
+    # IXWebSocket links the mbedTLS installed with the SDK, and its own
+    # package does not look for it.
+    find_dependency(MbedTLS CONFIG)
+  endif()
+  find_dependency(ixwebsocket CONFIG)
+endif()
+if(@GAMEND_WITH_WEBRTC@)
+  # A static libdatachannel links OpenSSL, and its own package does not look
+  # for it. Look where the SDK's build found it; one without it needs none.
+  set(gamend_openssl_root "@gamend_openssl_root@")
+  if(NOT OPENSSL_ROOT_DIR AND gamend_openssl_root)
+    set(OPENSSL_ROOT_DIR "${gamend_openssl_root}")
+  endif()
+  find_package(OpenSSL QUIET)
+  find_dependency(LibDataChannel CONFIG)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/gamendTargets.cmake")
+check_required_components(gamend)

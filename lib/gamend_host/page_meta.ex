@@ -8,6 +8,8 @@ defmodule GamendHost.PageMeta do
   markdown. The mechanics are `GamendWeb.PageMeta`.
   """
 
+  @behaviour GamendWeb.PageMeta.Provider
+
   import GamendWeb.PageMeta
 
   alias Gamend.Content

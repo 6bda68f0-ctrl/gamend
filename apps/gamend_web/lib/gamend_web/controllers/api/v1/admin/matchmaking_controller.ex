@@ -3,40 +3,17 @@ defmodule GamendWeb.Api.V1.Admin.MatchmakingController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.Matchmaking
-  alias GamendWeb.Pagination
+  alias GamendWeb.Schemas
+
+  alias GamendWeb.Schemas.{
+    AdminMatchmakingStatsResponse,
+    AdminMatchmakingTicketPage,
+    AdminMatchmakingTicketResponse
+  }
+
   alias OpenApiSpex.Schema
 
   tags(["Admin – Matchmaking"])
-
-  @ticket_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      user_id: %Schema{type: :string, format: :uuid},
-      status: %Schema{type: :string, enum: ["queued", "matched", "cancelled"]},
-      match_params: %Schema{type: :object},
-      min_players: %Schema{type: :integer},
-      max_players: %Schema{type: :integer},
-      timeout_ms: %Schema{type: :integer},
-      queued_at: %Schema{type: :string, format: "date-time"},
-      matched_at: %Schema{type: :string, format: "date-time", nullable: true},
-      match_id: %Schema{type: :string, format: :uuid, nullable: true}
-    }
-  }
-
-  @meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      count: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer},
-      has_more: %Schema{type: :boolean}
-    }
-  }
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
 
   operation(:index,
     operation_id: "admin_list_matchmaking_tickets",
@@ -53,17 +30,9 @@ defmodule GamendWeb.Api.V1.Admin.MatchmakingController do
       page_size: [in: :query, schema: %Schema{type: :integer, default: 25}, required: false]
     ],
     responses: [
-      ok:
-        {"Tickets", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @ticket_schema},
-             meta: @meta_schema
-           }
-         }},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Tickets", "application/json", AdminMatchmakingTicketPage},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -80,10 +49,7 @@ defmodule GamendWeb.Api.V1.Admin.MatchmakingController do
     tickets = Matchmaking.list_tickets(filters)
     total = Matchmaking.count_tickets(filters)
 
-    json(conn, %{
-      data: Enum.map(tickets, &serialize/1),
-      meta: Pagination.meta(page, page_size, length(tickets), total)
-    })
+    reply_page(conn, Enum.map(tickets, &serialize/1), page, page_size, total)
   end
 
   operation(:delete,
@@ -94,22 +60,20 @@ defmodule GamendWeb.Api.V1.Admin.MatchmakingController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok:
-        {"Cancelled", "application/json",
-         %Schema{type: :object, properties: %{data: @ticket_schema}}},
-      not_found: {"Unknown or not queued", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Cancelled", "application/json", AdminMatchmakingTicketResponse},
+      not_found: Schemas.error("Unknown or not queued"),
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
   def delete(conn, %{"id" => id}) do
     case Matchmaking.cancel_ticket(id) do
       {:ok, ticket} ->
-        json(conn, %{data: serialize(ticket)})
+        reply_data(conn, serialize(ticket))
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
     end
   end
 
@@ -118,29 +82,14 @@ defmodule GamendWeb.Api.V1.Admin.MatchmakingController do
     summary: "Matchmaking statistics (admin)",
     security: [%{"authorization" => []}],
     responses: [
-      ok:
-        {"Stats", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{
-               type: :object,
-               properties: %{
-                 queued: %Schema{type: :integer},
-                 matched: %Schema{type: :integer},
-                 cancelled: %Schema{type: :integer},
-                 queues: %Schema{type: :array, items: %Schema{type: :object}}
-               }
-             }
-           }
-         }},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Stats", "application/json", AdminMatchmakingStatsResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
   def stats(conn, _params) do
-    json(conn, %{data: Matchmaking.stats()})
+    reply_data(conn, Matchmaking.stats())
   end
 
   defp serialize(ticket) do
@@ -148,13 +97,13 @@ defmodule GamendWeb.Api.V1.Admin.MatchmakingController do
       id: ticket.id,
       user_id: ticket.user_id,
       status: ticket.status,
-      match_params: ticket.match_params,
+      match_params: ticket.match_params || %{},
       min_players: ticket.min_players,
       max_players: ticket.max_players,
       timeout_ms: ticket.timeout_ms,
       queued_at: ticket.queued_at,
       matched_at: ticket.matched_at,
-      match_id: ticket.match_id
+      match_id: ticket.match_id || ""
     }
   end
 end

@@ -50,7 +50,7 @@ defmodule Gamend.Repo do
   @spec durable_transaction((-> result), keyword()) :: {:ok, result} | {:error, term()}
         when result: term()
   def durable_transaction(fun, opts \\ []) when is_function(fun, 0) do
-    transaction(
+    Gamend.AfterCommit.transaction(
       fn ->
         if postgres?() do
           query!("SET LOCAL synchronous_commit = on", [])
@@ -68,6 +68,55 @@ defmodule Gamend.Repo do
   defp postgres? do
     __adapter__() == Module.concat([Ecto, Adapters, Postgres])
   end
+
+  @doc """
+  Runs `fun`, answering `{:error, reason}` when it violates a foreign key --
+  however the adapter reports it.
+
+  The contexts check the referenced row exists first
+  (`Gamend.Accounts.user_exists?/1`), but the row can still be deleted between
+  that check and the write. This closes that window: the race answers like the
+  check would have, instead of a 500 or a changeset.
+
+  The adapters report the violation differently, which is why both forms are
+  handled here:
+
+    * SQLite, the default, does not say *which* constraint an INSERT violated,
+      so `Ecto.Changeset.foreign_key_constraint/2` cannot match and Ecto raises
+      `Ecto.ConstraintError`.
+    * Postgres names the constraint, so the changeset declaration matches and
+      `fun` returns `{:error, changeset}` -- or `{:error, {tag, changeset}}`
+      from a context that tags its failures -- with a `constraint: :foreign`
+      error on the key.
+
+  Handling only the first answered `:user_not_found` on SQLite and a
+  validation changeset on Postgres for the same race. Any other constraint
+  error is re-raised, and any other error result is returned as it was.
+  """
+  @spec rescue_foreign_key(term(), (-> result)) :: result | {:error, term()} when result: term()
+  def rescue_foreign_key(reason, fun) when is_function(fun, 0) do
+    case fun.() do
+      {:error, error} = result ->
+        if foreign_key_error?(error), do: {:error, reason}, else: result
+
+      result ->
+        result
+    end
+  rescue
+    error in Ecto.ConstraintError ->
+      if error.type == :foreign_key,
+        do: {:error, reason},
+        else: reraise(error, __STACKTRACE__)
+  end
+
+  defp foreign_key_error?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_message, opts}} -> opts[:constraint] == :foreign end)
+  end
+
+  defp foreign_key_error?({_tag, %Ecto.Changeset{} = changeset}),
+    do: foreign_key_error?(changeset)
+
+  defp foreign_key_error?(_error), do: false
 
   @doc ~S"""
   Escapes `LIKE` wildcards (`%`, `_`) and the escape character (`\`) in

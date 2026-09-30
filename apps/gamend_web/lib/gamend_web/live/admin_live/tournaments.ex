@@ -3,6 +3,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
 
   alias Gamend.Tournaments
   alias Gamend.Tournaments.Tournament
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -59,7 +60,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
                     <th>State</th>
                     <th>Starts</th>
                     <th>Entries</th>
-                    <th>Bracket</th>
+                    <th>Bracket / Round window</th>
                     <th>Recur</th>
                     <th></th>
                   </tr>
@@ -195,7 +196,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
                   data-confirm="Cancel this tournament?"
                   class="btn btn-sm btn-error btn-outline"
                 >
-                  Cancel
+                  Cancel tournament
                 </button>
                 <button
                   :if={@detail.tournament.state == "cancelled"}
@@ -347,14 +348,11 @@ defmodule GamendWeb.AdminLive.Tournaments do
     {:noreply, socket |> assign(:state_filter, state) |> assign(:page, 1) |> reload()}
   end
 
-  def handle_event("prev_page", _params, socket) do
-    {:noreply, socket |> assign(:page, max(socket.assigns.page - 1, 1)) |> reload()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload()}
 
-  def handle_event("next_page", _params, socket) do
-    page = min(socket.assigns.page + 1, socket.assigns.total_pages)
-    {:noreply, socket |> assign(:page, page) |> reload()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload()}
 
   def handle_event("new_tournament", _params, socket) do
     changeset =
@@ -458,14 +456,21 @@ defmodule GamendWeb.AdminLive.Tournaments do
 
   def handle_event("detail_next", _params, socket) do
     d = socket.assigns.detail
-    {:noreply, load_detail(socket, d.tournament.id, min(d.entry_page + 1, d.entry_pages))}
+    # Floored at 1: a tournament with no entries has 0 pages.
+    {:noreply, load_detail(socket, d.tournament.id, min(d.entry_page + 1, max(d.entry_pages, 1)))}
   end
 
   def handle_event("select_bracket", %{"index" => index}, socket) do
     d = socket.assigns.detail
-    index = String.to_integer(index)
-    socket = assign(socket, :detail, Map.put(d, :selected_bracket, index))
-    {:noreply, load_detail(socket, d.tournament.id, d.entry_page)}
+
+    case Gamend.Parse.integer(index) do
+      nil ->
+        {:noreply, socket}
+
+      index ->
+        socket = assign(socket, :detail, Map.put(d, :selected_bracket, index))
+        {:noreply, load_detail(socket, d.tournament.id, d.entry_page)}
+    end
   end
 
   def handle_event("force_reopen", _params, socket) do
@@ -501,7 +506,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
     socket
     |> assign(:tournaments, Tournaments.list_tournaments(opts))
     |> assign(:count, count)
-    |> assign(:total_pages, max(ceil_div(count, socket.assigns.page_size), 1))
+    |> assign(:total_pages, max(LiveHelpers.total_pages(count, socket.assigns.page_size), 1))
   end
 
   @detail_page_size 25
@@ -542,7 +547,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
           entries: entries,
           entry_count: entry_count,
           entry_page: page,
-          entry_pages: ceil_div(entry_count, @detail_page_size),
+          entry_pages: LiveHelpers.total_pages(entry_count, @detail_page_size),
           brackets: brackets,
           selected_bracket: selected_bracket,
           matches: matches,
@@ -578,8 +583,6 @@ defmodule GamendWeb.AdminLive.Tournaments do
       _ -> user_id
     end
   end
-
-  defp ceil_div(num, den), do: div(num + den - 1, den)
 
   defp refresh_detail(socket) do
     case socket.assigns.detail do

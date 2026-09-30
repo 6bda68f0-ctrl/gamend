@@ -13,7 +13,7 @@ defmodule GamendWeb.HostLayouts do
 
   @locale_labels %{
     "ar" => "العربية",
-    "bg" => "български език",
+    "bg" => "Български",
     "cs" => "Čeština",
     "da" => "Dansk",
     "de" => "Deutsch",
@@ -121,6 +121,10 @@ defmodule GamendWeb.HostLayouts do
   attr :flush, :boolean,
     default: false,
     doc: "when true, render content edge-to-edge with no main wrapper, padding, or footer"
+
+  attr :wide, :boolean,
+    default: false,
+    doc: "when true, the content column widens for a page with its own side columns"
 
   attr :background_icons, :any,
     default: nil,
@@ -416,7 +420,15 @@ defmodule GamendWeb.HostLayouts do
   # is global and only re-read on deploy, and `:current_path` is kept in step
   # by the `:set_current_path` hook in `GamendWeb.UserAuth`, so a `push_patch`
   # to another URL does change the nav highlight.
-  @shell_assign_inputs [:background_icons, :conn, :current_path, :current_scope, :flush, :theme]
+  @shell_assign_inputs [
+    :background_icons,
+    :conn,
+    :current_path,
+    :current_scope,
+    :flush,
+    :theme,
+    :wide
+  ]
 
   # The assigns `HostLayoutShell.app/1` renders from, derived from the handful
   # of attrs `app/1` takes. Public so the change-tracking contract above can be
@@ -575,29 +587,29 @@ defmodule GamendWeb.HostLayouts do
   # File IO also crosses onto a dirty scheduler, so the cost under load is
   # worse than the ~8us it measures on an idle box.
   #
-  # The consequence is that dropping a `theme.css` into a running release is
-  # not picked up until restart, which is the same rule the rest of the static
-  # pipeline already follows.
+  # The consequence is that dropping a `theme.css` into a running release, or
+  # into a project's static overlay, is not picked up until the static files
+  # are reloaded (`GamendWeb.ProjectStatic.reload/0`, on a theme reload) or the
+  # node restarts, which is the rule the rest of the static pipeline follows.
   defp host_theme_css_path do
     key = {__MODULE__, :host_theme_css_path}
+    generation = GamendWeb.ProjectStatic.generation()
 
     case :persistent_term.get(key, :miss) do
-      :miss ->
-        path = compute_host_theme_css_path()
-        :persistent_term.put(key, path)
+      {^generation, path} ->
         path
 
-      path ->
+      _ ->
+        path = compute_host_theme_css_path()
+        :persistent_term.put(key, {generation, path})
         path
     end
   end
 
+  # Through the resolver, so a project's own `theme.css` in its static overlay
+  # counts as well as the host app's.
   defp compute_host_theme_css_path do
-    host_static_app = Application.get_env(:gamend_web, :host_static_app, :gamend_web)
-    host_static_dir = Application.app_dir(host_static_app, "priv/static")
-    theme_css_rel = String.trim_leading(@host_theme_css_path, "/")
-
-    if File.exists?(Path.join(host_static_dir, theme_css_rel)) do
+    if GamendWeb.ProjectStatic.path_for(@host_theme_css_path) do
       @host_theme_css_path
     end
   end

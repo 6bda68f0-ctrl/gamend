@@ -7,28 +7,11 @@ defmodule GamendWeb.Api.V1.Admin.PushController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.Push
-  alias GamendWeb.Pagination
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{AdminPushTokenPage, OkResponse}
   alias OpenApiSpex.Schema
 
   tags(["Admin – Push"])
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
-
-  @push_token_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      user_id: %Schema{type: :string, format: :uuid},
-      user_name: %Schema{type: :string},
-      token: %Schema{type: :string},
-      platform: %Schema{type: :string, enum: ["android", "ios", "web"]},
-      provider: %Schema{type: :string, enum: ["fcm", "apns"]},
-      device_id: %Schema{type: :string},
-      disabled_at: %Schema{type: :string, format: :"date-time", nullable: true},
-      last_used_at: %Schema{type: :string, format: :"date-time", nullable: true},
-      inserted_at: %Schema{type: :string, format: :"date-time"}
-    }
-  }
 
   operation(:index,
     operation_id: "admin_list_push_tokens",
@@ -55,16 +38,8 @@ defmodule GamendWeb.Api.V1.Admin.PushController do
       page_size: [in: :query, schema: %Schema{type: :integer, default: 25}, required: false]
     ],
     responses: [
-      ok:
-        {"Tokens", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @push_token_schema},
-             meta: %Schema{type: :object}
-           }
-         }},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Tokens", "application/json", AdminPushTokenPage},
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -75,10 +50,7 @@ defmodule GamendWeb.Api.V1.Admin.PushController do
     tokens = Push.list_all_tokens(filters, page: page, page_size: page_size)
     total = Push.count_all_tokens(filters)
 
-    json(conn, %{
-      data: Enum.map(tokens, &serialize/1),
-      meta: Pagination.meta(page, page_size, length(tokens), total)
-    })
+    reply_page(conn, Enum.map(tokens, &serialize/1), page, page_size, total)
   end
 
   operation(:delete,
@@ -89,16 +61,16 @@ defmodule GamendWeb.Api.V1.Admin.PushController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted token", "application/json", @push_token_schema},
-      not_found: {"Unknown token", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      not_found: Schemas.error("Unknown token"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
   def delete(conn, %{"id" => id}) do
     case Gamend.UUIDv7.cast_or_nil(id) && Push.admin_delete_token(id) do
-      {:ok, token} -> json(conn, serialize(token))
-      _ -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
+      {:ok, _token} -> reply_ok(conn)
+      _ -> reply_error(conn, :not_found, "not_found")
     end
   end
 
@@ -126,12 +98,11 @@ defmodule GamendWeb.Api.V1.Admin.PushController do
          }
        }},
     responses: [
-      ok:
-        {"Queued", "application/json",
-         %Schema{type: :object, properties: %{status: %Schema{type: :string}}}},
-      bad_request: {"Invalid message", "application/json", @error_schema},
-      not_found: {"Unknown user", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Queued", "application/json", OkResponse},
+      bad_request: Schemas.error("No user_id (missing_param)"),
+      unprocessable_entity: Schemas.error("Invalid message (validation_failed)"),
+      not_found: Schemas.error("Unknown user"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -143,20 +114,18 @@ defmodule GamendWeb.Api.V1.Admin.PushController do
 
       case Push.send_to_user(user_id, message) do
         :ok ->
-          json(conn, %{status: "queued"})
+          reply_ok(conn)
 
         {:error, errors} ->
-          conn
-          |> put_status(:bad_request)
-          |> json(%{error: "invalid_message", errors: errors})
+          unprocessable(conn, errors)
       end
     else
-      _ -> conn |> put_status(:not_found) |> json(%{error: "user_not_found"})
+      _ -> reply_error(conn, :not_found, "user_not_found")
     end
   end
 
   def send(conn, _params) do
-    conn |> put_status(:bad_request) |> json(%{error: "missing_user_id"})
+    reply_error(conn, :bad_request, "missing_param", "user_id is required")
   end
 
   defp serialize(token) do
@@ -175,7 +144,7 @@ defmodule GamendWeb.Api.V1.Admin.PushController do
   end
 
   defp user_name(%{user: %Gamend.Accounts.User{} = user}),
-    do: user.display_name || user.username
+    do: Gamend.Accounts.display_name(user)
 
-  defp user_name(_), do: nil
+  defp user_name(_), do: ""
 end

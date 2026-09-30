@@ -18,6 +18,9 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
   ELIXIR_VERSION: "1.20.1"
   OTP_VERSION: "29.0.2"
+  # Linked statically into the server binaries (rel/scripts/static-deps.sh).
+  OPENSSL_VERSION: "3.5.8"
+  LIBSRTP_VERSION: "2.7.0"
 
 jobs:
   build:
@@ -481,6 +484,11 @@ jobs:
         working-directory: apps/gamend_web
         run: MIX_ENV=test mix deps.get
 
+      # `mix test` at the root also runs the core's own suite.
+      - name: Install core test dependencies
+        working-directory: apps/gamend_core
+        run: MIX_ENV=test mix deps.get
+
       - name: Compile
         run: MIX_ENV=test mix compile --warnings-as-errors
 
@@ -552,6 +560,11 @@ jobs:
         working-directory: apps/gamend_web
         run: MIX_ENV=test mix deps.get
 
+      # `mix test` at the root also runs the core's own suite.
+      - name: Install core test dependencies
+        working-directory: apps/gamend_core
+        run: MIX_ENV=test mix deps.get
+
       - name: Compile
         run: MIX_ENV=test mix compile --warnings-as-errors
 
@@ -596,9 +609,7 @@ jobs:
 
   publish-js-sdk:
     name: Publish JS SDK
-    # Disable it temporarily
-    if: false
-    #if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -650,6 +661,22 @@ jobs:
           # so the cache key is computed correctly.
           cache-dependency-path: clients/package-lock.json
 
+      # Trusted publishing needs npm >= 11.5.1; Node 24 originally shipped
+      # 11.3.0. An older CLI does not fail loudly - it ignores the OIDC
+      # environment, falls back to looking for a token, and dies with
+      # ENEEDAUTH, which reads like a broken trusted publisher rather than a
+      # stale CLI. Pin the floor so that guess is never needed.
+      - name: Ensure npm supports trusted publishing (OIDC)
+        run: |
+          set -euo pipefail
+          need=11.5.1
+          have=$(npm --version)
+          if [ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]; then
+            echo "npm ${have} is older than ${need}; upgrading."
+            npm install -g npm@latest
+          fi
+          echo "npm $(npm --version)"
+
       - name: Set up Elixir helpers
         working-directory: /tmp
         run: |
@@ -675,35 +702,89 @@ jobs:
           npm ci
           npm run generate
       
-      - name: Ensure license is included for JS SDK
+      - name: Stamp package metadata and runtime dependencies
+        working-directory: clients/javascript
         run: |
-          cp LICENSE clients/javascript/LICENSE
-          jq '.license = "MIT"' clients/javascript/package.json > clients/javascript/package.json.tmp && mv clients/javascript/package.json.tmp clients/javascript/package.json
+          set -euo pipefail
+          cp ../../LICENSE LICENSE
 
-      - name: Update package.json with repository field (https://github.com/appsinacup/gamend.git)
-        run: |
-          REPO_FIELD='"repository": { "type": "git", "url": "git+https://github.com/appsinacup/gamend.git" },'
-          jq ". + { $REPO_FIELD }" clients/javascript/package.json > clients/javascript/package.json.tmp && mv clients/javascript/package.json.tmp clients/javascript/package.json
+          # The generator emits neither field, and trusted publishing requires
+          # repository.url to match the GitHub repository exactly.
+          jq '.license = "MIT"
+              | .repository = {"type":"git","url":"git+https://github.com/appsinacup/gamend.git"}' \
+            package.json > tmp && mv tmp package.json
 
-      - name: Add phoenix as a dependency
+          # The handcrafted realtime code ships in the bundle but is invisible
+          # to the generator, so its dependencies have to be added here:
+          # realtime.js imports phoenix, and gamend_realtime.pb.js imports
+          # protobufjs. Omitting protobufjs is what made 1.0.0 throw
+          # "Cannot find module 'protobufjs/minimal.js'" on a clean install.
+          #
+          # Resolved at publish time instead of pinned, so a release never
+          # ships dependencies that are already months stale. The smoke test
+          # below is what makes that safe.
+          for dep in superagent phoenix protobufjs; do
+            latest=$(npm view "$dep" version)
+            echo "  ${dep} -> ^${latest}"
+            jq --arg d "$dep" --arg v "^${latest}" '.dependencies[$d] = $v' \
+              package.json > tmp && mv tmp package.json
+          done
+
+          # The generator lists @babel/cli as a runtime dependency. It is only
+          # needed to build, and `prepare` does not run for consumers
+          # installing from the registry, so it is weight in every install.
+          jq '.devDependencies["@babel/cli"] = (.dependencies["@babel/cli"] // "^7.0.0")
+              | del(.dependencies["@babel/cli"])' \
+            package.json > tmp && mv tmp package.json
+
+          jq '{name, license, repository, dependencies}' package.json
+
+      # The deps just changed under it, so the tree built during generation is
+      # stale. Reinstall and rebuild before anything inspects the bundle.
+      - name: Install stamped dependencies and rebuild
+        working-directory: clients/javascript
         run: |
-          jq '.dependencies.phoenix = ">=1.7.0"' \
-            clients/javascript/package.json > clients/javascript/package.json.tmp \
-            && mv clients/javascript/package.json.tmp clients/javascript/package.json
+          npm install --no-audit --no-fund
+          npm run build
+
+      # Catches the 1.0.0 failure mode directly: a module the bundle requires
+      # that nothing declares. Green builds and green tests both missed it,
+      # because the break only appears in a clean consumer install.
+      - name: Verify the bundle declares every module it requires
+        run: node clients/check_shipped_deps.js
+
+      # A real HTTP round trip through the generated client plus a load of the
+      # realtime code. This is the gate that lets the dependency versions above
+      # float to latest without risking a silent break.
+      - name: Smoke-test the built package
+        run: node clients/smoke_package.js
 
       - name: Apply version and publish
         run: |
           cd clients/javascript
-          echo "Publishing package with version=${{ steps.version.outputs.version }}"
-          npm version ${{ steps.version.outputs.version }} --no-git-tag-version
-          # Trusted Publishing (OIDC) — npm 11+ auto-detects the OIDC
-          # environment and authenticates without tokens. Provenance
-          # attestations are generated automatically.
-          npm publish --access public
+          PKG=$(jq -r .name package.json)
+          echo "Publishing ${PKG} with version=${APP_VERSION}"
+          npm version "${APP_VERSION}" --no-git-tag-version
+          # Same re-publish guard as the Hex jobs: npm rejects a version that
+          # already exists, so a workflow re-run on the same commit would fail
+          # here for no reason. The registry answers 200 for a published
+          # version and 404 otherwise (the scope's "/" is URL-encoded).
+          if curl -sfo /dev/null "https://registry.npmjs.org/${PKG/\//%2f}/${APP_VERSION}"; then
+            echo "${PKG} ${APP_VERSION} is already on npm - skipping (workflow re-run on the same commit)."
+          else
+            # Trusted Publishing (OIDC): npm >= 11.5.1 detects the GitHub
+            # Actions OIDC environment and authenticates without a token.
+            # Provenance attestations are generated automatically. The
+            # trusted publisher on npmjs.com must name this repository
+            # (appsinacup/gamend) and this file (build-and-check.yml), and
+            # must have direct "npm publish" permission enabled - new
+            # configurations default to stage-only.
+            npm publish --access public
+          fi
 
   build-godot-sdk:
     runs-on: ubuntu-latest
-    name: Generate Godot client and upload addons
+    name: Generate the Godot, Balaur and C++ SDKs
 
     steps:
       - name: Checkout repository
@@ -758,26 +839,239 @@ jobs:
           cd clients
           ./generate_godot.sh
 
+      - name: Check the Balaur SDK is current
+        # generate_godot.sh just wrote the document it is generated from.
+        run: python3 clients/sdkgen balaur --check
+
+      - name: Stamp the version into the Balaur SDK
+        env:
+          APP_VERSION: ${{ env.APP_VERSION }}
+        run: clients/generate_balaur.sh
+
+      # cpp_sdk/ is not committed: the jobs below build and test this copy,
+      # and release-cpp-sdk publishes it.
+      - name: Generate the C++ SDK
+        env:
+          APP_VERSION: ${{ env.APP_VERSION }}
+        run: clients/generate_cpp.sh
+
+      - name: Upload the C++ SDK
+        uses: actions/upload-artifact@v7
+        with:
+          name: cpp_sdk
+          path: cpp_sdk
+
       - name: Upload addons zip
         uses: actions/upload-artifact@v7
         with:
           name: godot_addons
           path: godot_addons
 
+      - name: Upload the Balaur addon
+        uses: actions/upload-artifact@v7
+        with:
+          name: balaur_addons
+          path: balaur_addons
+
       - name: Archive
         shell: sh
         run: |
           zip -r "godot_addons.zip" godot_addons
+          zip -r "balaur_addons.zip" balaur_addons
+
+      # release-cpp-sdk adds gamend-cpp-sdk.tar.gz to this release once the
+      # C++ builds and the conformance run pass.
       - name: Release
         if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
         uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
-          name: Gamend Godot SDK Nightly
+          name: Gamend SDKs Nightly
+          body: |
+            The Gamend client SDKs, built from the latest `main` (version ${{ env.APP_VERSION }}):
+
+            - **Godot**: `godot_addons.zip`. Copy `addons/gamend` into your project, or install it from the [Godot Asset Library](https://godotengine.org/asset-library/asset/4510). [Guide](https://gamend.org/docs/godot-sdk)
+            - **Rune (Balaur)**: `balaur_addons.zip`, Rune scripts for the Balaur engine. Copy `addons/gamend` into your Balaur project; its `README.md` lists every module.
+            - **C++**: `gamend-cpp-sdk.tar.gz`. Fetch it with CMake's `FetchContent`, or build it and `cmake --install` it for `find_package(gamend)`. [Guide](https://gamend.org/docs/cpp-sdk)
+
+            The JavaScript SDK is on npm: [`@ughuuu/gamend`](https://www.npmjs.com/package/@ughuuu/gamend).
           files: |
             godot_addons.zip
+            balaur_addons.zip
           generate_release_notes: false
           make_latest: true
+          fail_on_unmatched_files: true
+
+  cpp-sdk:
+    name: C++ SDK (${{ matrix.os }})
+    needs: [build-godot-sdk]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            flags: -DGAMEND_WARNINGS_AS_ERRORS=ON -DGAMEND_WITH_WEBRTC=ON
+          - os: macos-latest
+            flags: -DGAMEND_WARNINGS_AS_ERRORS=ON -DGAMEND_WITH_WEBRTC=ON
+          - os: windows-latest
+            # libcurl comes from FetchContent over Schannel, and IXWebSocket's
+            # TLS from the mbedTLS the SDK builds when the machine has none —
+            # which is what a game on Windows gets, so CI builds it too.
+            # WebRTC stays off: libdatachannel wants an OpenSSL the runner
+            # does not have.
+            flags: ""
+
+    steps:
+      - name: Download the C++ SDK
+        uses: actions/download-artifact@v8
+        with:
+          name: cpp_sdk
+          path: cpp_sdk
+
+      - name: Install libcurl and OpenSSL
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev
+
+      - name: Configure
+        run: cmake -S cpp_sdk -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Install, and build a game against find_package(gamend)
+        shell: bash
+        run: |
+          cmake --install build --config Release --prefix "$RUNNER_TEMP/gamend"
+          cmake -S cpp_sdk/tests/package -B build-package -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/gamend"
+          cmake --build build-package --config Release --parallel
+
+  cpp-conformance:
+    name: C++ SDK conformance (live server)
+    needs: [build-godot-sdk]
+    runs-on: ubuntu-latest
+
+    container:
+      image: elixir:1.20.1-otp-29
+
+    # For every step, not only the server's: bench mode is compile-time
+    # config, so the deps have to be built under it too.
+    env:
+      GAMEND_DEV_BENCH: "1"
+      GAMEND_CONTENT_PLUGINS_DIR: modules/plugins_examples
+      GAMEND_RATELIMIT_ENABLED: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        run: |
+          apt update
+          apt install -y build-essential cmake ninja-build git erlang-dev curl libsrtp2-dev \
+            pkg-config libcurl4-openssl-dev libssl-dev
+
+      - name: Install Rust toolchain (for ex_sctp WebRTC DataChannels)
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Set up Elixir helpers
+        working-directory: /tmp
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      # Steps 5 and 9 call example_hook.hello, so the server loads the
+      # example plugins, bundled as the loader reads them.
+      - name: Bundle the example plugin
+        working-directory: modules/plugins_examples/example_hook
+        run: |
+          mix deps.get
+          mix plugin.bundle
+
+      - name: Prepare database
+        run: |
+          mix ecto.create --quiet -r Gamend.Repo
+          mix db.migrate
+
+      - name: Start the server
+        env:
+          PORT: "4000"
+        run: |
+          nohup mix phx.server > server.log 2>&1 &
+          for i in $(seq 1 120); do
+            if curl -sf http://127.0.0.1:4000/api/v1/health > /dev/null; then exit 0; fi
+            sleep 5
+          done
+          tail -100 server.log
+          exit 1
+
+      # The first account on a fresh database is the admin; step 6 writes KV
+      # as one.
+      - name: Sign up the admin
+        run: |
+          curl -sf -X POST http://127.0.0.1:4000/api/v1/register \
+            -H 'content-type: application/json' \
+            -d '{"email":"admin@example.com","password":"conformance-password-1"}' > /dev/null
+
+      - name: Download the C++ SDK
+        uses: actions/download-artifact@v8
+        with:
+          name: cpp_sdk
+          path: cpp_sdk
+
+      - name: Build the C++ SDK with every transport
+        run: |
+          cmake -S cpp_sdk -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DGAMEND_WITH_WEBRTC=ON -DGAMEND_WARNINGS_AS_ERRORS=ON -DGAMEND_BUILD_TESTS=OFF
+          cmake --build build --target gamend_conformance
+
+      - name: Conformance (JSON)
+        env:
+          GAMEND_ADMIN_EMAIL: admin@example.com
+          GAMEND_ADMIN_PASSWORD: conformance-password-1
+        run: build/gamend_conformance http://127.0.0.1:4000
+
+      - name: Conformance (protobuf)
+        env:
+          GAMEND_ADMIN_EMAIL: admin@example.com
+          GAMEND_ADMIN_PASSWORD: conformance-password-1
+        run: build/gamend_conformance http://127.0.0.1:4000 --protobuf
+
+      - name: Server log
+        if: failure()
+        run: tail -200 server.log
+
+  release-cpp-sdk:
+    name: Release the C++ SDK
+    needs: [build-godot-sdk, cpp-sdk, cpp-conformance]
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download the C++ SDK
+        uses: actions/download-artifact@v8
+        with:
+          name: cpp_sdk
+          path: cpp_sdk
+
+      - name: Archive
+        run: tar -czf gamend-cpp-sdk.tar.gz cpp_sdk
+
+      # Next to godot_addons.zip on the release build-godot-sdk made.
+      - name: Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: latest
+          files: gamend-cpp-sdk.tar.gz
           fail_on_unmatched_files: true
 
   publish-hex:
@@ -821,6 +1115,30 @@ jobs:
           mix local.hex --force
           mix local.rebar --force
 
+      # Before any publish. Each package's mix.exs takes its version from an
+      # env var (APP_VERSION for the SDK pair, GAMEND_CONTENT_APP_VERSION for
+      # core and web), so this repo's own image and docs carry the CI version.
+      # Shipped that way, a host compiled each package as whatever the var held
+      # on its machine: a Dockerfile exporting GAMEND_CONTENT_APP_VERSION=1.0.0
+      # built gamend_core and gamend_web as 1.0.0, and the SDK pair, whose
+      # @version was never stamped, built as 1.0.26 wherever APP_VERSION was
+      # unset. Both failed a host's `>= 1.0.1266` floor with "the dependency
+      # does not match the requirement". The published mix.exs states the
+      # release's version and reads nothing.
+      - name: Pin the published package versions
+        run: |
+          for f in sdk/mix.exs sdk_tools/mix.exs apps/gamend_core/mix.exs apps/gamend_web/mix.exs; do
+            sed -i \
+              -e "s|@version \"[^\"]*\"|@version \"${APP_VERSION}\"|" \
+              -e "s#version: System.get_env(\"[A-Z_]*\") || @version,#version: @version,#" \
+              "$f"
+            if ! grep -q "@version \"${APP_VERSION}\"" "$f" || ! grep -q "version: @version," "$f" ||
+               grep -q "version: System.get_env" "$f"; then
+              echo "::error::$f: version pin failed - the package would read its version from the environment"
+              exit 1
+            fi
+          done
+
       - name: Publish gamend_sdk
         working-directory: sdk
         run: |
@@ -846,7 +1164,7 @@ jobs:
             mix hex.publish --yes
           fi
 
-      - name: Rewrite the gamend_core path dep and stamp versions
+      - name: Rewrite the gamend_core path dep
         run: |
           # gamend_web depends on gamend_core by path; Hex only accepts Hex
           # deps, so the published package points at the version being cut.
@@ -857,9 +1175,6 @@ jobs:
             apps/gamend_web/mix.exs
           grep -q '{:gamend_core, "~> 1.0"}' apps/gamend_web/mix.exs ||
             { echo "::error::gamend_core path dep rewrite failed - gamend_web would publish broken"; exit 1; }
-          sed -i "s|@version \"[^\"]*\"|@version \"${APP_VERSION}\"|g" \
-            apps/gamend_core/mix.exs \
-            apps/gamend_web/mix.exs
 
       # Before gamend_web, which resolves gamend_core from the release this
       # step cuts.
@@ -963,3 +1278,254 @@ jobs:
           # ExDoc's output does not contain one — publishing without this would
           # delete it on the next push and take docs.gamend.org down.
           cname: docs.gamend.org
+
+  # ── Server binaries ─────────────────────────────────────────────────────
+  # Downloadable releases of the server: `gamend` for macOS (Apple silicon)
+  # and Linux (x86_64, arm64), SQLite and Postgres builds, plus the gamend.org
+  # website as a project folder. Every push to main republishes them on the
+  # rolling `server-latest` release, which rel/install.sh and the
+  # actions/setup-gamend action download from. The scripts are rel/scripts/;
+  # guide: priv/docs/10-setup/15-standalone.md.
+  binaries-linux:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    # Built in Ubuntu 22.04 rather than on the runner's own image, so the
+    # binaries need glibc 2.35, not whatever the runner has.
+    container: ubuntu:22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: gamend-linux-x86_64, runner: ubuntu-24.04, adapter: sqlite }
+          - { name: gamend-linux-x86_64-postgres, runner: ubuntu-24.04, adapter: postgres }
+          - { name: gamend-linux-arm64, runner: ubuntu-24.04-arm, adapter: sqlite }
+          - { name: gamend-linux-arm64-postgres, runner: ubuntu-24.04-arm, adapter: postgres }
+    services:
+      # For the Postgres builds' smoke test; the SQLite ones leave it idle.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      GAMEND_DB_ADAPTER: ${{ matrix.adapter }}
+      BUILD_ROOT: /opt/gamend-build
+    steps:
+      - name: System packages
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential autoconf pkg-config perl curl ca-certificates git \
+            libncurses-dev jq file binutils unzip xz-utils brotli \
+            imagemagick optipng pngquant
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          echo "GAMEND_CONTENT_APP_VERSION=1.0.$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+
+      - name: Cache static OpenSSL, libsrtp and OTP
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.BUILD_ROOT }}/deps
+            ${{ env.BUILD_ROOT }}/otp
+          key: otp-${{ matrix.runner }}-ubuntu22-${{ env.OTP_VERSION }}-${{ env.OPENSSL_VERSION }}-${{ env.LIBSRTP_VERSION }}-${{ hashFiles('rel/scripts/static-deps.sh', 'rel/scripts/build-otp.sh') }}
+
+      - name: Build the release
+        run: rel/scripts/build.sh "$BUILD_ROOT"
+
+      - name: Package
+        run: rel/scripts/package.sh "${{ matrix.name }}" dist
+
+      - name: Smoke test
+        run: |
+          # Only the Postgres build gets a database URL: an empty one still
+          # counts as set, and the SQLite build warns about it at boot.
+          if [ "$GAMEND_DB_ADAPTER" = postgres ]; then
+            export GAMEND_DB_URL=ecto://postgres:postgres@postgres:5432/gamend_smoke
+          fi
+          rel/scripts/smoke.sh "dist/${{ matrix.name }}.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}
+          path: dist/${{ matrix.name }}.tar.gz
+          if-no-files-found: error
+
+  binaries-macos:
+    name: ${{ matrix.name }}
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: gamend-macos-arm64, adapter: sqlite }
+          - { name: gamend-macos-arm64-postgres, adapter: postgres }
+    env:
+      GAMEND_DB_ADAPTER: ${{ matrix.adapter }}
+      BUILD_ROOT: ${{ github.workspace }}/../gamend-build
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        run: echo "GAMEND_CONTENT_APP_VERSION=1.0.$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+
+      # `mix assets.deploy` cuts the theme's responsive images with ImageMagick
+      # and optimizes PNGs, as the Docker build does.
+      - name: Image tools
+        run: |
+          for tool in imagemagick optipng pngquant brotli; do
+            brew list "$tool" > /dev/null 2>&1 || brew install "$tool"
+          done
+
+      - name: Cache static OpenSSL, libsrtp and OTP
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.BUILD_ROOT }}/deps
+            ${{ env.BUILD_ROOT }}/otp
+          key: otp-macos-15-${{ env.OTP_VERSION }}-${{ env.OPENSSL_VERSION }}-${{ env.LIBSRTP_VERSION }}-${{ hashFiles('rel/scripts/static-deps.sh', 'rel/scripts/build-otp.sh') }}
+
+      - name: Build the release
+        run: rel/scripts/build.sh "$BUILD_ROOT"
+
+      - name: Import the signing certificate
+        if: github.event_name != 'pull_request'
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          if [ -z "$BUILD_CERTIFICATE_BASE64" ]; then
+            echo "No signing certificate configured; the macOS build ships unsigned."
+            exit 0
+          fi
+          cert="$RUNNER_TEMP/certificate.p12"
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$cert"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security import "$cert" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain" > /dev/null
+          security list-keychain -d user -s "$keychain"
+          identity=$(security find-identity -v -p codesigning "$keychain" | grep "Developer ID Application" | head -1 | awk -F'"' '{print $2}')
+          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Package (signed and notarized on main)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: rel/scripts/package.sh "${{ matrix.name }}" dist
+
+      # The Postgres build needs a database macOS runners do not have; its
+      # linkage is the SQLite build's, checked by package.sh.
+      - name: Smoke test
+        if: matrix.adapter == 'sqlite'
+        run: rel/scripts/smoke.sh "dist/${{ matrix.name }}.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}
+          path: dist/${{ matrix.name }}.tar.gz
+          if-no-files-found: error
+
+  binaries-website:
+    name: gamend-website
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: rel/scripts/website.sh dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gamend-website
+          path: dist/gamend-website.tar.gz
+          if-no-files-found: error
+
+  # The Linux archive is built on Ubuntu 22.04; prove it runs, with nothing
+  # installed beyond curl, on the distributions people actually deploy to.
+  binaries-distros:
+    name: runs on ${{ matrix.image }}
+    needs: binaries-linux
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:12-slim", "ubuntu:24.04", "fedora:42"]
+    steps:
+      - name: curl and tar
+        run: |
+          if command -v apt-get > /dev/null; then
+            apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
+          else
+            # Fedora ships curl-minimal; --allowerasing lets dnf keep or swap it.
+            dnf install -y --allowerasing curl tar gzip findutils
+          fi
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: gamend-linux-x86_64
+          path: dist
+      - run: rel/scripts/smoke.sh dist/gamend-linux-x86_64.tar.gz
+
+  publish-binaries:
+    name: Publish server-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [binaries-linux, binaries-macos, binaries-website, binaries-distros]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The server archives only: the run's other artifacts (the SDKs, the
+      # Docker build records) are not release assets, and a folder fails the upload.
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: gamend-*
+          merge-multiple: true
+
+      - name: Checksums and installer
+        run: |
+          cp rel/install.sh dist/install.sh
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: Move server-latest to this commit and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="1.0.$(git rev-list --count HEAD)"
+          notes="Gamend server $version, built from ${GITHUB_SHA::12}.
+
+          Install: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/rel/install.sh | sh\`
+          Guide: https://gamend.org/docs/standalone"
+
+          git tag -f server-latest "$GITHUB_SHA"
+          git push -f origin refs/tags/server-latest
+
+          if gh release view server-latest > /dev/null 2>&1; then
+            gh release edit server-latest --prerelease --title "Gamend server (latest)" --notes "$notes"
+          else
+            gh release create server-latest --prerelease --title "Gamend server (latest)" --notes "$notes" --verify-tag
+          fi
+          gh release upload server-latest dist/* --clobber
+          # The release holds this build alone: drop what an older upload left.
+          gh release view server-latest --json assets --jq '.assets[].name' |
+            while read -r asset; do
+              [ -e "dist/$asset" ] || gh release delete-asset server-latest "$asset" --yes
+            done

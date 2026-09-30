@@ -56,17 +56,15 @@ reload — the page painted at the top and glided down to where it had been. --%
         Map.get(theme, "tagline") || "" %>
     <% description = String.replace(description_raw, ~r/\*+/, "") %>
     <% banner_path = Map.get(theme, "banner", "") %>
-    <% host_static_app = Application.get_env(:gamend_web, :host_static_app, :gamend_web) %>
-    <% host_static_dir = Application.app_dir(host_static_app, "priv/static") %>
-    <% web_static_dir = Application.app_dir(:gamend_web, "priv/static") %>
     <% banner_dark_path = String.replace(banner_path, ~r/\.(\w+)$/, "_dark.\\1") %>
-    <% banner_dark_rel = String.trim_leading(banner_dark_path, "/") %>
     <% banner_dark_exists? =
       banner_dark_path != "" and
         banner_dark_path != banner_path and
-        (File.exists?(Path.join(host_static_dir, banner_dark_rel)) or
-           File.exists?(Path.join(web_static_dir, banner_dark_rel))) %>
-    <% image_path = if banner_dark_exists?, do: banner_dark_path, else: banner_path %>
+        GamendWeb.ProjectStatic.derived_from?(banner_dark_path, banner_path) %>
+    <%!-- A page's own image first — the page-meta provider's `image/1`, a
+          guide's social card or a post's cover — else the theme's banner. --%>
+    <% image_path =
+      assigns[:meta_image] || if(banner_dark_exists?, do: banner_dark_path, else: banner_path) %>
     <%!-- Open Graph requires absolute URLs — a relative path breaks share previews. --%>
     <% site_url = String.trim_trailing(GamendWeb.endpoint().url(), "/") %>
     <% image_url =
@@ -75,6 +73,7 @@ reload — the page painted at the top and glided down to where it had been. --%
         String.starts_with?(image_path, ["http://", "https://"]) -> image_path
         true -> site_url <> "/" <> String.trim_leading(image_path, "/")
       end %>
+    <% page_url = site_url <> (assigns[:seo_path] || Process.get(:gamend_page_path) || "/") %>
 
     <meta name="description" content={description} />
     <%!--
@@ -84,6 +83,7 @@ reload — the page painted at the top and glided down to where it had been. --%
     --%>
     <meta :if={assigns[:robots]} name="robots" content={assigns[:robots]} />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content={page_url} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:image" content={image_url} />

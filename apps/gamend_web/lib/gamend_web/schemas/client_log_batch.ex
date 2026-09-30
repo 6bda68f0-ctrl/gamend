@@ -195,3 +195,13 @@ defmodule GamendWeb.Schemas.ClientLogPolicy do
     required: [:enabled, :level, :categories, :batch_max, :message_max_bytes]
   })
 end
+
+defmodule GamendWeb.Schemas.ClientLogPolicyResponse do
+  @moduledoc "The capture policy under `data`."
+  use GamendWeb.Schemas.Envelope, data: GamendWeb.Schemas.ClientLogPolicy
+end
+
+defmodule GamendWeb.Schemas.ClientLogResultResponse do
+  @moduledoc "An upload's outcome under `data`."
+  use GamendWeb.Schemas.Envelope, data: GamendWeb.Schemas.ClientLogResult
+end

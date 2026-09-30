@@ -29,15 +29,16 @@ Back in Certificates, Identifiers & Profiles:
 1. Click "+" to create new identifier
 2. Select "Services IDs" and click Continue
 3. Enter description (e.g., "Gamend Web")
-4. Enter identifier (e.g., com.yourcompany.gameserver.web) - This is your CLIENT_ID
+4. Enter identifier (e.g., com.yourcompany.gameserver.web) - This is your `GAMEND_OAUTH_APPLE_CLIENT_ID`
 5. Check "Sign in with Apple"
 6. Click "Configure" next to Sign in with Apple
 7. Select your App ID as the Primary App ID
 8. Add these domains and redirect URLs:
- Domain: example.com Return URL: https://example.com/auth/apple/callback
+   ```text
+   Domain:     example.com
+   Return URL: https://example.com/auth/apple/callback
+   ```
 9. Click Save, then Continue, then Register
-
-com.yourcompany.gameserver.web
 
 ## Create a private key
 
@@ -69,16 +70,18 @@ GAMEND_OAUTH_APPLE_CLIENT_ID="com.yourcompany.gameserver.web"
 GAMEND_OAUTH_APPLE_IOS_CLIENT_ID="com.yourcompany.gameserver.ios"
 GAMEND_OAUTH_APPLE_TEAM_ID="A1B2C3D4E5"
 GAMEND_OAUTH_APPLE_KEY_ID="ABC123XYZ"
-GAMEND_OAUTH_APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----"
-"MIGTAgEAMBMGByq...your key content..."
-"-----END PRIVATE KEY-----"
+GAMEND_OAUTH_APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----
+MIGTAgEAMBMGByq...your key content...
+-----END PRIVATE KEY-----"
 ```
+
+The private key is the whole `.p8` file, in one quoted value. Where a value must fit on one line, write each line break as `\n`.
 
 ## Test Apple sign-in
 
 After deploying with the secrets:
 
 1. Go to your app's login page
-2. Click "Sign in with Apple"
+2. Click "Log in with Apple"
 3. Authorize the application with your Apple ID
 4. You should be redirected back and logged in

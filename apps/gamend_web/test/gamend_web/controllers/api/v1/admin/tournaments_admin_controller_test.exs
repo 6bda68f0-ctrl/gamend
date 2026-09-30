@@ -29,7 +29,7 @@ defmodule GamendWeb.Api.V1.Admin.TournamentsAdminControllerTest do
   test "full admin lifecycle over HTTP: create, update, draw, resolve, finish", %{
     admin_conn: admin_conn
   } do
-    resp = admin_conn |> post("/api/v1/admin/tournaments", create_attrs()) |> json_response(200)
+    resp = admin_conn |> post("/api/v1/admin/tournaments", create_attrs()) |> json_response(201)
     assert %{"id" => id, "state" => "scheduled"} = resp["data"]
 
     resp =
@@ -62,17 +62,18 @@ defmodule GamendWeb.Api.V1.Admin.TournamentsAdminControllerTest do
       })
       |> json_response(200)
 
-    assert resp["winner_entry_id"] == match.a_entry_id
+    assert resp["data"]["winner_entry_id"] == match.a_entry_id
+    assert resp["data"]["resolved_at"]
 
-    # Champion decided -> the tournament already finished; finish reports 400.
-    resp = admin_conn |> post("/api/v1/admin/tournaments/#{id}/finish") |> json_response(400)
+    # Champion decided -> the tournament already finished; finish is refused.
+    resp = admin_conn |> post("/api/v1/admin/tournaments/#{id}/finish") |> json_response(403)
     assert resp["error"] == "not_running"
 
     assert Tournaments.get_tournament(id).state == "finished"
   end
 
   test "resolve without a winner records a double forfeit", %{admin_conn: admin_conn} do
-    resp = admin_conn |> post("/api/v1/admin/tournaments", create_attrs()) |> json_response(200)
+    resp = admin_conn |> post("/api/v1/admin/tournaments", create_attrs()) |> json_response(201)
     id = resp["data"]["id"]
 
     tournament = Tournaments.get_tournament(id)
@@ -93,32 +94,51 @@ defmodule GamendWeb.Api.V1.Admin.TournamentsAdminControllerTest do
       |> post("/api/v1/admin/tournaments/#{id}/matches/#{match.id}/resolve", %{})
       |> json_response(200)
 
-    assert resp["winner_entry_id"] == nil
+    assert resp["data"]["winner_entry_id"] == ""
 
     resp =
       admin_conn
       |> post("/api/v1/admin/tournaments/#{id}/matches/#{match.id}/resolve", %{
         "winner_entry_id" => match.a_entry_id
       })
-      |> json_response(400)
+      |> json_response(409)
 
     assert resp["error"] == "already_resolved"
   end
 
+  test "finish ends a running tournament early", %{admin_conn: admin_conn} do
+    resp = admin_conn |> post("/api/v1/admin/tournaments", create_attrs()) |> json_response(201)
+    id = resp["data"]["id"]
+    tournament = Tournaments.get_tournament(id)
+
+    for _ <- 1..2 do
+      {:ok, _} =
+        Tournaments.join_tournament(
+          Gamend.AccountsFixtures.user_fixture(),
+          Tournaments.advance_lifecycle(tournament)
+        )
+    end
+
+    _ = admin_conn |> post("/api/v1/admin/tournaments/#{id}/draw") |> json_response(200)
+
+    resp = admin_conn |> post("/api/v1/admin/tournaments/#{id}/finish") |> json_response(200)
+    assert resp["data"]["state"] == "finished"
+  end
+
   test "cancel and delete", %{admin_conn: admin_conn} do
-    resp = admin_conn |> post("/api/v1/admin/tournaments", create_attrs()) |> json_response(200)
+    resp = admin_conn |> post("/api/v1/admin/tournaments", create_attrs()) |> json_response(201)
     id = resp["data"]["id"]
 
     resp = admin_conn |> post("/api/v1/admin/tournaments/#{id}/cancel") |> json_response(200)
     assert resp["data"]["state"] == "cancelled"
 
     resp = admin_conn |> delete("/api/v1/admin/tournaments/#{id}") |> json_response(200)
-    assert resp["ok"] == true
+    assert resp == %{"ok" => true}
     assert Tournaments.get_tournament(id) == nil
   end
 
   test "cancel then reopen over HTTP", %{admin_conn: admin_conn} do
-    resp = admin_conn |> post("/api/v1/admin/tournaments", create_attrs()) |> json_response(200)
+    resp = admin_conn |> post("/api/v1/admin/tournaments", create_attrs()) |> json_response(201)
     id = resp["data"]["id"]
 
     resp = admin_conn |> post("/api/v1/admin/tournaments/#{id}/cancel") |> json_response(200)
@@ -128,7 +148,7 @@ defmodule GamendWeb.Api.V1.Admin.TournamentsAdminControllerTest do
     assert resp["data"]["state"] == "registration"
 
     # reopening something that is not cancelled is rejected
-    resp = admin_conn |> post("/api/v1/admin/tournaments/#{id}/reopen") |> json_response(400)
+    resp = admin_conn |> post("/api/v1/admin/tournaments/#{id}/reopen") |> json_response(403)
     assert resp["error"] == "not_cancelled"
   end
 
@@ -138,7 +158,7 @@ defmodule GamendWeb.Api.V1.Admin.TournamentsAdminControllerTest do
       |> post("/api/v1/admin/tournaments", %{"slug" => "bad"})
       |> json_response(422)
 
-    assert resp["error"] == "invalid_data"
+    assert resp["error"] == "validation_failed"
     assert resp["errors"]["title"]
   end
 

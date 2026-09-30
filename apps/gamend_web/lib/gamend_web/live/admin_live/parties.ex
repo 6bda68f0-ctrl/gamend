@@ -2,6 +2,7 @@ defmodule GamendWeb.AdminLive.Parties do
   use GamendWeb, :live_view
 
   alias Gamend.Parties
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -21,6 +22,7 @@ defmodule GamendWeb.AdminLive.Parties do
       |> assign(:show_create, false)
       |> assign(:create_form, to_form(%{"leader_id" => "", "max_size" => "4"}, as: "party"))
       |> assign(:add_member_id, "")
+      |> assign(:max_party_size, Gamend.Limits.get(:max_party_size))
       |> reload_parties()
 
     {:ok, socket}
@@ -49,7 +51,13 @@ defmodule GamendWeb.AdminLive.Parties do
                 <button
                   type="button"
                   phx-click="bulk_delete"
-                  data-confirm={"Delete #{MapSet.size(@selected_ids)} selected parties?"}
+                  data-confirm={
+                    ngettext(
+                      "Delete %{count} selected party?",
+                      "Delete %{count} selected parties?",
+                      MapSet.size(@selected_ids)
+                    )
+                  }
                   class="btn btn-sm btn-outline btn-error"
                   disabled={MapSet.size(@selected_ids) == 0}
                 >
@@ -125,16 +133,16 @@ defmodule GamendWeb.AdminLive.Parties do
                           type="number"
                           name="min_size"
                           value={@filters["min_size"]}
-                          class="input input-bordered input-xs w-16"
-                          placeholder="Min"
+                          class="input input-bordered input-xs w-20"
+                          placeholder="Min cap"
                           phx-debounce="300"
                         />
                         <input
                           type="number"
                           name="max_size"
                           value={@filters["max_size"]}
-                          class="input input-bordered input-xs w-16"
-                          placeholder="Max"
+                          class="input input-bordered input-xs w-20"
+                          placeholder="Max cap"
                           phx-debounce="300"
                         />
                       </th>
@@ -160,7 +168,7 @@ defmodule GamendWeb.AdminLive.Parties do
                         <span class="font-mono">{p.leader_id}</span>
                         <%= if p.leader do %>
                           <span class="text-base-content/60 ml-1">
-                            ({p.leader.display_name || p.leader.email || "-"})
+                            ({Gamend.Accounts.display_label(p.leader)})
                           </span>
                         <% end %>
                       </td>
@@ -234,7 +242,11 @@ defmodule GamendWeb.AdminLive.Parties do
           <h3 class="font-bold text-lg">Edit Party</h3>
 
           <.form for={@form} id="party-edit-form" phx-submit="save_party">
-            <.input field={@form[:max_size]} type="number" label="Max size (2–32)" />
+            <.input
+              field={@form[:max_size]}
+              type="number"
+              label={"Max size (2–#{@max_party_size})"}
+            />
 
             <div class="form-control">
               <label class="label">Metadata (JSON)</label>
@@ -278,11 +290,11 @@ defmodule GamendWeb.AdminLive.Parties do
 
           <div class="flex gap-2 mt-4">
             <input
-              type="number"
+              type="text"
               placeholder="User ID to add"
               value={@add_member_id}
               phx-keyup="update_add_member_id"
-              class="input input-bordered input-sm w-40"
+              class="input input-bordered input-sm w-80 max-w-full font-mono"
               id="party-add-member-input"
             />
             <button
@@ -308,7 +320,7 @@ defmodule GamendWeb.AdminLive.Parties do
               <tbody>
                 <tr :for={m <- @members} id={"party-member-" <> to_string(m.id)}>
                   <td class="font-mono text-sm">{m.id}</td>
-                  <td class="text-sm">{m.display_name || m.email || "-"}</td>
+                  <td class="text-sm">{Gamend.Accounts.display_label(m)}</td>
                   <td class="text-sm">
                     <%= if m.id == @selected_party.leader_id do %>
                       <span class="badge badge-primary badge-sm">Leader</span>
@@ -358,7 +370,7 @@ defmodule GamendWeb.AdminLive.Parties do
             <.input
               field={@create_form[:max_size]}
               type="number"
-              label="Max size (2–32)"
+              label={"Max size (2–#{@max_party_size})"}
             />
 
             <div class="modal-action">
@@ -413,15 +425,19 @@ defmodule GamendWeb.AdminLive.Parties do
                  |> put_flash(:info, "Party ##{party.id} created")
                  |> reload_parties()}
 
-              {:error, :in_lobby} ->
-                {:noreply, put_flash(socket, :error, "User is currently in a lobby")}
-
               {:error, :already_in_party} ->
                 {:noreply, put_flash(socket, :error, "User is already in a party")}
 
-              {:error, changeset} ->
+              {:error, {:hook_rejected, reason}} ->
+                {:noreply,
+                 put_flash(socket, :error, "Create rejected by a hook: #{inspect(reason)}")}
+
+              {:error, %Ecto.Changeset{} = changeset} ->
                 {:noreply,
                  put_flash(socket, :error, "Create failed: #{inspect(changeset.errors)}")}
+
+              {:error, reason} ->
+                {:noreply, put_flash(socket, :error, "Create failed: #{inspect(reason)}")}
             end
         end
     end
@@ -499,13 +515,26 @@ defmodule GamendWeb.AdminLive.Parties do
     socket =
       cond do
         failed == 0 ->
-          put_flash(socket, :info, "Deleted #{deleted} parties")
+          put_flash(
+            socket,
+            :info,
+            ngettext("Deleted %{count} party", "Deleted %{count} parties", deleted)
+          )
 
         deleted == 0 ->
           put_flash(socket, :error, "Failed to delete selected parties")
 
         true ->
-          put_flash(socket, :error, "Deleted #{deleted} parties; failed #{failed}")
+          put_flash(
+            socket,
+            :error,
+            ngettext(
+              "Deleted %{count} party; %{failed} failed",
+              "Deleted %{count} parties; %{failed} failed",
+              deleted,
+              failed: failed
+            )
+          )
       end
 
     {:noreply, reload_parties(socket)}
@@ -538,35 +567,25 @@ defmodule GamendWeb.AdminLive.Parties do
   def handle_event("save_party", %{"party" => params}, socket) do
     party = socket.assigns.selected_party
 
-    params =
-      case Map.get(params, "metadata") do
-        nil ->
-          params
+    # Text that is not a JSON object is refused rather than saved as %{},
+    # which would wipe the party's metadata behind a success flash.
+    case normalize_metadata(params) do
+      {:ok, params} ->
+        case Parties.admin_update_party(party, params) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Party updated")
+             |> assign(:selected_party, nil)
+             |> assign(:form, nil)
+             |> reload_parties()}
 
-        "" ->
-          Map.put(params, "metadata", %{})
+          {:error, changeset} ->
+            {:noreply, assign(socket, :form, to_form(changeset, as: "party"))}
+        end
 
-        s when is_binary(s) ->
-          case Jason.decode(s) do
-            {:ok, map} when is_map(map) -> Map.put(params, "metadata", map)
-            _ -> Map.put(params, "metadata", %{})
-          end
-
-        other ->
-          Map.put(params, "metadata", other)
-      end
-
-    case Parties.admin_update_party(party, params) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Party updated")
-         |> assign(:selected_party, nil)
-         |> assign(:form, nil)
-         |> reload_parties()}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :form, to_form(changeset, as: "party"))}
+      :error ->
+        {:noreply, put_flash(socket, :error, "Metadata must be a JSON object")}
     end
   end
 
@@ -692,13 +711,12 @@ defmodule GamendWeb.AdminLive.Parties do
   end
 
   @impl true
-  def handle_event("admin_parties_page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:parties_page_size, String.to_integer(size))
-     |> assign(:parties_page, 1)
-     |> reload_parties()}
-  end
+  def handle_event("admin_parties_page_size", %{"size" => size}, socket),
+    do:
+      {:noreply,
+       socket
+       |> LiveHelpers.put_page_size(size, size_key: :parties_page_size, page_key: :parties_page)
+       |> reload_parties()}
 
   # ---------------------------------------------------------------------------
   # PubSub
@@ -733,9 +751,7 @@ defmodule GamendWeb.AdminLive.Parties do
     total_count = Parties.count_all_parties(filters)
 
     total_pages =
-      if page_size > 0,
-        do: div(total_count + page_size - 1, page_size),
-        else: 0
+      LiveHelpers.total_pages(total_count, page_size)
 
     socket
     |> assign(:parties, parties)
@@ -746,6 +762,28 @@ defmodule GamendWeb.AdminLive.Parties do
   end
 
   defp party_ids(parties) when is_list(parties), do: Enum.map(parties, & &1.id)
+
+  defp normalize_metadata(params) do
+    case Map.get(params, "metadata") do
+      nil ->
+        {:ok, params}
+
+      s when is_binary(s) ->
+        case String.trim(s) do
+          "" ->
+            {:ok, Map.put(params, "metadata", %{})}
+
+          trimmed ->
+            case Jason.decode(trimmed) do
+              {:ok, map} when is_map(map) -> {:ok, Map.put(params, "metadata", map)}
+              _ -> :error
+            end
+        end
+
+      other ->
+        {:ok, Map.put(params, "metadata", other)}
+    end
+  end
 
   defp sync_selected_ids(socket, ids) when is_list(ids) do
     selected = socket.assigns[:selected_ids] || MapSet.new()

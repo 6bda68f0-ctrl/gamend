@@ -21,12 +21,17 @@ defmodule GamendWeb.TournamentsLive do
   alias GamendWeb.ContentText
   alias GamendWeb.LiveHelpers
   alias GamendWeb.OnMount.SeoTitle
+  alias GamendWeb.Plugs.FeatureGate
 
   @page_size 25
   @brackets_page_size 12
 
   @impl true
   def mount(_params, _session, socket) do
+    unless FeatureGate.enabled?(:list_tournaments) do
+      raise GamendWeb.NotFoundError
+    end
+
     {:ok,
      socket
      |> assign(:page_title, gettext("Tournaments"))
@@ -73,32 +78,31 @@ defmodule GamendWeb.TournamentsLive do
   end
 
   @impl true
+  # The "next" handlers clamped to `total_pages` with no floor, so an empty list
+  # (0 pages) put the reader on page 0. `LiveHelpers.next_page/3` never goes
+  # below 1.
   def handle_event("prev_page", _params, socket) do
-    {:noreply, load_index(socket, max(socket.assigns.page - 1, 1))}
+    socket = LiveHelpers.prev_page(socket)
+    {:noreply, load_index(socket, socket.assigns.page)}
   end
 
   def handle_event("next_page", _params, socket) do
-    {:noreply, load_index(socket, min(socket.assigns.page + 1, socket.assigns.total_pages))}
+    socket = LiveHelpers.next_page(socket)
+    {:noreply, load_index(socket, socket.assigns.page)}
   end
 
-  def handle_event("brackets_prev", _params, socket) do
-    {:noreply, socket |> assign(:page, max(socket.assigns.page - 1, 1)) |> load_brackets()}
-  end
+  def handle_event("brackets_prev", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> load_brackets()}
 
-  def handle_event("brackets_next", _params, socket) do
-    page = min(socket.assigns.page + 1, socket.assigns.total_pages)
-    {:noreply, socket |> assign(:page, page) |> load_brackets()}
-  end
+  def handle_event("brackets_next", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> load_brackets()}
 
-  def handle_event("players_prev", _params, socket) do
-    page = max(socket.assigns.players_page - 1, 1)
-    {:noreply, socket |> assign(:players_page, page) |> load_players()}
-  end
+  def handle_event("players_prev", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page(:players_page) |> load_players()}
 
-  def handle_event("players_next", _params, socket) do
-    page = min(socket.assigns.players_page + 1, socket.assigns.players_pages)
-    {:noreply, socket |> assign(:players_page, page) |> load_players()}
-  end
+  def handle_event("players_next", _params, socket),
+    do:
+      {:noreply, socket |> LiveHelpers.next_page(:players_page, :players_pages) |> load_players()}
 
   def handle_event("search", %{"search" => term}, socket) do
     {:noreply, socket |> assign(:search, term) |> assign(:players_page, 1) |> load_players()}
@@ -252,7 +256,7 @@ defmodule GamendWeb.TournamentsLive do
     |> assign(:page, page)
     |> assign(:groups, ContentText.translate(groups))
     |> assign(:count, total)
-    |> assign(:total_pages, ceil_div(total, @page_size))
+    |> assign(:total_pages, LiveHelpers.total_pages(total, @page_size))
   end
 
   defp load_detail(socket, tournament, page) do
@@ -301,7 +305,7 @@ defmodule GamendWeb.TournamentsLive do
     socket
     |> assign(:entries, entries)
     |> assign(:players_count, total)
-    |> assign(:players_pages, ceil_div(total, @page_size))
+    |> assign(:players_pages, LiveHelpers.total_pages(total, @page_size))
   end
 
   defp load_brackets(%{assigns: %{drawn?: false}} = socket) do
@@ -326,7 +330,10 @@ defmodule GamendWeb.TournamentsLive do
     socket
     |> assign(:brackets, brackets)
     |> assign(:bracket_progress, bracket_progress(brackets, matches))
-    |> assign(:total_pages, ceil_div(socket.assigns.bracket_count, @brackets_page_size))
+    |> assign(
+      :total_pages,
+      LiveHelpers.total_pages(socket.assigns.bracket_count, @brackets_page_size)
+    )
   end
 
   defp bracket_progress(brackets, matches) do
@@ -385,9 +392,9 @@ defmodule GamendWeb.TournamentsLive do
     end
   end
 
-  defp player_name(%{display_name: name}) when is_binary(name) and name != "", do: name
-  defp player_name(%{username: name}) when is_binary(name) and name != "", do: name
-  defp player_name(_leader), do: gettext("Player")
+  defp leader_name(%{display_name: name}) when is_binary(name) and name != "", do: name
+  defp leader_name(%{username: name}) when is_binary(name) and name != "", do: name
+  defp leader_name(_leader), do: gettext("Player")
 
   defp not_found(socket) do
     socket
@@ -405,8 +412,6 @@ defmodule GamendWeb.TournamentsLive do
       :error -> default
     end
   end
-
-  defp ceil_div(num, den), do: div(num + den - 1, den)
 
   # ── Render ────────────────────────────────────────────────────────────────
 
@@ -674,7 +679,7 @@ defmodule GamendWeb.TournamentsLive do
                     <.user_avatar user={e.leader} class="w-8 h-8" />
                     <div class="flex flex-col leading-tight">
                       <span class={[e.leader_id == @current_user_id && "font-bold"]}>
-                        {player_name(e.leader)}
+                        <.player_name name={leader_name(e.leader)} />
                       </span>
                       <.user_title user={e.leader} />
                     </div>
@@ -810,7 +815,7 @@ defmodule GamendWeb.TournamentsLive do
         <div>
           <span class="text-sm text-base-content/70">{gettext("Showing")}</span>
           <div class="text-xl font-bold flex items-center gap-2">
-            {player_name(@highlight.leader)}
+            <.player_name name={leader_name(@highlight.leader)} />
             <span :if={@own?} class="badge badge-primary badge-sm">{gettext("You")}</span>
           </div>
           <.user_title user={@highlight.leader} class="text-sm text-base-content/60" />
@@ -915,7 +920,7 @@ defmodule GamendWeb.TournamentsLive do
   defp slot_name(entries, entry_id) do
     case Map.get(entries, entry_id) do
       nil -> gettext("Player")
-      entry -> player_name(entry.leader)
+      entry -> leader_name(entry.leader)
     end
   end
 

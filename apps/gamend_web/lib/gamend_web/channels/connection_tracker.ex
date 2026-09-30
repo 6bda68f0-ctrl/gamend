@@ -67,26 +67,19 @@ defmodule GamendWeb.ConnectionTracker do
   end
 
   @doc """
-  Registers a user channel under both the `:user_channel` type (for counts) and
-  a per-user key, so the "does this user have any other socket?" check on
-  disconnect is O(sockets-for-this-user) instead of O(all user channels).
+  Registers a user channel under the `:user_channel` type, which the admin
+  connections page counts.
+
+  There used to be a second, per-user registration here, to answer "does this
+  user have any other socket?" on disconnect. That question is now
+  `Gamend.Presence.last_socket?/1`, which sees the whole cluster rather than
+  one node — see `GamendWeb.UserChannel.terminate/2`. Nothing read the per-user
+  key afterwards, so every channel join paid for a registry write that no
+  longer had a reader.
   """
   def register_user_channel(user_id) do
     _ = register(:user_channel, %{user_id: user_id})
-    _ = register({:user_channel, user_id}, %{})
     :ok
-  end
-
-  @doc """
-  Counts this user's live user channels excluding the calling process — used on
-  disconnect to decide whether the user just went fully offline.
-  """
-  def count_other_user_channels(user_id) do
-    @registry
-    |> Registry.lookup({:user_channel, user_id})
-    |> Enum.count(fn {pid, _meta} -> pid != self() end)
-  rescue
-    ArgumentError -> 0
   end
 
   @doc """

@@ -97,7 +97,7 @@ defmodule GamendWeb.QuestsLiveLockTest do
     # Both quests completed on login; only the free one is claimable, so the
     # banner must say one. Counting two sends the reader hunting for a button
     # that is deliberately not there.
-    assert html =~ "You have 1 quest(s) ready to claim!"
+    assert html =~ "You have 1 quest ready to claim!"
   end
 
   test "a blank label is not a lock", %{conn: conn} do

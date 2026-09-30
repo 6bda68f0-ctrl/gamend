@@ -7,36 +7,11 @@ defmodule GamendWeb.Api.V1.Admin.SessionController do
   alias Gamend.Accounts
   alias Gamend.Accounts.UserToken
   alias Gamend.Repo
-  alias GamendWeb.Pagination
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{AdminSessionPage, OkResponse}
   alias OpenApiSpex.Schema
 
   tags(["Admin – Sessions"])
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
-
-  @session_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      user_id: %Schema{type: :string, format: :uuid},
-      user_email: %Schema{type: :string},
-      context: %Schema{type: :string},
-      inserted_at: %Schema{type: :string, format: "date-time"},
-      authenticated_at: %Schema{type: :string, format: "date-time", nullable: true}
-    }
-  }
-
-  @meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      count: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer},
-      has_more: %Schema{type: :boolean}
-    }
-  }
 
   operation(:index,
     operation_id: "admin_list_sessions",
@@ -47,37 +22,28 @@ defmodule GamendWeb.Api.V1.Admin.SessionController do
       page_size: [in: :query, schema: %Schema{type: :integer}, required: false]
     ],
     responses: [
-      ok:
-        {"Sessions (paginated)", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{data: %Schema{type: :array, items: @session_schema}, meta: @meta_schema}
-         }},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Sessions, newest first", "application/json", AdminSessionPage},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
   def index(conn, params) do
     {page, page_size} = GamendWeb.Pagination.params(params)
+    session_query = from(t in UserToken, where: t.context == "session")
 
-    total_count = Repo.aggregate(from(t in UserToken, where: t.context == "session"), :count)
+    total_count = Repo.aggregate(session_query, :count)
 
     tokens =
-      Repo.all(
-        from t in UserToken,
-          join: u in assoc(t, :user),
-          where: t.context == "session",
-          order_by: [desc: t.inserted_at],
-          offset: ^((page - 1) * page_size),
-          limit: ^page_size,
-          preload: [user: u]
+      from(t in session_query,
+        join: u in assoc(t, :user),
+        order_by: [desc: t.inserted_at],
+        preload: [user: u]
       )
+      |> Gamend.Query.page(page: page, page_size: page_size)
+      |> Repo.all()
 
-    json(conn, %{
-      data: Enum.map(tokens, &serialize_session/1),
-      meta: Pagination.meta(page, page_size, length(tokens), total_count)
-    })
+    reply_page(conn, Enum.map(tokens, &serialize_session/1), page, page_size, total_count)
   end
 
   operation(:delete,
@@ -88,30 +54,25 @@ defmodule GamendWeb.Api.V1.Admin.SessionController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
   def delete(conn, %{"id" => id}) do
     case Repo.get(UserToken, id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       %UserToken{} = token ->
         case Accounts.delete_user_token(token) do
           {:ok, _} ->
-            json(conn, %{})
+            reply_ok(conn)
 
           {:error, %Ecto.Changeset{} = cs} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: "validation_failed",
-              errors: Ecto.Changeset.traverse_errors(cs, & &1)
-            })
+            unprocessable(conn, cs)
         end
     end
   end
@@ -124,9 +85,9 @@ defmodule GamendWeb.Api.V1.Admin.SessionController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -141,7 +102,7 @@ defmodule GamendWeb.Api.V1.Admin.SessionController do
     case Gamend.Accounts.get_user(id) do
       %Gamend.Accounts.User{} = user ->
         _ = Gamend.Accounts.revoke_all_tokens(user)
-        json(conn, %{})
+        reply_ok(conn)
 
       _ ->
         _ =
@@ -149,7 +110,7 @@ defmodule GamendWeb.Api.V1.Admin.SessionController do
             from(t in UserToken, where: t.user_id == ^id and t.context == "session")
           )
 
-        json(conn, %{})
+        reply_ok(conn)
     end
   end
 

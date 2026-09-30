@@ -5,49 +5,12 @@ defmodule GamendWeb.Api.V1.Admin.GroupController do
   import GamendWeb.Helpers.ParamParser
 
   alias Gamend.Groups
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{GroupPage, GroupResponse, OkResponse}
   alias GamendWeb.Serializers
   alias OpenApiSpex.Schema
 
   tags(["Admin – Groups"])
-
-  @error_schema %Schema{
-    type: :object,
-    properties: %{error: %Schema{type: :string}}
-  }
-
-  @meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      count: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer},
-      has_more: %Schema{type: :boolean}
-    }
-  }
-
-  @group_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      title: %Schema{type: :string},
-      description: %Schema{type: :string},
-      type: %Schema{type: :string},
-      max_members: %Schema{type: :integer},
-      metadata: %Schema{type: :object},
-      creator_id: %Schema{
-        type: :string,
-        format: :uuid,
-        description: "User ID of the creator, or -1 for system groups"
-      },
-      creator_name: %Schema{type: :string},
-      member_count: %Schema{type: :integer},
-      slowdown: %Schema{type: :integer, description: "Chat slowdown in seconds (0 = disabled)"},
-      inserted_at: %Schema{type: :string, format: :"date-time"},
-      updated_at: %Schema{type: :string, format: :"date-time"}
-    }
-  }
 
   operation(:index,
     operation_id: "admin_list_groups",
@@ -82,12 +45,7 @@ defmodule GamendWeb.Api.V1.Admin.GroupController do
       page_size: [in: :query, schema: %Schema{type: :integer}]
     ],
     responses: [
-      ok:
-        {"Groups list", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{data: %Schema{type: :array, items: @group_schema}, meta: @meta_schema}
-         }}
+      ok: {"Groups list", "application/json", GroupPage}
     ]
   )
 
@@ -118,9 +76,9 @@ defmodule GamendWeb.Api.V1.Admin.GroupController do
       }
     },
     responses: [
-      ok: {"Updated", "application/json", @group_schema},
-      not_found: {"Not found", "application/json", @error_schema},
-      unprocessable_entity: {"Validation error", "application/json", @error_schema}
+      ok: {"Updated", "application/json", GroupResponse},
+      not_found: Schemas.error("Not found"),
+      unprocessable_entity: Schemas.error("Validation error")
     ]
   )
 
@@ -133,8 +91,10 @@ defmodule GamendWeb.Api.V1.Admin.GroupController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      not_found: Schemas.error("Not found"),
+      forbidden: Schemas.error("Vetoed by a hook (rejected)"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
@@ -161,38 +121,30 @@ defmodule GamendWeb.Api.V1.Admin.GroupController do
       )
 
     serialized = Enum.map(groups, &serialize_group/1)
-    count = length(serialized)
     total_count = Groups.count_all_groups(filters)
 
-    json(conn, %{
-      data: serialized,
-      meta: GamendWeb.Pagination.meta(page, page_size, count, total_count)
-    })
+    reply_page(conn, serialized, page, page_size, total_count)
   end
 
   def update(conn, %{"id" => id} = params) do
     case parse_id(id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       group_id ->
         group = Groups.get_group(group_id)
 
         if is_nil(group) do
-          conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          reply_error(conn, :not_found, "not_found")
         else
           attrs = Map.drop(params, ["id"])
 
           case Groups.admin_update_group(group, attrs) do
             {:ok, updated} ->
-              json(conn, serialize_group(updated))
+              reply_data(conn, serialize_group(updated))
 
             {:error, changeset} ->
-              conn
-              |> put_status(:unprocessable_entity)
-              |> json(%{
-                error: Ecto.Changeset.traverse_errors(changeset, fn {msg, _} -> msg end)
-              })
+              unprocessable(conn, changeset)
           end
         end
     end
@@ -201,15 +153,24 @@ defmodule GamendWeb.Api.V1.Admin.GroupController do
   def delete(conn, %{"id" => id}) do
     case parse_id(id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       group_id ->
-        case Groups.admin_delete_group(group_id) do
-          {:ok, _} -> json(conn, %{})
-          {:error, _} -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
-        end
+        if Groups.get_group(group_id), do: do_delete(conn, group_id), else: not_found(conn)
     end
   end
+
+  # The only refusal left once the group exists is the `before_group_delete`
+  # hook's veto; it used to be reported as not_found.
+  defp do_delete(conn, group_id) do
+    case Groups.admin_delete_group(group_id) do
+      {:ok, _} -> reply_ok(conn)
+      {:error, %Ecto.Changeset{} = changeset} -> unprocessable(conn, changeset)
+      {:error, reason} -> reply_rejected(conn, reason)
+    end
+  end
+
+  defp not_found(conn), do: reply_error(conn, :not_found, "not_found")
 
   # ---------------------------------------------------------------------------
   # Helpers

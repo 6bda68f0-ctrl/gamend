@@ -30,7 +30,7 @@ defmodule GamendWeb.Components.TimestampTest do
     # A date alone cannot be misread as a local hour, and the localizer still
     # corrects it across a midnight boundary.
     date = render_component(&CoreComponents.timestamp/1, at: @at, format: "date")
-    assert date =~ "Aug 01, 2026"
+    assert date =~ "Aug 1, 2026"
     refute date =~ "UTC"
   end
 
@@ -38,6 +38,27 @@ defmodule GamendWeb.Components.TimestampTest do
     html = render_component(&CoreComponents.timestamp/1, at: ~N[2026-08-01 23:30:00])
 
     assert html =~ ~s(datetime="2026-08-01T23:30:00Z")
+  end
+
+  describe "a calendar date" do
+    # A publication day is not an instant. It used to be rendered with no
+    # localizer mark at all — right to avoid shifting it across midnight, but it
+    # left every date on the site in English. `calendar-date` has the localizer
+    # translate it with the zone pinned to UTC.
+    test "carries the calendar mark and the bare ISO date, not an instant" do
+      html = render_component(&CoreComponents.timestamp/1, at: ~D[2026-09-16])
+
+      assert html =~ ~s(datetime="2026-09-16")
+      assert html =~ ~s(data-local-time="calendar-date")
+      refute html =~ "T00:00"
+    end
+
+    test "falls back to a readable English date without JS" do
+      html = render_component(&CoreComponents.timestamp/1, at: ~D[2026-09-16])
+
+      assert html =~ "Sep 16, 2026"
+      refute html =~ "UTC"
+    end
   end
 
   test "nil renders the placeholder and nothing for the localizer to touch" do

@@ -85,6 +85,11 @@ config :gamend_core, async_inline: true
 # ticker supervised but idle. Tests drive Gamend.Tournaments.tick/0 directly.
 config :gamend_core, Gamend.Tournaments.Ticker, enabled: false
 
+# Retention sweeps outside any sandbox: the live cycle every minute, the full
+# one five minutes after boot, which a long suite reaches. Tests call
+# `Gamend.Retention.prune_all/0` and `prune_live/0` themselves.
+config :gamend_core, Gamend.Retention, enabled: false
+
 # Same for the matchmaking sweep: no sandbox connection, and on SQLite it
 # collides with the test's open write transaction ("database is locked").
 # Tests drive Gamend.Matchmaking.Worker.sweep/0 directly.
@@ -93,6 +98,10 @@ config :gamend_core, Gamend.Matchmaking.Worker, enabled: false
 # Same again for the chat-moderation boot load and mute sweep. Tests drive
 # Gamend.Chat.Moderation.Cache.load_persisted/0 directly.
 config :gamend_core, Gamend.Chat.Moderation.Sync, enabled: false
+
+# And for the IP-ban boot load. Tests drive GamendWeb.Plugs.IpBan.load_persisted/0
+# directly.
+config :gamend_web, GamendWeb.IpBanSync, enabled: false
 
 # Disable app-level caching in tests to avoid stale reads across assertions.
 # Still provide the multilevel configuration so the cache can start.
@@ -113,8 +122,7 @@ config :phoenix_live_view,
 # Configure Guardian for testing
 config :gamend_web, GamendWeb.Auth.Guardian,
   issuer: "gamend",
-  secret_key: "dJoNJZBOt08JlBREyPV5xvuOdwgHPORxK9WHp/k3Cs+g0R9ctyheJ8/CMeg/AdI1",
-  ttl: {15, :minutes}
+  secret_key: "dJoNJZBOt08JlBREyPV5xvuOdwgHPORxK9WHp/k3Cs+g0R9ctyheJ8/CMeg/AdI1"
 
 # Disable rate limiting in tests
 config :gamend_web, GamendWeb.Plugs.RateLimiter, enabled: false

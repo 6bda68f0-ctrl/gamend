@@ -32,8 +32,9 @@ export const normalizeQuery = (value) =>
 // Ranking before truncating is what keeps "goal" above "goalpost": taking the
 // first N in index order buries the thing you typed under everything that
 // merely contains it.
-export const fieldRank = (value, needle) => {
-  const normalized = normalizeQuery(value)
+export const fieldRank = (value, needle) => normalizedRank(normalizeQuery(value), needle)
+
+const normalizedRank = (normalized, needle) => {
   if (normalized === "") return 4
   if (normalized === needle) return 0
   if (normalized.startsWith(needle)) return 1
@@ -42,21 +43,69 @@ export const fieldRank = (value, needle) => {
   return 4
 }
 
+// Below every title and keyword hit, above a miss: the subtitle is a guide's
+// summary or a section's first sentence, so it is where the words a reader
+// half-remembers live, and also where a lot of words live.
+const SUBTITLE_RANK = 3.5
+const SUBTITLE_MIN_LENGTH = 3
+
+// Normalizing is the costly part of matching, and the index does not change
+// between keystrokes, so each row is normalized once, the first time it is
+// ranked, and remembered for as long as the row itself lives.
+const prepared = new WeakMap()
+
+const prepare = (entry) => {
+  let fields = prepared.get(entry)
+
+  if (!fields) {
+    const keywords = (Array.isArray(entry.keywords) ? entry.keywords : []).map(normalizeQuery)
+
+    fields = {
+      title: normalizeQuery(entry.title),
+      keywords,
+      keywordWords: keywords.flatMap((keyword) => keyword.split(WORD_SPLIT)).filter(Boolean),
+      subtitle: normalizeQuery(entry.subtitle),
+      subtitleWords: normalizeQuery(entry.subtitle).split(WORD_SPLIT).filter(Boolean),
+    }
+
+    prepared.set(entry, fields)
+  }
+
+  return fields
+}
+
+// A needle with a separator in it ("utf-8") is a phrase, and the words it
+// spans are matched in order; one without is matched against the start of
+// each word.
+const SEPARATOR = /[^\p{L}\p{N}]/u
+
+const subtitleMatches = (fields, needle) =>
+  SEPARATOR.test(needle)
+    ? fields.subtitle.includes(needle)
+    : fields.subtitleWords.some((word) => word.startsWith(needle))
+
 // The title carries the rank; a keyword can only match, never outrank a title
 // match, so "Spanish" stays above a row that merely lists "spanish" as an
-// alias.
+// alias. A subtitle word ranks below both, and only whole words and their
+// starts count there, so "id" does not find every sentence with "hidden".
 export const rankEntry = (entry, needle) => {
-  const title = fieldRank(entry.title, needle)
+  const fields = prepare(entry)
+  const title = normalizedRank(fields.title, needle)
   if (title < 4) return title
 
-  const keywords = Array.isArray(entry.keywords) ? entry.keywords : []
   let best = 4
-  for (const keyword of keywords) {
-    const rank = fieldRank(keyword, needle)
+  for (const keyword of fields.keywords) {
+    const rank = normalizedRank(keyword, needle)
     if (rank < best) best = rank
   }
   // A keyword hit never beats a title hit of the same tier.
-  return best === 4 ? 4 : Math.min(best + 1, 4)
+  if (best < 4) return Math.min(best + 1, 4)
+
+  if (needle.length >= SUBTITLE_MIN_LENGTH && subtitleMatches(fields, needle)) {
+    return SUBTITLE_RANK
+  }
+
+  return 4
 }
 
 // Edit distance, given up on as soon as it passes `max`. A reader who
@@ -113,8 +162,8 @@ const typoBudget = (length) => (length >= 7 ? 2 : 1)
 // Null when they could not reasonably have meant it.
 const typoDistance = (entry, needle) => {
   const budget = typoBudget(needle.length)
-  const title = normalizeQuery(entry.title)
-  const candidates = [title, ...title.split(WORD_SPLIT), ...keywordWords(entry)]
+  const {title, keywordWords: words} = prepare(entry)
+  const candidates = [title, ...title.split(WORD_SPLIT), ...words]
 
   let best = null
   for (const candidate of candidates) {
@@ -499,6 +548,70 @@ export function startSearchPalette(doc = typeof document === "undefined" ? null 
     setActive(0)
   }
 
+  // Below this the palette is the full-width sheet the stylesheet describes:
+  // a panel hanging off a button needs room beside the button, and a phone has
+  // none. Matches Tailwind's `sm`, which is where the rest of the shell splits.
+  const ANCHOR_MIN_WIDTH = 640
+  const PANEL_WIDTH = 448
+  const VIEWPORT_MARGIN = 16
+  const BUTTON_GAP = 8
+
+  const view = () => doc.defaultView
+
+  // Hang the dialog under the button that opened it. A modal `<dialog>` is in
+  // the top layer, so `position: fixed` here is relative to the viewport and
+  // these four properties are the whole of the placement.
+  const anchor = (dialog) => {
+    const window_ = view()
+    const button = doc.querySelector("[data-gamend-search-open]")
+    const rect = button?.getBoundingClientRect()
+
+    // No window, no button, or a button that is not currently laid out (inside
+    // a closed hamburger, say): leave the sheet the stylesheet gives us.
+    if (!window_ || !rect || rect.width === 0 || window_.innerWidth < ANCHOR_MIN_WIDTH) {
+      for (const property of ["left", "right", "top", "width", "max-height"]) {
+        dialog.style.removeProperty(property)
+      }
+      return
+    }
+
+    const width = Math.min(PANEL_WIDTH, window_.innerWidth - VIEWPORT_MARGIN * 2)
+
+    // Aligned on the edge of the button the reader reads towards, so the panel
+    // opens back across the page rather than off the side of it.
+    const rtl = window_.getComputedStyle(doc.documentElement).direction === "rtl"
+    const preferred = rtl ? rect.left : rect.right - width
+    const furthest = window_.innerWidth - width - VIEWPORT_MARGIN
+
+    dialog.style.left = `${Math.round(Math.max(VIEWPORT_MARGIN, Math.min(preferred, furthest)))}px`
+    // `inset-x-0` in the class list pins both edges; the measured `left` only
+    // wins if the other one lets go.
+    dialog.style.right = "auto"
+    const top = Math.round(rect.bottom + BUTTON_GAP)
+    dialog.style.top = `${top}px`
+    dialog.style.width = `${Math.round(width)}px`
+    // Only as tall as the room under the button. A percentage of the viewport
+    // cannot know where the panel starts, so on a short laptop screen the list
+    // ran off the bottom with no way to reach the end of it.
+    dialog.style.maxHeight = `${Math.max(0, window_.innerHeight - top - VIEWPORT_MARGIN)}px`
+  }
+
+  // The button moves under the palette when the window changes size, and on a
+  // host whose header hides as you scroll it moves when the page does. One
+  // frame at a time, and only while there is something to move.
+  let anchorFrame = null
+
+  const reanchor = () => {
+    const dialog = dialogFor()
+    if (!dialog?.open || anchorFrame !== null) return
+
+    anchorFrame = view()?.requestAnimationFrame(() => {
+      anchorFrame = null
+      const current = dialogFor()
+      if (current?.open) anchor(current)
+    })
+  }
+
   const open = async () => {
     const dialog = dialogFor()
     if (!dialog) return
@@ -506,6 +619,7 @@ export function startSearchPalette(doc = typeof document === "undefined" ? null 
     const input = dialog.querySelector("[data-gamend-search-input]")
 
     if (!dialog.open && typeof dialog.showModal === "function") dialog.showModal()
+    anchor(dialog)
     if (input) {
       input.focus()
       input.select()
@@ -531,16 +645,33 @@ export function startSearchPalette(doc = typeof document === "undefined" ? null 
     const target = event.target
     if (!target || typeof target.closest !== "function") return
 
+    // The button is a toggle: it is the only thing on screen that says where
+    // the palette is, so pressing it again to put it away is what a reader
+    // expects — and it is outside the panel, so the rule below would otherwise
+    // close and immediately reopen it.
     if (target.closest("[data-gamend-search-open]")) {
       event.preventDefault()
-      open()
+      if (dialogFor()?.open) close()
+      else open()
       return
     }
 
-    if (target.closest("[data-gamend-search-close]") || target.matches("dialog[data-gamend-search]")) {
+    if (target.closest("[data-gamend-search-close]")) {
       close()
+      return
     }
+
+    // Anything that is not the panel is outside it. That includes the
+    // `::backdrop`, which is a pseudo-element and so reports the `<dialog>`
+    // itself as the target — the reason a plain "did the click land in the
+    // panel" test covers clicking away, and the reason the daisyUI
+    // `.modal-backdrop` div that used to sit here had to go: a real element
+    // over the backdrop swallowed the click and nothing ever closed.
+    if (dialogFor()?.open && !target.closest("[data-gamend-search-panel]")) close()
   })
+
+  view()?.addEventListener("resize", reanchor)
+  view()?.addEventListener("scroll", reanchor, {passive: true, capture: true})
 
   doc.addEventListener("input", (event) => {
     const target = event.target
@@ -574,7 +705,13 @@ export function startSearchPalette(doc = typeof document === "undefined" ? null 
 
     if (!isOpen || event.metaKey || event.ctrlKey || event.altKey) return
 
-    if (event.key === "ArrowDown") {
+    if (event.key === "Escape") {
+      // `<input type="search">` eats the first Escape to clear itself, and the
+      // cursor is always in it — so the dialog's own Esc never fired and the
+      // palette could only be closed with the mouse.
+      event.preventDefault()
+      close()
+    } else if (event.key === "ArrowDown") {
       event.preventDefault()
       setActive(active + 1)
     } else if (event.key === "ArrowUp") {

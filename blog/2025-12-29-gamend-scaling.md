@@ -6,7 +6,7 @@ Both the running instance of gamend, which can be found at [https://gamend.org](
 
 ## Infrastructure
 
-When scaling, the recommended is to use Postgres database and Redis cache:
+When scaling, the recommended setup is a Postgres database and a Redis cache:
 
 ```sh
 +------------------------------+

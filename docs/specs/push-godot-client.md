@@ -2,7 +2,7 @@
 
 Design spec for the Phase 1 **Push — Godot client** item in
 [ROADMAP.md](../../ROADMAP.md). This is the **client half** of push; the server
-half is [push.md](push.md) (the contract this targets). Ships Android first,
+half is the [push guide](../../priv/docs/40-gameplay/80-push-notifications.md) (the contract this targets). Ships Android first,
 then iOS — hence "Android → iOS".
 
 Goal: from a Godot game, obtain the device's push token, register it with the
@@ -67,7 +67,7 @@ A Godot **iOS plugin** (`GamendPushIOS`, Obj-C/Swift, packaged under the addon's
 - Needs the **Push Notifications** capability + `aps-environment` entitlement in
   the export — documented in setup.
 - Registers tokens as `platform: "ios", provider: "apns"` — **no Firebase SDK on
-  iOS**, matching the server's APNs-direct provider (see [push.md](push.md)).
+  iOS**, matching the server's APNs-direct provider (see the [push guide](../../priv/docs/40-gameplay/80-push-notifications.md)).
   (An alternate FCM-on-iOS path is possible but not shipped; APNs-direct keeps
   the iOS client lean.)
 
@@ -95,7 +95,7 @@ signal notification_opened(data: Dictionary)     # user tapped it (cold or warm 
 
 1. Client obtains a token from the platform plugin.
 2. `PushApi.register_token({token, platform, provider, device_id})` — server
-   upserts it (see [push.md](push.md) → `Push.register_token/2`). `device_id`
+   upserts it (see the [push guide](../../priv/docs/40-gameplay/80-push-notifications.md) → `Push.register_token/2`). `device_id`
    reuses the addon's existing device id so re-installs rotate in place.
 3. Server delivery (FCM/APNs) reaches the device; the plugin emits
    `notification_received` / `notification_opened`.
@@ -123,8 +123,10 @@ signal notification_opened(data: Dictionary)     # user tapped it (cold or warm 
 - **Web push (browser Push API / VAPID): defer.** Mobile is the demand; add the
   web platform branch once the JS SDK needs it. The server `web` platform enum
   already reserves the slot.
-- **Rich/interactive notifications (action buttons, images, Live Activities):
-  defer** — mirrors the server-side deferral in [push.md](push.md).
+- **Rich/interactive notifications (action buttons, Live Activities): defer.**
+  The server message (`Gamend.Push.Message`) carries `title`, `body`, `data`,
+  `image`, `sound`, `badge` and `collapse_key`; nothing server-side models
+  buttons or activities yet.
 - **FCM-on-iOS: rejected for the client.** APNs-direct keeps the iOS build free
   of the Firebase SDK; revisit only if a unified analytics story demands FCM.
 

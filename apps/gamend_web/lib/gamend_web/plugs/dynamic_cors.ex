@@ -8,7 +8,9 @@ defmodule GamendWeb.Plugs.DynamicCors do
   persistent_term for near-zero overhead on subsequent requests.
   """
 
-  @default_allow_headers ["content-type", "authorization"]
+  # `x-gamend-session` names the client's run on every call (see
+  # `GamendWeb.Plugs.ClientSession`); a browser game's preflight asks for it.
+  @default_allow_headers ["content-type", "authorization", "x-gamend-session"]
   @default_allow_methods ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
   @pt_key {__MODULE__, :corsica_opts}

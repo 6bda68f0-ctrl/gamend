@@ -8,63 +8,20 @@ defmodule GamendWeb.Api.V1.FriendController do
   alias Gamend.Accounts.User
   alias Gamend.Friends
   alias GamendWeb.Pagination
+  alias GamendWeb.Schemas
+
+  alias GamendWeb.Schemas.{
+    BlockedFriendshipPage,
+    FriendPage,
+    FriendRequestResponse,
+    FriendRequestsResponse,
+    OkResponse,
+    UserBriefPage
+  }
+
   alias OpenApiSpex.Schema
 
-  @ok_schema %Schema{type: :object}
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
-
-  @validation_error_schema %Schema{
-    type: :object,
-    properties: %{error: %Schema{type: :string}, errors: %Schema{type: :object}}
-  }
-
   tags(["Friends"])
-
-  @request_list_schema %Schema{
-    type: :array,
-    items: %Schema{
-      type: :object,
-      properties: %{
-        id: %Schema{type: :string, format: :uuid},
-        requester: %Schema{
-          type: :object,
-          properties: %{
-            id: %Schema{type: :string, format: :uuid},
-            username: %Schema{type: :string},
-            display_name: %Schema{type: :string},
-            metadata: %Schema{type: :object, description: "User metadata"},
-            is_online: %Schema{type: :boolean},
-            last_seen_at: %Schema{type: :string, format: :date_time, nullable: false}
-          }
-        },
-        target: %Schema{
-          type: :object,
-          properties: %{
-            id: %Schema{type: :string, format: :uuid},
-            username: %Schema{type: :string},
-            display_name: %Schema{type: :string},
-            metadata: %Schema{type: :object, description: "User metadata"},
-            is_online: %Schema{type: :boolean},
-            last_seen_at: %Schema{type: :string, format: :date_time, nullable: false}
-          }
-        },
-        status: %Schema{type: :string},
-        inserted_at: %Schema{type: :string, format: :date_time}
-      }
-    }
-  }
-
-  @request_meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      count: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer},
-      has_more: %Schema{type: :boolean}
-    }
-  }
 
   operation(:create,
     operation_id: "create_friend_request",
@@ -86,11 +43,11 @@ defmodule GamendWeb.Api.V1.FriendController do
       }
     },
     responses: [
-      created: {"Request created", "application/json", @ok_schema},
-      bad_request: {"Bad request", "application/json", @error_schema},
-      conflict: {"Already friends or requested", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", @validation_error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      created: {"Request created", "application/json", FriendRequestResponse},
+      bad_request: Schemas.error("Bad request"),
+      conflict: Schemas.error("Already friends or requested"),
+      unprocessable_entity: Schemas.error("Validation failed"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -113,51 +70,7 @@ defmodule GamendWeb.Api.V1.FriendController do
       ]
     ],
     responses: [
-      ok:
-        {"List of friends (paginated)", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{
-               type: :array,
-               items: %Schema{
-                 type: :object,
-                 properties: %{
-                   id: %Schema{type: :string, format: :uuid},
-                   friendship_id: %Schema{type: :string, format: :uuid},
-                   username: %Schema{type: :string},
-                   display_name: %Schema{type: :string},
-                   profile_url: %Schema{type: :string},
-                   metadata: %Schema{
-                     type: :object,
-                     description: "User metadata (accessories, hat, color, etc.)"
-                   },
-                   is_online: %Schema{
-                     type: :boolean,
-                     description: "Whether the friend is currently connected"
-                   },
-                   last_seen_at: %Schema{
-                     type: :string,
-                     format: "date-time",
-                     nullable: false,
-                     description: "Last time the friend connected or disconnected"
-                   }
-                 }
-               }
-             },
-             meta: %Schema{
-               type: :object,
-               properties: %{
-                 page: %Schema{type: :integer},
-                 page_size: %Schema{type: :integer},
-                 count: %Schema{type: :integer},
-                 total_count: %Schema{type: :integer},
-                 total_pages: %Schema{type: :integer},
-                 has_more: %Schema{type: :boolean}
-               }
-             }
-           }
-         }}
+      ok: {"List of friends (paginated)", "application/json", FriendPage}
     ]
   )
 
@@ -180,29 +93,7 @@ defmodule GamendWeb.Api.V1.FriendController do
       ]
     ],
     responses: [
-      ok: {
-        "Requests",
-        "application/json",
-        %Schema{
-          type: :object,
-          properties: %{
-            data: %Schema{
-              type: :object,
-              properties: %{
-                incoming: @request_list_schema,
-                outgoing: @request_list_schema
-              }
-            },
-            meta: %Schema{
-              type: :object,
-              properties: %{
-                incoming: @request_meta_schema,
-                outgoing: @request_meta_schema
-              }
-            }
-          }
-        }
-      }
+      ok: {"Requests", "application/json", FriendRequestsResponse}
     ]
   )
 
@@ -220,9 +111,9 @@ defmodule GamendWeb.Api.V1.FriendController do
       ]
     ],
     responses: [
-      ok: {"Accepted", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Not authorized", "application/json", @error_schema}
+      ok: {"Accepted", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Not authorized")
     ]
   )
 
@@ -240,9 +131,9 @@ defmodule GamendWeb.Api.V1.FriendController do
       ]
     ],
     responses: [
-      ok: {"Rejected", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Not authorized", "application/json", @error_schema}
+      ok: {"Rejected", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Not authorized")
     ]
   )
 
@@ -260,9 +151,9 @@ defmodule GamendWeb.Api.V1.FriendController do
       ]
     ],
     responses: [
-      ok: {"Blocked", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Not authorized", "application/json", @error_schema}
+      ok: {"Blocked", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Not authorized")
     ]
   )
 
@@ -285,43 +176,7 @@ defmodule GamendWeb.Api.V1.FriendController do
       ]
     ],
     responses: [
-      ok: {
-        "Blocked list",
-        "application/json",
-        %Schema{
-          type: :object,
-          properties: %{
-            data: %Schema{
-              type: :array,
-              items: %Schema{
-                type: :object,
-                properties: %{
-                  id: %Schema{type: :string, format: :uuid},
-                  requester: %Schema{
-                    type: :object,
-                    properties: %{
-                      id: %Schema{type: :string, format: :uuid},
-                      username: %Schema{type: :string},
-                      display_name: %Schema{type: :string}
-                    }
-                  }
-                }
-              }
-            },
-            meta: %Schema{
-              type: :object,
-              properties: %{
-                page: %Schema{type: :integer},
-                page_size: %Schema{type: :integer},
-                count: %Schema{type: :integer},
-                total_count: %Schema{type: :integer},
-                total_pages: %Schema{type: :integer},
-                has_more: %Schema{type: :boolean}
-              }
-            }
-          }
-        }
-      }
+      ok: {"Blocked list", "application/json", BlockedFriendshipPage}
     ]
   )
 
@@ -339,10 +194,10 @@ defmodule GamendWeb.Api.V1.FriendController do
       ]
     ],
     responses: [
-      ok: {"Unblocked", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Not authorized", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Unblocked", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Not authorized"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -368,28 +223,8 @@ defmodule GamendWeb.Api.V1.FriendController do
       ]
     ],
     responses: [
-      ok: {
-        "Blacklisted users",
-        "application/json",
-        %Schema{
-          type: :object,
-          properties: %{
-            data: %Schema{
-              type: :array,
-              items: %Schema{
-                type: :object,
-                properties: %{
-                  id: %Schema{type: :string, format: :uuid},
-                  username: %Schema{type: :string},
-                  display_name: %Schema{type: :string}
-                }
-              }
-            },
-            meta: %Schema{type: :object}
-          }
-        }
-      },
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Blacklisted users", "application/json", UserBriefPage},
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -409,9 +244,9 @@ defmodule GamendWeb.Api.V1.FriendController do
       ]
     ],
     responses: [
-      ok: {"Blocked", "application/json", %Schema{type: :object}},
-      bad_request: {"Invalid id or cannot block self", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema}
+      ok: {"Blocked", "application/json", OkResponse},
+      bad_request: Schemas.error("Invalid id or cannot block self"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -428,10 +263,10 @@ defmodule GamendWeb.Api.V1.FriendController do
       ]
     ],
     responses: [
-      ok: {"Unblocked", "application/json", %Schema{type: :object}},
-      bad_request: {"Invalid id", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Unblocked", "application/json", OkResponse},
+      bad_request: Schemas.error("Invalid id"),
+      unauthorized: Schemas.error("Not authenticated"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -441,9 +276,9 @@ defmodule GamendWeb.Api.V1.FriendController do
     security: [%{"authorization" => []}],
     parameters: [id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]],
     responses: [
-      ok: {"Success", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Not authorized", "application/json", @error_schema}
+      ok: {"Success", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Not authorized")
     ]
   )
 
@@ -456,26 +291,21 @@ defmodule GamendWeb.Api.V1.FriendController do
         target_id = params["target_user_id"]
 
         case Friends.create_request(user.id, target_id) do
-          {:ok, _f} ->
-            conn |> put_status(:created) |> json(%{})
+          {:ok, friendship} ->
+            reply_data(conn, :created, serialize_request(friendship))
 
           {:error, :cannot_friend_self} ->
-            conn |> put_status(:bad_request) |> json(%{error: "cannot_friend_self"})
+            reply_error(conn, :bad_request, "cannot_friend_self")
 
           {:error, %Ecto.Changeset{} = cs} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: "validation_failed",
-              errors: Ecto.Changeset.traverse_errors(cs, & &1)
-            })
+            unprocessable(conn, cs)
 
           {:error, reason} ->
-            conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
+            reply_error(conn, :bad_request, reason)
         end
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -484,23 +314,23 @@ defmodule GamendWeb.Api.V1.FriendController do
       %User{} = user ->
         case parse_id(id) do
           nil ->
-            conn |> put_status(:bad_request) |> json(%{error: "invalid_id"})
+            reply_error(conn, :bad_request, "invalid_id")
 
           int_id ->
             case Friends.block_friend_request(int_id, user) do
               {:ok, _f} ->
-                json(conn, %{})
+                reply_ok(conn)
 
               {:error, :not_found} ->
-                conn |> put_status(:not_found) |> json(%{error: "not_found"})
+                reply_error(conn, :not_found, "not_found")
 
               {:error, :not_authorized} ->
-                conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
+                reply_error(conn, :forbidden, "forbidden")
             end
         end
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -513,13 +343,10 @@ defmodule GamendWeb.Api.V1.FriendController do
         serialized = Enum.map(users, &serialize_user/1)
         total_count = Friends.count_blocked_users(user.id)
 
-        json(conn, %{
-          data: serialized,
-          meta: GamendWeb.Pagination.meta(page, page_size, length(serialized), total_count)
-        })
+        reply_page(conn, serialized, page, page_size, total_count)
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -528,23 +355,23 @@ defmodule GamendWeb.Api.V1.FriendController do
       %User{} = user ->
         case parse_id(user_id) do
           nil ->
-            conn |> put_status(:bad_request) |> json(%{error: "invalid_id"})
+            reply_error(conn, :bad_request, "invalid_id")
 
           target_id ->
             case Friends.block_user(user, target_id) do
               {:ok, _f} ->
-                json(conn, %{})
+                reply_ok(conn)
 
               {:error, :cannot_block_self} ->
-                conn |> put_status(:bad_request) |> json(%{error: "cannot_block_self"})
+                reply_error(conn, :bad_request, "cannot_block_self")
 
               {:error, _reason} ->
-                conn |> put_status(:bad_request) |> json(%{error: "invalid"})
+                reply_error(conn, :bad_request, "invalid")
             end
         end
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -553,23 +380,23 @@ defmodule GamendWeb.Api.V1.FriendController do
       %User{} = user ->
         case parse_id(user_id) do
           nil ->
-            conn |> put_status(:bad_request) |> json(%{error: "invalid_id"})
+            reply_error(conn, :bad_request, "invalid_id")
 
           target_id ->
             case Friends.unblock_user(user, target_id) do
               {:ok, :unblocked} ->
-                json(conn, %{})
+                reply_ok(conn)
 
               {:error, :not_found} ->
-                conn |> put_status(:not_found) |> json(%{error: "not_found"})
+                reply_error(conn, :not_found, "not_found")
 
               {:error, reason} ->
-                conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
+                reply_error(conn, :bad_request, reason)
             end
         end
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -581,16 +408,12 @@ defmodule GamendWeb.Api.V1.FriendController do
         # include the friendship row id so clients can call delete/accept/reject by id
         friends = Friends.list_friends_with_friendship(user.id, page: page, page_size: page_size)
         serialized = Enum.map(friends, &serialize_friend/1)
-        count = length(serialized)
         total_count = Friends.count_friends_for_user(user.id)
 
-        json(conn, %{
-          data: serialized,
-          meta: GamendWeb.Pagination.meta(page, page_size, count, total_count)
-        })
+        reply_page(conn, serialized, page, page_size, total_count)
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -604,16 +427,12 @@ defmodule GamendWeb.Api.V1.FriendController do
         serialized =
           Enum.map(blocked, fn f -> %{id: f.id, requester: serialize_user(f.requester)} end)
 
-        count = length(serialized)
         total_count = Friends.count_blocked_for_user(user.id)
 
-        json(conn, %{
-          data: serialized,
-          meta: GamendWeb.Pagination.meta(page, page_size, count, total_count)
-        })
+        reply_page(conn, serialized, page, page_size, total_count)
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -622,26 +441,26 @@ defmodule GamendWeb.Api.V1.FriendController do
       %User{} = user ->
         case parse_id(id) do
           nil ->
-            conn |> put_status(:bad_request) |> json(%{error: "invalid_id"})
+            reply_error(conn, :bad_request, "invalid_id")
 
           int_id ->
             case Friends.unblock_friendship(int_id, user) do
               {:ok, :unblocked} ->
-                json(conn, %{})
+                reply_ok(conn)
 
               {:error, :not_found} ->
-                conn |> put_status(:not_found) |> json(%{error: "not_found"})
+                reply_error(conn, :not_found, "not_found")
 
               {:error, :not_authorized} ->
-                conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
+                reply_error(conn, :forbidden, "forbidden")
 
               {:error, reason} ->
-                conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
+                reply_error(conn, :bad_request, reason)
             end
         end
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -661,16 +480,15 @@ defmodule GamendWeb.Api.V1.FriendController do
 
         # Two collections share one window, so each gets its own standard meta
         # rather than the response inventing a parallel-map shape of its own.
-        json(conn, %{
-          data: %{incoming: inc_serialized, outgoing: out_serialized},
-          meta: %{
-            incoming: Pagination.meta(page, page_size, length(inc_serialized), total_in),
-            outgoing: Pagination.meta(page, page_size, length(out_serialized), total_out)
-          }
-        })
+        reply_pages(
+          conn,
+          %{incoming: {inc_serialized, total_in}, outgoing: {out_serialized, total_out}},
+          page,
+          page_size
+        )
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -679,26 +497,26 @@ defmodule GamendWeb.Api.V1.FriendController do
       %User{} = user ->
         case parse_id(id) do
           nil ->
-            conn |> put_status(:bad_request) |> json(%{error: "invalid_id"})
+            reply_error(conn, :bad_request, "invalid_id")
 
           int_id ->
             case Friends.accept_friend_request(int_id, user) do
               {:ok, _f} ->
-                json(conn, %{})
+                reply_ok(conn)
 
               {:error, :not_found} ->
-                conn |> put_status(:not_found) |> json(%{error: "not_found"})
+                reply_error(conn, :not_found, "not_found")
 
               {:error, :not_authorized} ->
-                conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
+                reply_error(conn, :forbidden, "forbidden")
 
               {:error, reason} ->
-                conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
+                reply_error(conn, :bad_request, reason)
             end
         end
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -707,26 +525,26 @@ defmodule GamendWeb.Api.V1.FriendController do
       %User{} = user ->
         case parse_id(id) do
           nil ->
-            conn |> put_status(:bad_request) |> json(%{error: "invalid_id"})
+            reply_error(conn, :bad_request, "invalid_id")
 
           int_id ->
             case Friends.reject_friend_request(int_id, user) do
               {:ok, _f} ->
-                json(conn, %{})
+                reply_ok(conn)
 
               {:error, :not_found} ->
-                conn |> put_status(:not_found) |> json(%{error: "not_found"})
+                reply_error(conn, :not_found, "not_found")
 
               {:error, :not_authorized} ->
-                conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
+                reply_error(conn, :forbidden, "forbidden")
 
               {:error, reason} ->
-                conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
+                reply_error(conn, :bad_request, reason)
             end
         end
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -735,12 +553,12 @@ defmodule GamendWeb.Api.V1.FriendController do
       %User{} = user ->
         case parse_id(id) do
           nil ->
-            conn |> put_status(:bad_request) |> json(%{error: "invalid_id"})
+            reply_error(conn, :bad_request, "invalid_id")
 
           int_id ->
             case Friends.get_friendship(int_id) do
               nil ->
-                conn |> put_status(:not_found) |> json(%{error: "not_found"})
+                reply_error(conn, :not_found, "not_found")
 
               f ->
                 handle_delete_friendship(conn, user, f)
@@ -748,7 +566,7 @@ defmodule GamendWeb.Api.V1.FriendController do
         end
 
       _ ->
-        conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
+        reply_error(conn, :unauthorized, "not_authenticated")
     end
   end
 
@@ -756,8 +574,9 @@ defmodule GamendWeb.Api.V1.FriendController do
     cond do
       f.status == "pending" and f.requester_id == user.id ->
         case Friends.cancel_request(f.id, user) do
-          {:ok, :cancelled} -> json(conn, %{})
-          err -> conn |> put_status(:bad_request) |> json(%{error: to_string(err)})
+          {:ok, :cancelled} -> reply_ok(conn)
+          {:error, :not_found} -> reply_error(conn, :not_found, "not_found")
+          {:error, _reason} -> reply_error(conn, :bad_request, "remove_failed")
         end
 
       f.status == "accepted" and (f.requester_id == user.id or f.target_id == user.id) ->
@@ -765,12 +584,12 @@ defmodule GamendWeb.Api.V1.FriendController do
                user.id,
                if(f.requester_id == user.id, do: f.target_id, else: f.requester_id)
              ) do
-          {:ok, _} -> json(conn, %{})
-          err -> conn |> put_status(:bad_request) |> json(%{error: to_string(err)})
+          {:ok, _} -> reply_ok(conn)
+          {:error, _reason} -> reply_error(conn, :bad_request, "remove_failed")
         end
 
       true ->
-        conn |> put_status(:forbidden) |> json(%{error: "not_authorized"})
+        reply_error(conn, :forbidden, "not_authorized")
     end
   end
 
@@ -783,37 +602,8 @@ defmodule GamendWeb.Api.V1.FriendController do
   end
 
   defp serialize_request(%Friends.Friendship{} = f) do
-    requester =
-      case f.requester do
-        %Ecto.Association.NotLoaded{} ->
-          %{
-            id: f.requester_id,
-            username: "",
-            display_name: "",
-            metadata: %{},
-            is_online: false,
-            last_seen_at: User.last_seen_at_or_fallback(%User{})
-          }
-
-        %User{} = r ->
-          User.serialize_brief(r)
-      end
-
-    target =
-      case f.target do
-        %Ecto.Association.NotLoaded{} ->
-          %{
-            id: f.target_id,
-            username: "",
-            display_name: "",
-            metadata: %{},
-            is_online: false,
-            last_seen_at: User.last_seen_at_or_fallback(%User{})
-          }
-
-        %User{} = t ->
-          User.serialize_brief(t)
-      end
+    requester = brief(f.requester, f.requester_id)
+    target = brief(f.target, f.target_id)
 
     %{
       id: f.id,
@@ -823,4 +613,9 @@ defmodule GamendWeb.Api.V1.FriendController do
       inserted_at: f.inserted_at
     }
   end
+
+  # A side that was not preloaded is sent as a blank member row with its id,
+  # built by the same serializer, so it has every field a loaded one has.
+  defp brief(%User{} = user, _id), do: User.serialize_brief(user)
+  defp brief(_not_loaded, id), do: User.serialize_brief(%User{id: id})
 end

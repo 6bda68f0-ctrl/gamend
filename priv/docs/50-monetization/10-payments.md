@@ -60,9 +60,9 @@ charge.dispute.created
 charge.dispute.funds_withdrawn
 ```
 
-1. Save the endpoint.
-2. Open endpoint details and copy the signing secret starting with `whsec_...`.
-3. Set `GAMEND_PAYMENTS_STRIPE_SANDBOX_WEBHOOK_SECRET` or `GAMEND_PAYMENTS_STRIPE_PRODUCTION_WEBHOOK_SECRET` to that value, matching `GAMEND_PAYMENTS_ENVIRONMENT`.
+6. Save the endpoint.
+7. Open endpoint details and copy the signing secret starting with `whsec_...`.
+8. Set `GAMEND_PAYMENTS_STRIPE_SANDBOX_WEBHOOK_SECRET` or `GAMEND_PAYMENTS_STRIPE_PRODUCTION_WEBHOOK_SECRET` to that value, matching `GAMEND_PAYMENTS_ENVIRONMENT`.
 
 Do not enable all Stripe events. Extra events add webhook traffic, stored provider events, retries, and logs without changing purchase fulfillment.
 
@@ -79,11 +79,9 @@ stripe listen --forward-to localhost:4000/api/v1/payments/webhooks/stripe
 
 Detected Stripe mode and masked provider variables are visible in [Admin > Config](/admin/config).
 
-Stripe API Keys
-
-Stripe Authentication
-
-Stripe Webhooks
+Stripe docs: [API keys](https://docs.stripe.com/keys),
+[authentication](https://docs.stripe.com/api/authentication),
+[webhooks](https://docs.stripe.com/webhooks).
 
 ## Stripe Checkout setup
 
@@ -96,12 +94,18 @@ Stripe Webhooks
 
 Entitlement and subscription products are buy-once while active: checkout quantity must be 1, and users with an active grant or in-progress checkout cannot start another checkout for that product. Consumables can be bought repeatedly.
 
+Checkout answers `{"data": {"purchase": ..., "checkout_url": ..., "provider_session_id": ...}}`. A refusal is a code: `quantity_not_allowed` (400); `already_owned` or `purchase_already_in_progress` (409); a `*_not_found` product (404); `stripe_not_configured` and every other `*_not_configured` (503), because the server is missing something, not the request. The catalog (`GET /api/v1/payments/catalog`) and the player's entitlements (`GET /api/v1/payments/entitlements`) are pages.
+
 Apple, Google, Steam, and Stripe products that unlock the same thing must point to the same internal product, or their internal products must share the same grant_config.entitlement_key. Ownership checks use that entitlement key across providers.
 
 Currency display is handled by Stripe Checkout. Enable Stripe Adaptive Pricing in Stripe Dashboard, or configure multi-currency Prices with currency options. The provider SKU still stores the Stripe Price ID.
 
-```text
-product_sku": "coins_100", "success_url": "https://your-game.example/payments/success", "cancel_url": "https://your-game.example/payments/cancel
+```json
+{
+  "product_sku": "coins_100",
+  "success_url": "https://your-game.example/payments/success",
+  "cancel_url": "https://your-game.example/payments/cancel"
+}
 ```
 
 ## User store and downloads
@@ -111,8 +115,11 @@ Authenticated users can open /store to test browser purchases. Stripe rows start
 - `/users/settings?tab=payments` shows order history, active entitlements, Stripe subscription cancellation, and downloads.
 - Consumables such as coin packs stay visible in purchase history. Use after_purchase_fulfilled/1 to grant coins or items in your game hooks.
 
-```text
-entitlement_key": "premium", "duration_seconds": 2592000 }
+```json
+{
+  "entitlement_key": "premium",
+  "duration_seconds": 2592000
+}
 ```
 
 Stripe subscription entitlements stay active while the subscription auto-renews. The account page shows Renews with Stripe current_period_end when known, Auto-renews when no provider period end is stored yet, and Cancels after cancel_at_period_end is scheduled.
@@ -133,15 +140,14 @@ Download assets are served from the payment downloads directory or priv/download
 
 ## Refunds, disputes and reversals
 
-Stripe refund and dispute events are callbacks. They update the purchase and revoke entitlements created by that purchase.
+Stripe refund and dispute events are callbacks. When one takes effect it updates the purchase and revokes the entitlements created by that purchase; otherwise it is ignored.
 
-| Event | Result |
-|---|---|
-| `charge.refunded` | Purchase marked refunded; entitlements revoked |
-| `refund.created` | Purchase marked refunded; entitlements revoked |
-| `refund.updated` | Purchase marked refunded; entitlements revoked |
-| `charge.dispute.created` | Purchase marked revoked; entitlements revoked |
-| `charge.dispute.funds_withdrawn` | Purchase marked revoked; entitlements revoked |
+| Event | Takes effect when | Result |
+|---|---|---|
+| `charge.refunded` | the charge is refunded in full (a partial refund is not a revocation) | Purchase marked refunded; entitlements revoked |
+| `refund.created`, `refund.updated`, `charge.refund.updated` | the refund's status is `succeeded` (a pending, failed or cancelled refund changes nothing) | Purchase marked refunded; entitlements revoked |
+| `charge.dispute.created` | always | Purchase marked revoked; entitlements revoked |
+| `charge.dispute.funds_withdrawn` | always | Purchase marked revoked; entitlements revoked |
 
 Recommended webhook events also include `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `customer.subscription.updated`, `customer.subscription.deleted`, and `charge.succeeded`.
 
@@ -174,11 +180,10 @@ GAMEND_PAYMENTS_GOOGLE_PLAY_AUTO_ACKNOWLEDGE=true
 3. For subscriptions, include `purchase_type: "subscription"` and `purchase_token`.
 4. Configure Pub/Sub push for RTDN to `POST /api/v1/payments/webhooks/google`.
 
-Google Product API
-
-Google Subscriptions API
-
-Google RTDN
+Google docs:
+[purchases.products](https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.products/get),
+[purchases.subscriptionsv2](https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptionsv2/get),
+[real-time developer notifications](https://developer.android.com/google/play/billing/rtdn-reference).
 
 ### App Store
 
@@ -195,11 +200,9 @@ GAMEND_PAYMENTS_APPLE_PRIVATE_KEY_PATH=/run/secrets/AuthKey_ABC123DEFG.p8
 3. If only transaction ID is available, send `transaction_id` and server fetches App Store Server API transaction info.
 4. Configure App Store Server Notifications v2 to `POST /api/v1/payments/webhooks/apple`.
 
-App Store Server API
-
-Get Transaction Info
-
-Apple Notifications
+Apple docs: [App Store Server API](https://developer.apple.com/documentation/appstoreserverapi),
+[Get Transaction Info](https://developer.apple.com/documentation/appstoreserverapi/get-transaction-info),
+[App Store Server Notifications](https://developer.apple.com/documentation/appstoreservernotifications).
 
 ### Steam MicroTxn
 
@@ -216,7 +219,7 @@ If `GAMEND_PAYMENTS_STEAM_WEB_API_KEY` is unset, payments reuse `GAMEND_OAUTH_ST
 3. After Steam approval, client calls `POST /api/v1/payments/steam/finalize` with `order_id`.
 4. Use Steam reports for later reconciliation of refunds and chargebacks.
 
-Steam MicroTxn API
+Steam docs: [ISteamMicroTxn](https://partner.steamgames.com/doc/webapi/isteammicrotxn).
 
 ## Admin and hooks
 

@@ -3,37 +3,23 @@ defmodule GamendWeb.Api.V1.Admin.RetentionController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.Retention
-  alias OpenApiSpex.Schema
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.RetentionStatusResponse
 
   tags(["Admin – Retention"])
-
-  @status_schema %Schema{
-    type: :object,
-    properties: %{
-      last_run_at: %Schema{type: :string, format: "date-time", nullable: true},
-      duration_ms: %Schema{type: :integer, nullable: true},
-      results: %Schema{
-        type: :object,
-        description: "Rows pruned per class in the last sweep",
-        additionalProperties: %Schema{type: :integer}
-      }
-    }
-  }
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
 
   operation(:show,
     operation_id: "admin_get_retention_status",
     summary: "Last retention sweep (admin)",
     security: [%{"authorization" => []}],
     responses: [
-      ok: {"Status", "application/json", @status_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Status", "application/json", RetentionStatusResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
-  def show(conn, _params), do: json(conn, serialize(Retention.status()))
+  def show(conn, _params), do: reply_data(conn, serialize(Retention.status()))
 
   operation(:run,
     operation_id: "admin_run_retention",
@@ -43,21 +29,24 @@ defmodule GamendWeb.Api.V1.Admin.RetentionController do
         "the sweeper, so it can never overlap the scheduled run.",
     security: [%{"authorization" => []}],
     responses: [
-      ok: {"Status", "application/json", @status_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      service_unavailable: {"Sweeper not running", "application/json", @error_schema}
+      ok: {"Status after the sweep", "application/json", RetentionStatusResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      service_unavailable: Schemas.error("Sweeper not running")
     ]
   )
 
   def run(conn, _params) do
     _results = Retention.run_now()
-    json(conn, serialize(Retention.status()))
+    reply_data(conn, serialize(Retention.status()))
   catch
     :exit, _reason ->
-      conn
-      |> put_status(:service_unavailable)
-      |> json(%{error: "retention sweeper is not running"})
+      reply_error(
+        conn,
+        :service_unavailable,
+        "sweeper_not_running",
+        "The retention sweeper is not running"
+      )
   end
 
   defp serialize(status) do

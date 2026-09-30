@@ -102,27 +102,107 @@ defimpl Jason.Encoder, for: MySchema do
 end
 ```
 
-**[R6]** An OpenAPI string property must not declare `nullable: true`. A
-schema that contradicts its serializer is worse than no schema — clients
-generate code from it.
+**[R6]** An OpenAPI string property must not declare `nullable: true`,
+unless it is a date or date-time. A schema that contradicts its serializer is
+worse than no schema — clients generate code from it. The lint checks the
+source line; `GamendWeb.ApiShapeTest` checks every property of the built
+document, nested and referenced ones included.
 
 ## Response shapes
 
-Reads return `data`, plus `meta` when paginated:
+**[R15]** Every JSON response takes one of four shapes, and nothing else:
+
+| Shape | Answers | Body | Helper |
+|---|---|---|---|
+| Resource | a read, or a write with something to return | `{"data": {...}}` | `reply_data/2,3` |
+| Page | any list of records | `{"data": [...], "meta": PageMeta}` | `reply_page/5` |
+| Done | a write with nothing to return | `{"ok": true}` | `reply_ok/1` |
+| Error | every 4xx and 5xx | `{"error": "snake_case", "message": "...", "errors": {...}}` | `reply_error/3,4`, `unprocessable/2` |
+
+The helpers live in `GamendWeb.Reply`, imported into every controller with
+`unprocessable/2`; answering through them is how a controller stays inside
+the table.
+
+- **Top level is fixed.** `data` alone, `data` with `meta`, `ok` alone, or
+  `error` with optional `message` and `errors`. Everything else — a member
+  list, a spectator count, a cursor — goes inside `data`.
+- **A write returns what it wrote.** Create answers 201 with the new resource,
+  update the updated one (a profile change answers the whole current user).
+  A write with nothing to show answers `{"ok": true}`, never `{}`.
+- **A list is a page.** An array under `data` carries the six-key `meta` from
+  `GamendWeb.Pagination`, even when the list is short today. The one
+  exemption is a fixed vocabulary — an array of enum strings, such as the
+  enabled sign-in providers. Two lists in one answer (friend requests) put an
+  object of lists under `data` and one `PageMeta` per list under `meta`:
 
 ```json
 {"data": [...], "meta": {"page": 1, "page_size": 25, "count": 25,
                          "total_count": 130, "total_pages": 6, "has_more": true}}
 ```
 
-All six meta keys, always, via `GamendWeb.Pagination.meta/4`. Mutations
-return `data` with the affected resource, or `{"ok": true}` when there is
-nothing to return. Errors return `{"error": "snake_case_reason"}` with a
-matching HTTP status.
+- **An error is a code.** `error` is a `snake_case` reason a client can switch
+  on; `message` is optional prose for a person; nothing else rides along.
+  Exceptions the endpoint renders (an unknown route, a crash) take the same
+  shape: `{"error": "not_found", "message": "Not Found"}`.
+- **The status follows the reason.** 404 for a thing that is not there,
+  including the caller's own current thing (`not_in_party`,
+  `no_current_match`: never `{"data": null}`); 409 when what was asked for
+  already holds (`already_member`, `already_registered`, every `already_*`);
+  403 for a refusal (`full`, `registration_closed`, a game hook's
+  `rejected`, whose words go in `message`, and a quest not yet
+  `not_completed`); 400 for a malformed request (`missing_param`,
+  `invalid_index`); 503 when the server, not the request, lacks something
+  (`stripe_not_configured`, every `*_not_configured`).
 
-An endpoint returning two parallel collections (friend requests) nests one
-standard meta per collection under `meta.incoming` / `meta.outgoing` rather
-than inventing a parallel-map shape.
+**[R12]** A failed changeset adds the per-field detail under `errors`, keyed by
+field, each value a list of already-interpolated, already-translated messages.
+`errors` appears with `"error": "validation_failed"` and nowhere else, and
+that answer is 422 — or 409 when what failed is a uniqueness constraint (a
+lobby title already taken):
+
+```json
+{"error": "validation_failed",
+ "errors": {"max_players": ["must be greater than or equal to min_players"]}}
+```
+
+`unprocessable(conn, changeset)` is the only way to write it;
+`GamendWeb.ChangesetErrors.errors/1` gives the map alone for the 409 case.
+`mix gamend.api.lint` rejects a hand-rolled `traverse_errors` in a controller.
+
+**[R16]** A person is named `<role>_name` (`host_name`, `sender_name`,
+`leader_name`); a thing carries its `title` (`group_title`, never
+`group_name`); no property is called `name`.
+
+**Enforcement.** `GamendWeb.ApiShapeTest` checks the OpenAPI document: every
+success response is a named component in one of the first three shapes, every
+error response is `ErrorResponse`, R16 holds for every property, and
+no string but a date or date-time is nullable (R6). At run
+time `GamendWeb.ResponseContract` checks every response the test suite
+provokes against its documented schema, rejects undeclared keys, and holds
+error bodies to the rules above. Together they mean a new endpoint cannot
+answer in a fifth shape without failing CI. Both see only documented
+operations, so **[R15]** in `mix gamend.api.lint` covers the source: an API
+controller answers through `GamendWeb.Reply`, never `json/2`, and documents a
+JSON response with a named `GamendWeb.Schemas` module, never an inline
+`%Schema{}`. See
+[named-api-schemas.md](named-api-schemas.md) for how the documented schemas
+are named.
+
+## Authentication in the document
+
+An operation's `security` says what its route's pipeline enforces, because a
+generated client sends the bearer token only where `security` asks for it:
+
+| Route pipeline | `security` |
+|---|---|
+| `:api_auth` | `[%{"authorization" => []}]` |
+| `:api_optional_auth` | `[%{}, %{"authorization" => []}]` — anonymous works, a signed-in caller sees more |
+| neither | none |
+
+`authorization` is the only scheme the document defines; a requirement naming
+another (`"bearer"`) is skipped by generators, which then send nothing.
+`GamendWeb.ApiSecurityTest` checks every `/api/v1` route against its
+operation.
 
 ## Paths
 

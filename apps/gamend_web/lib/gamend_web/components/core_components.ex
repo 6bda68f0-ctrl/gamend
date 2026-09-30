@@ -36,6 +36,25 @@ defmodule GamendWeb.CoreComponents do
   alias Phoenix.HTML.Form
   alias Phoenix.LiveView.JS
 
+  attr :name, :string, required: true
+
+  attr :class, :any,
+    default: "max-w-[24ch]",
+    doc: "width cap; replaced, not merged, so pass the cap you want (`max-w-full` in a sized box)"
+
+  attr :rest, :global
+
+  @doc """
+  A player's display name on one line: cut with an ellipsis where it does not
+  fit, whole on hover (`title`). A display name may be 255 characters, so any
+  place that prints one bare can be pushed wide by a single player.
+  """
+  def player_name(assigns) do
+    ~H"""
+    <span class={["inline-block min-w-0 truncate align-bottom", @class]} title={@name} {@rest}>{@name}</span>
+    """
+  end
+
   attr :code, :any, required: true, doc: "ISO alpha-2 country code, or nil for none"
   attr :square, :boolean, default: false, doc: "1:1 box instead of 4:3"
   attr :eager, :boolean, default: false, doc: "visible at load: fetch and decode with the page"
@@ -461,9 +480,12 @@ defmodule GamendWeb.CoreComponents do
   "or" divider. Renders nothing when no provider is enabled, so the auth
   forms need no branching of their own.
 
-      <.oauth_buttons label={gettext("Log in")} />
+      <.oauth_buttons action={:login} />
+
+  The label names the provider ("Log in with Discord"), so a row of buttons
+  does not read as the same word five times.
   """
-  attr :label, :string, required: true
+  attr :action, :atom, values: [:login, :register], required: true
 
   def oauth_buttons(assigns) do
     assigns = assign(assigns, :providers, Providers.enabled())
@@ -472,19 +494,32 @@ defmodule GamendWeb.CoreComponents do
     <div :if={@providers != []}>
       <div class="divider">{gettext("or")}</div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
+      <%!-- One column until lg: the form is max-w-sm below that, and a named
+           label ("Log in with Facebook") does not fit half of it. --%>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <.link
           :for={provider <- @providers}
           href={"/auth/#{provider}"}
-          class="btn btn-neutral w-full flex items-center justify-center gap-2"
+          class="btn btn-neutral w-full h-auto min-h-10 py-2 whitespace-normal flex items-center justify-center gap-2"
         >
           <.oauth_icon provider={provider} />
-          {@label}
+          {oauth_label(@action, oauth_name(provider))}
         </.link>
       </div>
     </div>
     """
   end
+
+  defp oauth_label(:login, name), do: gettext("Log in with %{provider}", provider: name)
+  defp oauth_label(:register, name), do: gettext("Register with %{provider}", provider: name)
+
+  # Brand names: never translated.
+  defp oauth_name(:discord), do: "Discord"
+  defp oauth_name(:google), do: "Google"
+  defp oauth_name(:apple), do: "Apple"
+  defp oauth_name(:facebook), do: "Facebook"
+  defp oauth_name(:github), do: "GitHub"
+  defp oauth_name(:steam), do: "Steam"
 
   attr :provider, :atom, required: true
 
@@ -531,6 +566,14 @@ defmodule GamendWeb.CoreComponents do
     ~H"""
     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
       <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+    </svg>
+    """
+  end
+
+  defp oauth_icon(%{provider: :github} = assigns) do
+    ~H"""
+    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+      <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 0-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.2-.4-.6-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.2 2.8.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.6-2.8 5.6-5.5 5.9.5.4.9 1.1.9 2.3v3.3c0 .3.1.7.8.6A12 12 0 0 0 12 .3" />
     </svg>
     """
   end
@@ -930,13 +973,6 @@ defmodule GamendWeb.CoreComponents do
   end
 
   @doc """
-  Translates the errors for a field from a keyword list of errors.
-  """
-  def translate_errors(errors, field) when is_list(errors) do
-    for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
-  end
-
-  @doc """
   Renders a stored-UTC timestamp for a human reader.
 
   The server has no timezone database and no idea where the reader is, so it
@@ -964,14 +1000,18 @@ defmodule GamendWeb.CoreComponents do
     ~H"{@empty}"
   end
 
-  # A bare date (blog posts, release dates) has no instant to localize, so it
-  # is rendered as-is with no `data-local-time` — shifting it into the
-  # reader's zone would move it across midnight boundaries it never crossed.
+  # A bare date (blog posts, release dates) has no instant to localize, and
+  # shifting it into the reader's zone would move it across midnight boundaries
+  # it never crossed. It used to skip the localizer for that reason, which left
+  # it in English for every reader. `calendar-date` translates it with the zone
+  # pinned to UTC, so it changes language without changing day.
   def timestamp(%{at: %Date{} = at} = assigns) do
     assigns = assign(assigns, :iso, Date.to_iso8601(at))
 
     ~H"""
-    <time datetime={@iso} class={@class}>{Calendar.strftime(@at, "%b %d, %Y")}</time>
+    <time datetime={@iso} data-local-time="calendar-date" class={@class}>
+      {Calendar.strftime(@at, "%b %-d, %Y")}
+    </time>
     """
   end
 
@@ -987,7 +1027,8 @@ defmodule GamendWeb.CoreComponents do
   # visibly reflow when the localizer runs. No UTC marker on a date alone: it is
   # an hour shown in the wrong zone that misleads, and the localizer corrects
   # the date across a midnight boundary anyway.
-  defp utc_text(at, "date"), do: Calendar.strftime(at, "%b %d, %Y")
+  # `%-d`, not `%d`: "Sep 8", as `dateStyle: "medium"` writes it, not "Sep 08".
+  defp utc_text(at, "date"), do: Calendar.strftime(at, "%b %-d, %Y")
   defp utc_text(at, "time"), do: Calendar.strftime(at, "%H:%M UTC")
   defp utc_text(at, "full"), do: Calendar.strftime(at, "%Y-%m-%d %H:%M:%S UTC")
   defp utc_text(at, _datetime), do: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")

@@ -4,7 +4,7 @@ icon: hero-chart-bar
 
 # Performance
 
-We compared **Gamend** and **Nakama** on various machine sizes. Overall, **Gamend** is 2x faster and supports 2x more idle connections.
+We compared **Gamend** and **Nakama** on various machine sizes. On the same 1-core / 3 GB shape, **Gamend** holds about 1.9x the idle connections, answers a plugin call about 2.6-3x faster, and registers a device about 1.3x faster.
 
 | operation | `shared-1x` | `shared-4x` | `shared-8x` | `perf-1x` | `perf-1x` | Nakama | `perf-2x` |
 |---|---:|---:|---:|---:|---:|---:|---:|

@@ -1,6 +1,7 @@
 defmodule GamendWeb.Schemas.OAuthSessionStatus do
   @moduledoc """
-  Schema describing the response for OAuth session status checks
+  A provider sign-in started with `GET /api/v1/auth/{provider}`, as the client
+  polls it. The tokens ride in `session`, once.
   """
 
   require OpenApiSpex
@@ -8,20 +9,28 @@ defmodule GamendWeb.Schemas.OAuthSessionStatus do
 
   OpenApiSpex.schema(%{
     title: "OAuthSessionStatus",
-    description: "Status payload returned when querying an OAuth session",
+    description: "Where a provider sign-in stands",
     type: :object,
     properties: %{
       status: %Schema{
         type: :string,
-        description: "Current session status",
-        enum: ["pending", "completed", "error", "conflict"]
+        description: "`pending` until the player finishes at the provider",
+        enum: ["pending", "completed", "error"]
       },
-      data: GamendWeb.Schemas.OAuthSessionData,
-      message: %Schema{
+      error: %Schema{
         type: :string,
-        description: "Optional human-readable message describing the current status"
+        description:
+          "The code when `status` is `error` (`account_not_activated`, `sign_in_failed`, " <>
+            "`authentication_failed`), else empty"
+      },
+      message: %Schema{type: :string, description: "For a person; may be empty"},
+      session: %Schema{
+        allOf: [GamendWeb.Schemas.Session],
+        nullable: true,
+        description:
+          "The signed-in session, on the first read after `completed`; null on every other"
       }
     },
-    required: [:status, :message, :data]
+    required: [:status, :error, :message, :session]
   })
 end

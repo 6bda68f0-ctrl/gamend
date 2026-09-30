@@ -14,6 +14,9 @@ defmodule GamendWeb.AdminLive.Index do
   alias GamendWeb.ConnectionTracker
   alias GamendWeb.Gettext.Stats, as: TranslationStats
   alias GamendWeb.Plugs.GeoCountry
+  alias GamendWeb.Plugs.IpBan
+
+  require Ecto.Query
 
   @dev_routes? Application.compile_env(:gamend_web, :dev_routes, false)
 
@@ -53,7 +56,7 @@ defmodule GamendWeb.AdminLive.Index do
             Matchmaking ({@matchmaking_stats.queued})
           </.link>
           <.link navigate={~p"/admin/sessions"} class="btn btn-outline">
-            Tokens ({@sessions_count})
+            Sessions ({@sessions_count})
           </.link>
           <.link navigate={~p"/admin/notifications"} class="btn btn-outline">
             Notifications ({@notifications_count})
@@ -92,7 +95,7 @@ defmodule GamendWeb.AdminLive.Index do
             Rate Limiting ({@rate_stats.limited})
           </.link>
           <.link navigate={~p"/admin/logs"} class="btn btn-outline">
-            Logs ({@log_recent_errors} errors/1h)
+            Logs ({ngettext("%{count} error", "%{count} errors", @log_recent_errors)}/1h)
           </.link>
           <.link navigate={~p"/admin/lobby_snapshots"} class="btn btn-outline">
             Lobby Snapshots ({@lobby_snapshot_runs.total})
@@ -141,9 +144,10 @@ defmodule GamendWeb.AdminLive.Index do
                 </div>
                 <div class="text-2xl font-bold">{@users_count}</div>
                 <div class="text-xs text-base-content/60 mt-2 space-y-1">
-                  <div>With email: {@users_password}</div>
+                  <div>With password: {@users_password}</div>
                   <div>Google: {@users_google}</div>
                   <div>Facebook: {@users_facebook}</div>
+                  <div>GitHub: {@users_github}</div>
                   <div>Discord: {@users_discord}</div>
                   <div>Apple: {@users_apple}</div>
                   <div>Steam: {@users_steam}</div>
@@ -196,7 +200,7 @@ defmodule GamendWeb.AdminLive.Index do
                       @analytics_stats.d30
                     )}
                   </div>
-                  <div>Payers (30d): {pct(@analytics_stats.conversion_30d)}</div>
+                  <div>Payer conversion (30d): {pct(@analytics_stats.conversion_30d)}</div>
                 </div>
               </div>
 
@@ -270,7 +274,7 @@ defmodule GamendWeb.AdminLive.Index do
                     Matches: {@tournament_stats.matches.open} open / {@tournament_stats.matches.total}
                   </div>
                   <div :if={@tournament_stats.matches.overdue > 0} class="text-warning">
-                    Past deadline_at: {@tournament_stats.matches.overdue}
+                    Past deadline: {@tournament_stats.matches.overdue}
                   </div>
                 </div>
               </div>
@@ -379,7 +383,7 @@ defmodule GamendWeb.AdminLive.Index do
                   </.link>
                 </div>
                 <div class="text-2xl font-bold">
-                  {length(@translation_stats)} languages
+                  {ngettext("%{count} language", "%{count} languages", length(@translation_stats))}
                 </div>
                 <div class="text-xs text-base-content/60 mt-2 space-y-1">
                   <div :for={stats <- @translation_stats} class="flex items-center gap-2">
@@ -466,7 +470,9 @@ defmodule GamendWeb.AdminLive.Index do
                   <div>OTP: {@sys_stats.otp_release}</div>
                   <div>Schedulers: {@sys_stats.schedulers}</div>
                   <div>Node: {@sys_stats.node}</div>
-                  <div>Cluster: {@sys_stats.cluster_size} nodes</div>
+                  <div>
+                    Cluster: {ngettext("%{count} node", "%{count} nodes", @sys_stats.cluster_size)}
+                  </div>
                   <div>Memory: {@sys_stats.memory_total_mb} MB</div>
                   <div>
                     Processes: {@sys_stats.process_count} / {format_number(@sys_stats.process_limit)}
@@ -484,12 +490,12 @@ defmodule GamendWeb.AdminLive.Index do
                 </div>
                 <div class="text-xs text-base-content/60 mt-2 space-y-2">
                   <div class="flex justify-between items-center">
-                    <span>IP Banned (1h)</span>
+                    <span>Active IP bans</span>
                     <span class={[
                       "badge badge-sm font-mono",
-                      if(@rate_stats.banned > 0, do: "badge-error", else: "badge-ghost opacity-50")
+                      if(@ip_ban_count > 0, do: "badge-error", else: "badge-ghost opacity-50")
                     ]}>
-                      {@rate_stats.banned}
+                      {@ip_ban_count}
                     </span>
                   </div>
                   <div class="flex justify-between items-center">
@@ -514,7 +520,7 @@ defmodule GamendWeb.AdminLive.Index do
                 </div>
                 <div class="text-2xl font-bold font-mono">{format_number(@geo_total)}</div>
                 <div class="text-xs text-base-content/60 mt-1">
-                  {length(@geo_stats)} countries &middot; {if(@geoip_available?,
+                  {countries_label(length(@geo_stats))} &middot; {if(@geoip_available?,
                     do: "MMDB",
                     else: "CF header"
                   )}
@@ -522,13 +528,15 @@ defmodule GamendWeb.AdminLive.Index do
                 <div class="text-xs text-base-content/60 mt-2 flex justify-between items-center">
                   <span>Last hour</span>
                   <span class="font-mono font-semibold">
-                    {format_number(@geo_total_1h)} reqs &middot; {length(@geo_stats_1h)} countries
+                    {format_number(@geo_total_1h)} reqs &middot; {countries_label(
+                      length(@geo_stats_1h)
+                    )}
                   </span>
                 </div>
                 <div :if={@geo_stats_1h != []} class="text-xs text-base-content/60 mt-1 space-y-1">
                   <%= for {country, count} <- Enum.take(@geo_stats_1h, 3) do %>
                     <div class="flex justify-between items-center">
-                      <span class="font-mono">{country_flag(country)} {country}</span>
+                      <span class="font-mono">{GamendWeb.AdminLive.Shared.country_flag(country)} {country}</span>
                       <span class="font-mono">{format_number(count)} (1h)</span>
                     </div>
                   <% end %>
@@ -731,7 +739,12 @@ defmodule GamendWeb.AdminLive.Index do
       # Players / lobbies / parties / quests / matchmaking / tournaments come
       # from the one cached composition every stats surface reads.
       snapshot: Task.async(fn -> safe_snapshot() end),
-      sessions_count: Task.async(fn -> Repo.aggregate(UserToken, :count) end),
+      # Sessions only, as the page the button opens lists: every token context
+      # (reset, confirm, API) made this read higher than that page ever showed.
+      sessions_count:
+        Task.async(fn ->
+          Repo.aggregate(Ecto.Query.where(UserToken, [t], t.context == "session"), :count)
+        end),
       notifications_count: Task.async(fn -> Notifications.count_all_notifications() end),
       push_stats: Task.async(fn -> Gamend.Push.token_stats() end),
       leaderboards_count: Task.async(fn -> Repo.aggregate(Leaderboard, :count) end),
@@ -741,6 +754,7 @@ defmodule GamendWeb.AdminLive.Index do
       kv_global: Task.async(fn -> KV.count_entries(global_only: true) end),
       users_google: Task.async(fn -> Accounts.count_users_with_provider(:google_id) end),
       users_facebook: Task.async(fn -> Accounts.count_users_with_provider(:facebook_id) end),
+      users_github: Task.async(fn -> Accounts.count_users_with_provider(:github_id) end),
       users_discord: Task.async(fn -> Accounts.count_users_with_provider(:discord_id) end),
       users_apple: Task.async(fn -> Accounts.count_users_with_provider(:apple_id) end),
       users_steam: Task.async(fn -> Accounts.count_users_with_provider(:steam_id) end),
@@ -804,6 +818,7 @@ defmodule GamendWeb.AdminLive.Index do
        kv_user: r.kv_count - r.kv_global,
        users_google: r.users_google,
        users_facebook: r.users_facebook,
+       users_github: r.users_github,
        users_discord: r.users_discord,
        users_apple: r.users_apple,
        users_steam: r.users_steam,
@@ -839,6 +854,7 @@ defmodule GamendWeb.AdminLive.Index do
        conn_stats: conn_stats,
        sys_stats: sys_stats,
        rate_stats: rate_stats,
+       ip_ban_count: length(IpBan.list_bans()),
        geo_stats: geo.stats_all,
        geo_total: geo.total_all,
        geo_total_1h: geo.total_1h,
@@ -874,6 +890,7 @@ defmodule GamendWeb.AdminLive.Index do
        conn_stats: ConnectionTracker.cluster_counts(),
        sys_stats: ConnectionTracker.system_stats(),
        rate_stats: build_rate_limit_stats(),
+       ip_ban_count: length(IpBan.list_bans()),
        geo_stats: geo.stats_all,
        geo_total: geo.total_all,
        geo_total_1h: geo.total_1h,
@@ -893,33 +910,38 @@ defmodule GamendWeb.AdminLive.Index do
     # backend the "Cache & limits" card (deny telemetry) covers this.
     case GamendWeb.RateLimit.backend() do
       GamendWeb.RateLimit.ETS -> build_rate_limit_stats(GamendWeb.RateLimit.ETS)
-      _other -> %{banned: 0, limited: 0}
+      _other -> %{limited: 0}
     end
   end
 
+  # IP bans are not Hammer entries — they live in `GamendWeb.Plugs.IpBan`'s own
+  # table, counted into `ip_ban_count` — so no "ip_ban:" key ever matched here.
   defp build_rate_limit_stats(table) do
+    # The limits the plug enforces, not fallbacks of 10/120.
+    auth_limit = Gamend.Settings.get(GamendWeb.Plugs.RateLimiter, :auth_limit)
+    general_limit = Gamend.Settings.get(GamendWeb.Plugs.RateLimiter, :general_limit)
+
     :ets.tab2list(table)
-    |> Enum.reduce(%{banned: 0, limited: 0}, fn
+    |> Enum.reduce(%{limited: 0}, fn
       {{key, _window}, count, _expiry}, acc when is_binary(key) ->
-        cond do
-          String.starts_with?(key, "ip_ban:") ->
-            %{acc | banned: acc.banned + 1}
-
-          String.starts_with?(key, "auth:") or String.starts_with?(key, "general:") ->
-            limit = if String.starts_with?(key, "auth:"), do: 10, else: 120
-            limited_inc = if count >= limit, do: 1, else: 0
-            %{acc | limited: acc.limited + limited_inc}
-
-          true ->
-            acc
+        case bucket_limit(key, auth_limit, general_limit) do
+          nil -> acc
+          limit when count >= limit -> %{acc | limited: acc.limited + 1}
+          _limit -> acc
         end
 
       _, acc ->
         acc
     end)
   rescue
-    _ -> %{banned: 0, limited: 0}
+    _ -> %{limited: 0}
   end
+
+  # The limit a rate-limiter bucket key counts against, or nil for a key that
+  # is not a per-client bucket.
+  defp bucket_limit("auth:" <> _, auth_limit, _general_limit), do: auth_limit
+  defp bucket_limit("general:" <> _, _auth_limit, general_limit), do: general_limit
+  defp bucket_limit(_key, _auth_limit, _general_limit), do: nil
 
   defp cache_hit_rate_label(%{cache: []}), do: "—"
 
@@ -940,19 +962,7 @@ defmodule GamendWeb.AdminLive.Index do
 
   defp format_number(n), do: to_string(n)
 
-  # Convert ISO 3166-1 alpha-2 country code to its flag emoji.
-  # Works by offseting each letter into the Regional Indicator Symbol range.
-  defp country_flag(code) when is_binary(code) and byte_size(code) == 2 do
-    code
-    |> String.upcase()
-    |> String.to_charlist()
-    |> Enum.map(fn c -> c - ?A + 0x1F1E6 end)
-    |> List.to_string()
-  rescue
-    _ -> "🌐"
-  end
-
-  defp country_flag(_), do: "🌐"
+  defp countries_label(n), do: ngettext("%{count} country", "%{count} countries", n)
 
   defp safe_log_count_by_level do
     GamendWeb.AdminLogBuffer.count_by_level()

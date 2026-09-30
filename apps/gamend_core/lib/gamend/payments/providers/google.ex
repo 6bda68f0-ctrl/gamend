@@ -10,6 +10,9 @@ defmodule Gamend.Payments.Providers.Google do
   @androidpublisher_scope "https://www.googleapis.com/auth/androidpublisher"
   @token_url "https://oauth2.googleapis.com/token"
 
+  @behaviour Gamend.Payments.Provider
+
+  alias Gamend.Payments.Params
   alias Gamend.Payments.ProviderConfig
   require Logger
 
@@ -49,7 +52,7 @@ defmodule Gamend.Payments.Providers.Google do
   end
 
   def validate_purchase(_user, attrs) when is_map(attrs) do
-    attrs = normalize_params(attrs)
+    attrs = Params.normalize(attrs)
 
     with {:ok, token} <- purchase_token(attrs),
          {:ok, package_name} <- package_name(),
@@ -68,12 +71,12 @@ defmodule Gamend.Payments.Providers.Google do
     with :ok <- verify_rtdn_token(authorization_header),
          {:ok, envelope} <- Jason.decode(raw_body),
          {:ok, message} <- required_map(envelope, "message"),
-         {:ok, data} <- required_binary(message, "data"),
+         {:ok, data} <- Params.required_binary(message, "data"),
          {:ok, decoded} <- Base.decode64(data),
          {:ok, notification} <- Jason.decode(decoded) do
       {:ok,
        notification
-       |> normalize_params()
+       |> Params.normalize()
        |> Map.put("message_id", message["messageId"] || message["message_id"])
        |> Map.put("subscription", envelope["subscription"])}
     end
@@ -160,12 +163,12 @@ defmodule Gamend.Payments.Providers.Google do
   defp google_subscription_status(_state), do: "pending"
 
   defp google_product_environment(%{"purchaseType" => 0}), do: "test"
-  defp google_product_environment(_body), do: default_environment()
+  defp google_product_environment(_body), do: ProviderConfig.environment()
 
-  defp google_subscription_environment(%{"testPurchase" => nil}), do: default_environment()
+  defp google_subscription_environment(%{"testPurchase" => nil}), do: ProviderConfig.environment()
   defp google_subscription_environment(%{"testPurchase" => _value}), do: "test"
 
-  defp google_subscription_environment(_body), do: default_environment()
+  defp google_subscription_environment(_body), do: ProviderConfig.environment()
 
   defp first_line_item(%{"lineItems" => [line_item | _]}) when is_map(line_item),
     do: {:ok, line_item}
@@ -247,8 +250,8 @@ defmodule Gamend.Payments.Providers.Google do
   end
 
   defp service_account_assertion(account) do
-    with {:ok, client_email} <- required_binary(account, "client_email"),
-         {:ok, private_key} <- required_binary(account, "private_key") do
+    with {:ok, client_email} <- Params.required_binary(account, "client_email"),
+         {:ok, private_key} <- Params.required_binary(account, "private_key") do
       token_url = account["token_uri"] || @token_url
       now = System.system_time(:second)
 
@@ -260,7 +263,7 @@ defmodule Gamend.Payments.Providers.Google do
         "exp" => now + 3600
       }
 
-      jwk = JOSE.JWK.from_pem(normalize_private_key(private_key))
+      jwk = JOSE.JWK.from_pem(Params.normalize_private_key(private_key))
 
       {_jws, assertion} =
         jwk
@@ -348,7 +351,7 @@ defmodule Gamend.Payments.Providers.Google do
   defp get_json(url, access_token) do
     case http_client().get(url, auth: {:bearer, access_token}) do
       {:ok, %{status: status, body: body}} when status in 200..299 and is_map(body) ->
-        {:ok, normalize_params(body)}
+        {:ok, Params.normalize(body)}
 
       {:ok, %{status: status, body: body}} ->
         {:error, {:google_play_error, status, body}}
@@ -361,7 +364,7 @@ defmodule Gamend.Payments.Providers.Google do
   defp post_json(url, access_token, body) do
     case http_client().post(url, auth: {:bearer, access_token}, json: body) do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
-        {:ok, if(is_map(body), do: normalize_params(body), else: %{})}
+        {:ok, if(is_map(body), do: Params.normalize(body), else: %{})}
 
       {:ok, %{status: status, body: body}} ->
         {:error, {:google_play_error, status, body}}
@@ -374,7 +377,7 @@ defmodule Gamend.Payments.Providers.Google do
   defp post_form(url, form) do
     case http_client().post(url, form: form) do
       {:ok, %{status: status, body: body}} when status in 200..299 and is_map(body) ->
-        {:ok, normalize_params(body)}
+        {:ok, Params.normalize(body)}
 
       {:ok, %{status: status, body: body}} ->
         {:error, {:google_oauth_error, status, body}}
@@ -386,14 +389,7 @@ defmodule Gamend.Payments.Providers.Google do
 
   defp required_map(map, key) do
     case map[key] do
-      value when is_map(value) -> {:ok, normalize_params(value)}
-      _ -> {:error, String.to_atom("missing_#{key}")}
-    end
-  end
-
-  defp required_binary(map, key) do
-    case map[key] do
-      value when is_binary(value) and value != "" -> {:ok, value}
+      value when is_map(value) -> {:ok, Params.normalize(value)}
       _ -> {:error, String.to_atom("missing_#{key}")}
     end
   end
@@ -409,7 +405,7 @@ defmodule Gamend.Payments.Providers.Google do
   end
 
   defp http_client do
-    Application.get_env(:gamend_core, :payments_http_client, Req)
+    Application.get_env(:gamend_core, :payments_http_client, Gamend.HTTP)
   end
 
   # The app_key is the declared setting name, so this resolves through
@@ -417,12 +413,6 @@ defmodule Gamend.Payments.Providers.Google do
   defp config_value(_env_key, app_key) do
     Gamend.Settings.get(Gamend.Payments.Settings, app_key)
   end
-
-  defp default_environment do
-    ProviderConfig.environment()
-  end
-
-  defp normalize_private_key(value), do: String.replace(value, "\\n", "\n")
 
   defp present?(value), do: is_binary(value) and value != ""
 
@@ -436,16 +426,4 @@ defmodule Gamend.Payments.Providers.Google do
   end
 
   defp parse_int(_value, default), do: default
-
-  defp normalize_params(attrs) when is_map(attrs) do
-    Map.new(attrs, fn
-      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-      {k, v} when is_map(v) -> {k, normalize_params(v)}
-      {k, v} when is_list(v) -> {k, Enum.map(v, &normalize_nested/1)}
-      {k, v} -> {k, v}
-    end)
-  end
-
-  defp normalize_nested(value) when is_map(value), do: normalize_params(value)
-  defp normalize_nested(value), do: value
 end

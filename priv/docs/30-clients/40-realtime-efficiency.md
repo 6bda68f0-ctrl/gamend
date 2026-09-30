@@ -20,20 +20,20 @@ Set GAMEND_REALTIME_DEBOUNCE_MS to hold outbound updates for that many milliseco
 
 This is the lever that actually reduces bandwidth on a compressed connection, because each message costs about 76 bytes of framing and headers before any payload (see below). Removing a message saves more than shrinking one. The trade is latency: an update may wait up to the debounce window before the client sees it, so leave it at 0 for twitch-sensitive state and raise it only for chatty, non-urgent updates.
 
-Debouncing applies to the state events only: updated, member_updated, user_updated, lobby_updated, group_updated, friend_updated. One-shot events (member_joined, notification, chat, invites) are never delayed.
+Debouncing applies to the state events only: updated, member_updated, user_updated, lobby_updated, group_updated, friend_updated, and ready_check_updated on lobby and party channels. One-shot events (member_joined, notification, chat, invites) are never delayed.
 
 ## Which events are deduplicated
 
 | Topic | Event |
 |---|---|
 | user:{user_id} | updated, friend_updated |
-| lobby:{lobby_id} | updated, user_updated |
-| party:{party_id} | updated, member_updated |
+| lobby:{lobby_id} | updated, user_updated, ready_check_updated |
+| party:{party_id} | updated, member_updated, ready_check_updated |
 | group:{group_id} | updated, member_updated |
 | lobbies | lobby_updated |
 | groups | group_updated |
 
-These are exactly the events that re-send an object's full state. Every other event either announces a one-time fact (member_joined, quest_completed, notification) or creates/deletes an object, none of which have a previous version to compare against.
+These are exactly the events that re-send an object's full state (for ready_check_updated, the whole check). The ready_check_updated pushed on the user channel for an accept check is not deduplicated. Every other event either announces a one-time fact (member_joined, quest_completed, notification) or creates/deletes an object, none of which have a previous version to compare against.
 
 ## What the transport costs
 
@@ -61,10 +61,10 @@ Protobuf shrinks the payload itself, so it stacks with the debounce. Sockets con
 
 Protobuf keeps a real edge after compression: 22-27% on the payload, 9-17% once per-message headers are counted. Events without a protobuf mapping fall back to JSON on the same socket, so coverage can grow event by event without breaking clients.
 
-Ranking the levers (compressed connection)
+## Ranking the levers (compressed connection)
 
 Coalescing bursts (GAMEND_REALTIME_DEBOUNCE_MS) is the largest win, roughly 30% on a 4-message burst. Protobuf (?format=protobuf) gives 9-17%. They compose: a debounced protobuf socket gets both.
 
-Reproducing these numbers
+## Reproducing these numbers
 
 Payloads were encoded with the realtime serializers and run through zlib configured the way Bandit configures it (raw deflate, window 15, sync flush per message); protobuf sizes use the field numbers of the original realtime schema; header sizes are the standard values per protocol layer. These are representative payload shapes, not production telemetry, so your own payloads, especially metadata size, will move the numbers.

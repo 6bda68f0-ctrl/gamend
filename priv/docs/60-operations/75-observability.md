@@ -33,7 +33,7 @@ scrape_configs:
 
 ### Grafana
 
-`docker compose up` starts Prometheus (scraping `/metrics` every 15s) and Grafana at `localhost:3000`, with provisioning that auto-adds the Prometheus data source and a "Gamend" dashboard folder. PromEx renders the standard BEAM, Phoenix and Ecto dashboards for that setup. If you host Grafana elsewhere, set `GAMEND_OBSERVABILITY_GRAFANA_URL` and the admin dashboard links to it.
+`docker compose up` starts Prometheus (scraping `/metrics` every 15s) and Grafana at `localhost:3000`, with provisioning that auto-adds the Prometheus data source. No dashboards are provisioned: the "Gamend" folder's provider reads `/var/lib/grafana/dashboards`, which nothing fills, so it starts empty. PromEx ships BEAM, Phoenix and Ecto dashboards; render one with `mix prom_ex.dashboard.export --dashboard beam.json --module GamendWeb.PromEx --stdout` (likewise `phoenix.json`, `ecto.json`) and import it in Grafana. If you host Grafana elsewhere, set `GAMEND_OBSERVABILITY_GRAFANA_URL` and the admin dashboard links to it.
 
 ## Logs
 
@@ -52,7 +52,7 @@ GAMEND_OBSERVABILITY_LOG_FILE_MAX_FILES=5          # ~50MB total
 
 ## Health
 
-`GET /api/v1/health` is unauthenticated and returns `{"status": "ok"}` with a timestamp. Point load-balancer and uptime checks at it.
+`GET /api/v1/health` is unauthenticated and returns `{"data": {"status": "ok", "timestamp": …}}`. Point load-balancer and uptime checks at it.
 
 ## Public stats
 

@@ -35,6 +35,9 @@ rm -rf "$OUT_DIR/apis" "$OUT_DIR/models"
 GEN_IMAGE=${GEN_IMAGE:-openapitools/openapi-generator-cli}
 GENERATOR=${GENERATOR:-gdscript}
 ADDITIONAL_PROPERTIES=${ADDITIONAL_PROPERTIES:-coreNamePrefix=Api,coreNameSuffix=Client,allowUnicodeIdentifiers=false}
+# GDScript `class_name` is global: a model named `Lobby` or `Quest` would clash
+# with a game's own class, so every model is `Gamend<Name>` (`GamendLobby`).
+MODEL_NAME_PREFIX=${MODEL_NAME_PREFIX:-Gamend}
 
 echo "Generating GDScript client into $OUT_DIR using Docker image $GEN_IMAGE"
 
@@ -51,11 +54,23 @@ if command -v id >/dev/null 2>&1; then
   fi
 fi
 
-docker run --rm $DOCKER_USER_OPT -v "$ROOT_DIR:/local" $GEN_IMAGE generate \
-  -i /local/clients/godot/openapi.json \
-  -g "$GENERATOR" \
-  -o /local/clients/godot \
-  --additional-properties="$ADDITIONAL_PROPERTIES"
+# OPENAPI_GENERATOR_JAR runs a local openapi-generator-cli jar with Java instead
+# of the Docker image, for a machine where Docker is not running (or hangs).
+if [ -n "${OPENAPI_GENERATOR_JAR:-}" ]; then
+  java -jar "$OPENAPI_GENERATOR_JAR" generate \
+    -i "$ROOT_DIR/clients/godot/openapi.json" \
+    -g "$GENERATOR" \
+    -o "$ROOT_DIR/clients/godot" \
+    --model-name-prefix "$MODEL_NAME_PREFIX" \
+    --additional-properties="$ADDITIONAL_PROPERTIES"
+else
+  docker run --rm $DOCKER_USER_OPT -v "$ROOT_DIR:/local" $GEN_IMAGE generate \
+    -i /local/clients/godot/openapi.json \
+    -g "$GENERATOR" \
+    -o /local/clients/godot \
+    --model-name-prefix "$MODEL_NAME_PREFIX" \
+    --additional-properties="$ADDITIONAL_PROPERTIES"
+fi
 
 echo "Generation finished. See $OUT_DIR for generated files."
 
@@ -78,123 +93,36 @@ find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/#s
 # Replace : Object with : Dictionary
 find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/: Object/: Dictionary/g" -i
 
+# The enum check in a generated setter compares `str(value)` against the
+# allowed values, which for an array of enum strings is the whole array's text
+# (`["discord", "steam"]`): it never matches, and the setter returns without
+# assigning, so `list_auth_providers` came back with no providers. Check only
+# a String (`typeof`, since the setter's `value` is statically typed); an
+# array's items are the server's to get right.
+find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe 's/if str\(value\) != "" and not \(str\(value\) in (__\w+__allowable__values)\):/if typeof(value) == TYPE_STRING and str(value) != "" and not (str(value) in $1):/g' -i
+
+# A schema with no type (a field that is sometimes a string, sometimes a map,
+# like ErrorResponse.details) comes out as `@export var x: AnyType:`, a type
+# that does not exist. An exported property must be typed, so it becomes a
+# plain Variant property with its setter kept.
+find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe 's/\@export var (\w+): AnyType:/var $1:/g' -i
+
 # Other fixes
-# Replace login_200_response_data with Login200ResponseData
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/login_200_response_data/Login200ResponseData/g" -i
-# Replace login_200_response_data_user with Login200ResponseDataUser
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/login_200_response_data_user/Login200ResponseDataUser/g" -i
-# Replace OAuthSessionData_details with OAuthSessionDataDetails
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/OAuthSessionData_details/OAuthSessionDataDetails/g" -i
-# Replace list_blocked_friends_200_response_data_inner with ListBlockedFriends200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_blocked_friends_200_response_data_inner/ListBlockedFriends200ResponseDataInner/g" -i
-# Replace list_lobbies_200_response_meta with ListLobbies200ResponseMeta
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_lobbies_200_response_meta/ListLobbies200ResponseMeta/g" -i
-# Replace list_blocked_friends_200_response_data_inner_requester with ListBlockedFriends200ResponseDataInnerRequester
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_blocked_friends_200_response_data_inner_requester/ListBlockedFriends200ResponseDataInnerRequester/g" -i
-# Replace list_friend_requests_200_response_incoming_inner with ListFriendRequests200ResponseIncomingInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_friend_requests_200_response_incoming_inner/ListFriendRequests200ResponseIncomingInner/g" -i
-# Replace list_friend_requests_200_response_meta with ListFriendRequests200ResponseMeta
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_friend_requests_200_response_meta/ListFriendRequests200ResponseMeta/g" -i
-# Replace list_friend_requests_200_response_incoming_inner_requester with ListFriendRequests200ResponseIncomingInnerRequester
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_friend_requests_200_response_incoming_inner_requester/ListFriendRequests200ResponseIncomingInnerRequester/g" -i
-# Replace list_friends_200_response_data_inner with ListFriends200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_friends_200_response_data_inner/ListFriends200ResponseDataInner/g" -i
-# Replace list_lobbies_200_response_data_inner with ListLobbies200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_lobbies_200_response_data_inner/ListLobbies200ResponseDataInner/g" -i
-# Replace Login200ResponseData_user with Login200ResponseDataUser
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/Login200ResponseData_user/Login200ResponseDataUser/g" -i
-# Replace ListBlockedFriends200ResponseDataInner_requester with ListBlockedFriends200ResponseDataInnerRequester
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/ListBlockedFriends200ResponseDataInner_requester/ListBlockedFriends200ResponseDataInnerRequester/g" -i
-# Replace ListFriendRequests200ResponseIncomingInner_requester with ListFriendRequests200ResponseIncomingInnerRequester
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/ListFriendRequests200ResponseIncomingInner_requester/ListFriendRequests200ResponseIncomingInnerRequester/g" -i
-# Replace refresh_token_200_response_data with RefreshToken200ResponseData
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/refresh_token_200_response_data/RefreshToken200ResponseData/g" -i
-# Replace list_leaderboard_records_200_response_meta with ListLeaderboardRecords200ResponseMeta
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_leaderboard_records_200_response_meta/ListLeaderboardRecords200ResponseMeta/g" -i
-# Replace list_leaderboard_records_200_response_data_inner with ListLeaderboardRecords200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_leaderboard_records_200_response_data_inner/ListLeaderboardRecords200ResponseDataInner/g" -i
-# Replace list_leaderboards_200_response_data_inner with ListLeaderboards200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_leaderboards_200_response_data_inner/ListLeaderboards200ResponseDataInner/g" -i
 # Fix the placeholder polling default: BEE_DEFAULT_POLLING_INTERVAL_MS is emitted
 # as 333 but should be 16ms. Scoped to that const so unrelated "333" values
 # anywhere else in the generated code are never corrupted (the old blanket
 # s/333/16/g rewrote every 333 in every file).
 find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/(BEE_DEFAULT_POLLING_INTERVAL_MS\s*:=\s*)333/\${1}16/g" -i
-# Replace get_current_user_200_response_linked_providers with GetCurrentUser200ResponseLinkedProviders
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/get_current_user_200_response_linked_providers/GetCurrentUser200ResponseLinkedProviders/g" -i
-# Replace search_users_200_response_data_inner with SearchUsers200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/search_users_200_response_data_inner/SearchUsers200ResponseDataInner/g" -i
 # Replace @export var data: Dictionary with var data
 find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/\@export var data: Dictionary/var data/g" -i
-# Replace admin_list_kv_entries_200_response_data_inner with AdminListKvEntries200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_list_kv_entries_200_response_data_inner/AdminListKvEntries200ResponseDataInner/g" -i
-# Replace admin_list_sessions_200_response_data_inner with AdminListSessions200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_list_sessions_200_response_data_inner/AdminListSessions200ResponseDataInner/g" -i
-# Replace admin_submit_leaderboard_score_200_response_data with AdminSubmitLeaderboardScore200ResponseData
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_submit_leaderboard_score_200_response_data/AdminSubmitLeaderboardScore200ResponseData/g" -i
-# Replace admin_update_user_200_response_data with AdminUpdateUser200ResponseData
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_update_user_200_response_data/AdminUpdateUser200ResponseData/g" -i
-# Replace admin_ListLobbies200ResponseDataInner with AdminListLobbies200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_ListLobbies200ResponseDataInner/AdminListLobbies200ResponseDataInner/g" -i
-# Replace admin_end_leaderboard_200_response_data with AdminEndLeaderboard200ResponseData
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_end_leaderboard_200_response_data/AdminEndLeaderboard200ResponseData/g" -i
-# Replace admin_list_notifications_200_response_meta with AdminListNotifications200ResponseMeta
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_list_notifications_200_response_meta/AdminListNotifications200ResponseMeta/g" -i
-# Replace list_notifications_200_response_data_inner with ListNotifications200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_notifications_200_response_data_inner/ListNotifications200ResponseDataInner/g" -i
-# Replace admin_ListNotifications200ResponseDataInner with AdminListNotifications200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_ListNotifications200ResponseDataInner/AdminListNotifications200ResponseDataInner/g" -i
-# Replace list_group_members_200_response_data_inner with ListGroupMembers200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_group_members_200_response_data_inner/ListGroupMembers200ResponseDataInner/g" -i
-# Replace list_group_invitations_200_response_data_inner with ListGroupInvitations200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_group_invitations_200_response_data_inner/ListGroupInvitations200ResponseDataInner/g" -i
-# Replace list_my_groups_200_response_data_inner with ListMyGroups200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_my_groups_200_response_data_inner/ListMyGroups200ResponseDataInner/g" -i
-# Replace cancel_join_request_200_response with CancelJoinRequest200Response
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/cancel_join_request_200_response/CancelJoinRequest200Response/g" -i
-# Replace list_sent_invitations_200_response_data_inner with ListSentInvitations200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_sent_invitations_200_response_data_inner/ListSentInvitations200ResponseDataInner/g" -i
-# Replace admin_update_group_200_response with AdminUpdateGroup200Response
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_update_group_200_response/AdminUpdateGroup200Response/g" -i
-# Replace show_party_200_response_members_inner with ShowParty200ResponseMembersInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/show_party_200_response_members_inner/ShowParty200ResponseMembersInner/g" -i
-# Replace admin_list_chat_messages_200_response_data_inner with AdminListChatMessages200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_list_chat_messages_200_response_data_inner/AdminListChatMessages200ResponseDataInner/g" -i
-# Replace get_chat_message_200_response with GetChatMessage200Response
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/get_chat_message_200_response/GetChatMessage200Response/g" -i
-# Replace get_lobby_200_response_members_inner with GetLobby200ResponseMembersInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/get_lobby_200_response_members_inner/GetLobby200ResponseMembersInner/g" -i
-# Replace list_party_invitations_200_response_inner with ListPartyInvitations200ResponseInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_party_invitations_200_response_inner/ListPartyInvitations200ResponseInner/g" -i
-# Replace list_sent_party_invitations_200_response_inner with ListSentPartyInvitations200ResponseInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/list_sent_party_invitations_200_response_inner/ListSentPartyInvitations200ResponseInner/g" -i
 # Replace from_dict.has("ends_at") with from_dict.has("ends_at") && from_dict.get("ends_at", "")
 find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe 's/from_dict\.has\("ends_at"\)/from_dict.has("ends_at") && from_dict.get("ends_at", "")/g' -i
 # Replace from_dict.has("starts_at") with from_dict.has("starts_at") && from_dict.get("starts_at", "")
 find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe 's/from_dict\.has\("starts_at"\)/from_dict.has("starts_at") && from_dict.get("starts_at", "")/g' -i
-# Replace user_achievements_200_response_data_inner with UserAchievements200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/user_achievements_200_response_data_inner/UserAchievements200ResponseDataInner/g" -i
-# Replace admin_update_achievement_200_response with AdminUpdateAchievement200Response
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/admin_update_achievement_200_response/AdminUpdateAchievement200Response/g" -i
-# Replace from_dict.has("unlocked_at") with from_dict.has("unlocked_at") && from_dict.get("unlocked_at", "") != null
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe 's/from_dict\.has\("unlocked_at"\)/from_dict.has("unlocked_at") && from_dict.get("unlocked_at", "") != null/g' -i  
-# Replace GamendWeb_Api_V1_AchievementController_UserAchievements200ResponseDataInner with GamendWebApiV1AchievementControllerUserAchievements200ResponseDataInner
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe "s/GamendWeb_Api_V1_AchievementController_UserAchievements200ResponseDataInner/GamendWebApiV1AchievementControllerUserAchievements200ResponseDataInner/g" -i
 # headers_for_godot, body_serialized
 # with 
 # headers_for_godot, "" if body_serialized == "null" else body_serialized
 find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -pe 's/headers_for_godot, body_serialized/headers_for_godot, "" if body_serialized == "null" else body_serialized/g' -i
-
-# General model-reference fix (replaces the per-model snake_case -> PascalCase
-# lines above — you no longer need to add one per new model).
-#
-# The gdscript generator calls a model's static factory as
-#   <snake_name>.bzz_denormalize_single/multiple(...)
-# but declares the class in PascalCase (class_name FooBarResponse), so the
-# lower-cased reference never resolves ("Identifier ... not declared").
-# PascalCase the identifier in every such call: split on "_", capitalize each
-# segment, and re-join. This handles any current or future model automatically.
-find "$OUT_DIR" -type f -iname "*.gd" -print0 | xargs -0 -r perl -0777 -i -pe 's{\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(\.bzz_denormalize_(?:single|multiple))\b}{join("", map { ucfirst } split(/_/, $1)) . $2}ge'
 
 echo "Post-processing complete."
 
@@ -210,22 +138,24 @@ const GAMEND_VERSION = "${APP_VERSION}"
 EOF
 fi
 
-# Generic fix: the generator references models by snake_case names while the
-# model files declare PascalCase class_names. Derive the mapping from the
-# model filenames so new models never need to be added to the list above.
+# A nested inline model is declared PascalCase but referenced as
+# `<Parent>_<snake>` (`GamendAdminCreateQuestRequest_objectives_inner` for
+# `GamendAdminCreateQuestRequestObjectivesInner`). Join it back when that class
+# exists. Every response is a named schema, whose `$ref` already comes out as
+# the class name, so only what the document still leaves inline takes this:
+# request body items.
 python3 - "$OUT_DIR" <<'PYEOF'
 import os, re, glob, sys
 out_dir = sys.argv[1]
 models = [os.path.splitext(os.path.basename(f))[0] for f in glob.glob(os.path.join(out_dir, "models/*.gd"))]
-def snake(name):
-    s = re.sub(r'(?<=[a-zA-Z])(?=[A-Z][a-z])|(?<=[a-z])(?=[A-Z])|(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])', '_', name)
-    return s.lower()
-mapping = {snake(m): m for m in models}
+known = set(models)
+def join_suffix(m):
+    candidate = m.group(1) + "".join(w.capitalize() for w in m.group(2).split("_"))
+    return candidate if candidate in known else m.group(0)
+suffixed = re.compile(r'\b([A-Z][A-Za-z0-9]*)_([a-z0-9]+(?:_[a-z0-9]+)*)\b')
 for f in glob.glob(os.path.join(out_dir, "**/*.gd"), recursive=True):
     src = open(f).read()
-    out = src
-    for sn, pc in mapping.items():
-        out = re.sub(r'\b' + re.escape(sn) + r'\b', pc, out)
+    out = suffixed.sub(join_suffix, src)
     if out != src:
         open(f, "w").write(out)
 PYEOF

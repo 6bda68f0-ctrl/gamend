@@ -100,7 +100,7 @@ Matchmaking.record_result(match_id, %{winners: [...], losers: [...]}, opts)
 ## Limits / config
 
 `mm_base_band`, `mm_band_growth_per_sec`, `mm_max_band`, `mm_default_rating`,
-`mm_default_deviation` in `Gamend.Limits`/config (auto `LIMIT_*` where they're
+`mm_default_deviation` in `Gamend.Limits`/config (auto `GAMEND_LIMITS_*` where they're
 caps), `@limit_categories`. `skill_matchmaking_enabled` toggle.
 
 ## Web / API
@@ -125,9 +125,10 @@ caps), `@limit_categories`. `skill_matchmaking_enabled` toggle.
 - **README** Features: skill matchmaking. **CHANGELOG** `[added]` Skill-based
   matchmaking (rating + widening bands).
 - **.env.example** — band/rating config vars.
-- **host_public_docs/** — Matchmaking docs page gains a Skill section (rating,
-  bands, `record_result`, the override hook); Data Schema gains `player_ratings`
-  + the ticket `rating` column.
+- **Guide** — `priv/docs/40-gameplay/30-matchmaking.md` gains a Skill section
+  (rating, bands, `record_result`, the override hook);
+  `priv/docs/10-setup/40-data-schema.md` gains `player_ratings` + the ticket
+  `rating` column.
 - **api_spec.ex** — feature list + `GET /me/rating` + rating leaderboard.
 - **SDK** — rating read stubs + struct; hooks mirrored; `gen.sdk`.
 - **runtime_introspection.ex** — MM section already exists (repoint if needed);

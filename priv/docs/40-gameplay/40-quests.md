@@ -6,8 +6,9 @@ icon: hero-flag
 
 One engine for achievements, dailies, seasonal events and quest lines. A quest is objectives + rewards plus five independent settings that combine freely.
 
-| reset | When progress restarts: `never`, `daily`, `weekly`, `monthly`, or `interval` with `reset_interval_days` (biweekly = 14, any cadence). Every period boundary is 00:00 UTC, the same instant for every player - so a daily rolls over at noon in New Zealand and the previous afternoon on the US west coast. Show players the countdown a quest already carries rather than a reset time. |
+| Setting | What it does |
 |---|---|
+| reset | When progress restarts: `never`, `daily`, `weekly`, `monthly`, or `interval` with `reset_interval_days` (biweekly = 14, any cadence). Every period boundary is 00:00 UTC, the same instant for every player - so a daily rolls over at noon in New Zealand and the previous afternoon on the US west coast. Show players the countdown a quest already carries rather than a reset time. |
 | starts_at / ends_at | Availability window. Set them and it is an "event". |
 | prerequisite_quest_key | Must be completed first. Set it and it is a "chain" — hidden and frozen until unlocked. |
 | category | Free-form label for your UI tabs. No engine behavior. |
@@ -102,6 +103,10 @@ Every active quest with a matching objective advances (an objective's params mus
 Player endpoints live under `/api/v1/me/quests` and the catalogue under
 `/api/v1/quests` (gated by `GAMEND_FEATURES_LIST_QUESTS`) - see [/api/docs](/api/docs).
 
+- **Claiming:** `POST /api/v1/me/quests/:key/claim` answers the progress and
+  the rewards paid. A quest not yet completed answers `not_completed` (403), a
+  second claim `already_claimed` (409), and a `before_quest_claim` veto
+  `rejected` (403) with the hook's reason as `message`.
 - **Channel events:** `quest_progress`, `quest_completed`, `quest_claimed`
 - **Hooks:** `before_quest_claim/3` (may veto), `after_quest_completed/1`,
   `after_quest_claimed/1`

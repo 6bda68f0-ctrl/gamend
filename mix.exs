@@ -23,22 +23,42 @@ defmodule GamendHost.MixProject do
 
   # `mix release` copies config/runtime.exs to releases/<vsn>/runtime.exs and
   # nothing else from config/. Ours is a two-line shim that requires
-  # host_runtime.exs from its own directory, so without this step the release
-  # boots into a Code.LoadError before any application starts. Ship the file
-  # beside the shim that reads it.
+  # host_runtime.exs from its own directory, which in turn requires dotenv.exs
+  # to read the working directory's .env, so without this step the release
+  # boots into a Code.LoadError before any application starts. Ship the files
+  # beside the shim that reads them.
   defp releases do
     [
       gamend_host: [
-        steps: [:assemble, &copy_host_runtime_config/1]
+        steps: [:assemble, &copy_host_runtime_config/1, &copy_starter_env_example/1]
       ]
     ]
   end
 
   defp copy_host_runtime_config(release) do
-    source = Path.join([__DIR__, "config", "host_runtime.exs"])
-    target = Path.join([release.path, "releases", release.version, "host_runtime.exs"])
+    for file <- ["host_runtime.exs", "dotenv.exs"] do
+      source = Path.join([__DIR__, "config", file])
+      target = Path.join([release.path, "releases", release.version, file])
 
-    File.cp!(source, target)
+      File.cp!(source, target)
+    end
+
+    release
+  end
+
+  # `gamend starter` copies priv/starter/<name> into a project. The reference
+  # for every setting is generated at the root (`mix gamend.settings.env_example`),
+  # so it is added to each bundled template here rather than kept twice in git.
+  defp copy_starter_env_example(release) do
+    vsn = release.applications[:gamend_host][:vsn]
+    starters = Path.join([release.path, "lib", "gamend_host-#{vsn}", "priv", "starter"])
+
+    for template <- File.ls!(starters), File.dir?(Path.join(starters, template)) do
+      File.cp!(
+        Path.join(__DIR__, ".env.example"),
+        Path.join([starters, template, ".env.example"])
+      )
+    end
 
     release
   end
@@ -62,6 +82,11 @@ defmodule GamendHost.MixProject do
     [
       shared_dep(:gamend_core, "apps/gamend_core"),
       shared_dep(:gamend_web, "apps/gamend_web"),
+      # The GDScript transpiler, shipped at runtime so a release with no Mix can
+      # still build a GDScript plugin (`Gamend.Hooks.PluginBuilder` calls
+      # `Gamend.GDScript` in-process). Its Mix tasks compile in too; they are
+      # never called outside Mix.
+      shared_dep(:gamend_plugin_tools, "sdk_tools"),
       {:phoenix, "~> 1.8"},
       {:phoenix_ecto, "~> 4.5"},
       {:phoenix_html, "~> 4.1"},
@@ -114,12 +139,13 @@ defmodule GamendHost.MixProject do
       "db.rollback": ["host.rollback -r Gamend.Repo"],
       "db.setup": ["host.db.setup"],
       "db.reset": ["host.db.reset"],
+      "db.seed": ["host.seed"],
       test:
         [
           "ecto.create --quiet -r Gamend.Repo",
           "host.migrate --quiet -r Gamend.Repo",
           "test"
-        ] ++ local_web_commands([web_test_cmd("test")]),
+        ] ++ local_web_commands([core_test_cmd("test"), web_test_cmd("test")]),
       lint:
         ["format --check-formatted", "credo --strict"] ++
           local_web_commands([web_cmd("format --check-formatted"), web_cmd("credo --strict")]) ++
@@ -136,6 +162,25 @@ defmodule GamendHost.MixProject do
       # function added since the PLT was built as one that does not exist. CI
       # drops the hash file for the same reason.
       dialyzer: ["dialyzer --force-check"],
+      # The slow checks CI runs and `precommit` leaves out: a cold PLT is
+      # minutes, and `hex.outdated` hits the network. Both also run INSIDE each
+      # app, the way CI's dialyzer does: from the root, dialyzer reported 0
+      # errors while CI was red on two real warnings in gamend_web, and each
+      # app has its own mix.lock, which the root's `hex.outdated` does not read.
+      check:
+        [
+          "lint",
+          "dialyzer",
+          # Shelled out: `hex.outdated` lives in the Hex archive, which
+          # `Mix.Task.run/1` cannot resolve from inside an alias.
+          "cmd env #{force_ansi()}#{child_mix()} hex.outdated"
+        ] ++
+          local_web_commands([
+            core_cmd("dialyzer"),
+            web_cmd("dialyzer"),
+            core_cmd("hex.outdated"),
+            web_cmd("hex.outdated")
+          ]),
       # The inner loop: fast checks only. Generators and the web app's own
       precommit:
         [
@@ -157,6 +202,9 @@ defmodule GamendHost.MixProject do
             # No `xref unreachable`: Elixir folded that check into the compiler,
             # so the task prints "has no effect now" and exits 0. A step that
             # cannot fail is noise, not a gate.
+            # A dependency's warnings never fail its dependent's build, so the
+            # core is only gated when it is the project being compiled.
+            core_test_cmd("compile --warnings-as-errors"),
             web_test_cmd("compile --warnings-as-errors"),
             web_cmd("format"),
             web_cmd("credo --strict")
@@ -206,10 +254,22 @@ defmodule GamendHost.MixProject do
   # nothing is set and logs stay escape-free.
   defp force_ansi, do: if(IO.ANSI.enabled?(), do: "FORCE_ANSI=true ", else: "")
 
-  defp web_cmd(task), do: "cmd --cd #{web_app_path()} env #{force_ansi()}mix #{task}"
+  # `mix cmd` starts its child in a session of its own, so Ctrl+C reaches only
+  # this VM: the child outlives it, re-parented to launchd, still running.
+  # The child's stdin is a pipe from this VM, closed when it dies, so the
+  # child halts on EOF. Use this, never a bare `mix`, in every `cmd`.
+  defp child_mix, do: "elixir -e 'spawn(fn -> IO.read(:eof); System.halt(1) end)' -S mix"
+
+  defp web_cmd(task), do: "cmd --cd #{web_app_path()} env #{force_ansi()}#{child_mix()} #{task}"
 
   defp web_test_cmd(task),
-    do: "cmd --cd #{web_app_path()} env MIX_ENV=test #{force_ansi()}mix #{task}"
+    do: "cmd --cd #{web_app_path()} env MIX_ENV=test #{force_ansi()}#{child_mix()} #{task}"
+
+  defp core_cmd(task), do: "cmd --cd apps/gamend_core env #{force_ansi()}#{child_mix()} #{task}"
+
+  # The core's own suite: the context tests that need no web app to run.
+  defp core_test_cmd(task),
+    do: "cmd --cd apps/gamend_core env MIX_ENV=test #{force_ansi()}#{child_mix()} #{task}"
 
   defp local_web_commands(commands) do
     if local_web_source?(), do: commands, else: []
@@ -220,7 +280,7 @@ defmodule GamendHost.MixProject do
   # this, a misformatted one passes `precommit` and fails on CI, which does walk
   # `modules/plugins/*`. Absent in a host checkout, which has none of them.
   defp plugin_commands(task) do
-    for dir <- plugin_paths(), do: "cmd --cd #{dir} env #{force_ansi()}mix #{task}"
+    for dir <- plugin_paths(), do: "cmd --cd #{dir} env #{force_ansi()}#{child_mix()} #{task}"
   end
 
   defp plugin_paths do

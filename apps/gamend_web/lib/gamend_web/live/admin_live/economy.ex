@@ -7,6 +7,8 @@ defmodule GamendWeb.AdminLive.Economy do
 
   alias Gamend.Economy
   alias Gamend.Inventory
+  alias GamendWeb.AdminLive.Shared
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -49,9 +51,7 @@ defmodule GamendWeb.AdminLive.Economy do
   def handle_event("filter", params, socket) do
     {:noreply,
      socket
-     |> assign(:user_filter, String.trim(Map.get(params, "user_id", "")))
-     |> assign(:currency_filter, String.trim(Map.get(params, "currency", "")))
-     |> assign(:page, 1)
+     |> Shared.put_filters(params, user_filter: "user_id", currency_filter: "currency")
      |> reload()}
   end
 
@@ -71,28 +71,27 @@ defmodule GamendWeb.AdminLive.Economy do
            true <- qty > 0 and f["user_id"] not in [nil, ""] and f["item"] not in [nil, ""],
            {:ok, quantity} <-
              apply(Inventory, String.to_existing_atom(op), [f["user_id"], f["item"], qty, []]) do
-        put_flash(socket, :info, "#{op}: #{f["item"]} → #{quantity}")
+        put_flash(
+          socket,
+          :info,
+          "#{done_label(op)} #{qty} #{f["item"]}; quantity now #{quantity}"
+        )
       else
         {:error, reason} -> put_flash(socket, :error, "Failed: #{reason}")
-        _ -> put_flash(socket, :error, "Enter user_id, item and a positive quantity")
+        _ -> put_flash(socket, :error, "Enter a user ID, an item and a positive quantity")
       end
 
     {:noreply, reload(socket)}
   end
 
-  def handle_event("prev_page", _params, socket) do
-    {:noreply, socket |> assign(:page, max(socket.assigns.page - 1, 1)) |> reload()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload()}
 
-  def handle_event("next_page", _params, socket) do
-    page = min(socket.assigns.page + 1, max(socket.assigns.total_pages, 1))
-    {:noreply, socket |> assign(:page, page) |> reload()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload()}
 
-  def handle_event("page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket |> assign(:page_size, String.to_integer(size)) |> assign(:page, 1) |> reload()}
-  end
+  def handle_event("page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload()}
 
   def handle_event("refresh", _params, socket), do: {:noreply, reload(socket)}
 
@@ -109,10 +108,14 @@ defmodule GamendWeb.AdminLive.Economy do
                amount,
                [reason: blank(f["reason"]) || "admin_#{op}"]
              ]) do
-        put_flash(socket, :info, "#{String.capitalize(op)}: #{f["currency"]} → #{balance}")
+        put_flash(
+          socket,
+          :info,
+          "#{done_label(op)} #{amount} #{f["currency"]}; balance now #{balance}"
+        )
       else
         {:error, reason} -> put_flash(socket, :error, "Failed: #{reason}")
-        _ -> put_flash(socket, :error, "Enter user_id, currency and a positive amount")
+        _ -> put_flash(socket, :error, "Enter a user ID, a currency and a positive amount")
       end
 
     {:noreply, reload(socket)}
@@ -141,15 +144,18 @@ defmodule GamendWeb.AdminLive.Economy do
       Inventory.list_items(user_id: blank(socket.assigns.user_filter), page: 1, page_size: 20)
     )
     |> assign(:count, total)
-    |> assign(:total_pages, ceil_div(total, socket.assigns.page_size))
+    |> assign(:total_pages, LiveHelpers.total_pages(total, socket.assigns.page_size))
   end
 
   defp blank(nil), do: nil
   defp blank(""), do: nil
   defp blank(v), do: v
 
-  defp ceil_div(_num, 0), do: 0
-  defp ceil_div(num, den), do: div(num + den - 1, den)
+  # One flash shape for the wallet and inventory forms, which had drifted
+  # ("Grant: gold → 150" beside "grant_item: potion → 5").
+  defp done_label(op) when op in ~w(grant grant_item), do: "Granted"
+  defp done_label("spend"), do: "Spent"
+  defp done_label("consume_item"), do: "Consumed"
 
   # ── render ────────────────────────────────────────────────────────────────
 
@@ -175,7 +181,7 @@ defmodule GamendWeb.AdminLive.Economy do
               type="text"
               name="user_id"
               value={@form["user_id"]}
-              placeholder="user id"
+              placeholder="user ID"
               class="input input-sm input-bordered font-mono w-72"
             />
             <input
@@ -276,7 +282,7 @@ defmodule GamendWeb.AdminLive.Economy do
               type="text"
               name="user_id"
               value={@item_form["user_id"]}
-              placeholder="user id"
+              placeholder="user ID"
               class="input input-sm input-bordered font-mono w-72"
             />
             <input

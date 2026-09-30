@@ -97,6 +97,40 @@ defmodule GamendWeb.LogFiltersTest do
     end
   end
 
+  describe "protocol_version, which is placed by direction and not by name" do
+    # Verbatim from the production log: an iOS NetworkingExtension that had
+    # already completed the handshake and been served a favicon over HTTP/2.
+    test "a peer alert after the handshake is dropped" do
+      alert =
+        {:tls_alert,
+         {:protocol_version,
+          ~c"TLS server: In state connection received CLIENT ALERT: Fatal - Protocol Version\n"}}
+
+      assert LogFilters.filter_tls_alert(terminate_report(alert), []) == :stop
+    end
+
+    test "a peer alert during the handshake survives" do
+      # Still the client's alert, but before `connection`: this is the shape a
+      # client rejecting the version this server offered actually takes, and it
+      # is the one that can mean the TLS config here is wrong.
+      alert =
+        {:tls_alert,
+         {:protocol_version,
+          ~c"TLS server: In state hello received CLIENT ALERT: Fatal - Protocol Version\n"}}
+
+      assert LogFilters.filter_tls_alert(terminate_report(alert), []) == :ignore
+    end
+
+    test "one this server generates survives" do
+      alert =
+        {:tls_alert,
+         {:protocol_version,
+          ~c"TLS server: In state hello at tls_record.erl:253 generated SERVER ALERT: Fatal - Protocol Version\n"}}
+
+      assert LogFilters.filter_tls_alert(terminate_report(alert), []) == :ignore
+    end
+  end
+
   describe "sockets that died before first use" do
     test "Bandit's conn_data failure is dropped" do
       reason =

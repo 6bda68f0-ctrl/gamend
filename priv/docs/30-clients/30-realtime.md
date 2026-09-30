@@ -8,7 +8,7 @@ Real-time features use Phoenix PubSub to broadcast events. Domain modules publis
 
 ## WebSocket channels
 
-Clients connect via WebSocket and join channels to receive real-time events. Six channel types are available:
+Clients connect via WebSocket and join channels to receive real-time events. Seven channel types are available:
 
 - **UserChannel** (`user:{user_id}`) — personal channel: friend updates/presence, notifications, KV subscriptions, user profile updates
 - **LobbyChannel** (`lobby:{lobby_id}`) — per-lobby: member join/leave/kick, lobby settings, host changes
@@ -16,6 +16,7 @@ Clients connect via WebSocket and join channels to receive real-time events. Six
 - **GroupChannel** (`group:{group_id}`) — per-group: member join/leave/kick, promote/demote, join request decisions
 - **GroupsChannel** (`groups`) — global group list: group created/updated/deleted (excludes hidden)
 - **PartyChannel** (`party:{party_id}`) — per-party: member join/leave, party settings, disbanded
+- **SignalingChannel** (`signaling:{lobby_id}`) — WebRTC peer-to-peer signaling relay for one lobby (see the WebRTC page)
 
 ## Payload format: JSON (default) or Protobuf
 
@@ -32,7 +33,14 @@ const realtime = new GameRealtime(serverUrl, token, { format: 'protobuf' })
 ```
 
 ```gdscript
-var realtime = GamendRealtime.new(token_provider, endpoint, "protobuf")
+gamend_api.realtime_format = "protobuf"  # set before realtime_start()
+await gamend_api.realtime_start()
+```
+
+```cpp
+config.realtime_format = gamend::RealtimeFormat::Protobuf;  // before Client
+gamend::Client client(std::move(config));
+client.realtime().connect();
 ```
 
 - Decoded protobuf payloads keep the JSON field names, with two documented differences: timestamps are unix-millisecond integers (last_seen_at_ms, inserted_at_ms, ...) instead of ISO 8601 strings, and metadata/data values arrive already parsed.
@@ -61,10 +69,14 @@ KV keys are open-ended, so unlike the fixed names above there is no naming conve
 def kv_schemas do
   %{"loadout" => MyGame.V1.Loadout, "match:*" => MyGame.V1.MatchState}
 end
+```
 
-# Generate all bindings from the plugin's proto/ (one schema source):
-mix plugin.gen.proto --godot-out ../../godot/addons/my_game/my_game_pb.gd \
-                     --js-out ../../assets/js/my_game_pb.js
+```bash
+# Generate all bindings from the plugin's proto/ (one schema source).
+# Run from the plugin directory: relative paths resolve against it.
+mix host.proto.gen proto/my_game.proto \
+  --godot-out ../../godot/addons/my_game/my_game_pb.gd \
+  --js-out ../../assets/js/my_game_pb.js
 ```
 
 ```proto
@@ -107,7 +119,7 @@ Detailed payload shapes for every event pushed from the server to the client, gr
 | chat_message_deleted | Friend DM deleted | {id} |
 | quest_progress / quest_completed / quest_claimed | A quest objective advanced / completed / rewards claimed | {id, user_id, quest_key, period_key, objective_progress, status, completed_at, claimed_at, metadata, inserted_at, updated_at} |
 | group_invite_accepted | Someone accepted your group invite | {group_id} |
-| group_invite_cancelled | Group deleted — pending invites cancelled | {group_id, group_name} |
+| group_invite_cancelled | Group deleted — pending invites cancelled | {group_id, group_title} |
 | group_join_request_approved | Your group join request was approved | {group_id} |
 | group_join_request_rejected | Your group join request was declined | {group_id} |
 | party_invite_accepted | Someone accepted your party invite | {party_id, user_id} |
@@ -217,7 +229,8 @@ The UserChannel also accepts a "call_hook" push from the client to invoke server
 
 - All broadcasts are fire-and-forget; subscribers don't acknowledge receipt
 - In a cluster, PubSub automatically distributes messages across nodes via pg2/Phoenix.PubSub.PG2
-- WebSocket connections are authenticated via JWT token on join
+- WebSocket connections are authenticated on socket connect, not on channel join: the socket needs a valid JWT access token (a refresh token is refused), and a connection without one is rejected before any channel can be joined
+- A socket that sends nothing for `GAMEND_REALTIME_SOCKET_TIMEOUT_MS` (default 5 minutes) is closed. The default is long because browsers pause a background tab's game loop, heartbeats included; a hard disconnect still ends the socket at once. A single frame larger than `GAMEND_REALTIME_SOCKET_MAX_FRAME_BYTES` (default 128 KB) is refused
 - Friend DMs are broadcast to both the sorted-pair topic and each user's personal topic, so the recipient receives the message even without subscribing to the friend chat topic directly.
 - Clients that cache messages locally can update in place: `chat_message_updated`
   carries the full message, and `chat_message_deleted` carries only its `id`.
@@ -226,17 +239,18 @@ The UserChannel also accepts a "call_hook" push from the client to invoke server
 
 When a new chat message is sent, a notification is automatically created for recipients:
 
-- **Friend DM:** One consolidated notification per user: "New messages from friends"
-- **Group message:** One notification per group: "New messages from {group_name}". Sent to all group members except sender.
-- **Lobby message:** One notification per lobby: "New messages from {lobby_name}". Sent to all lobby members except sender.
+- **Friend DM:** One notification per recipient for all friend DMs: "New messages from friends" (`metadata.type` `chat_friend`).
+- **Group message:** One notification per group: "New messages in group {group_name}" (`chat_group`, with `group_id`). Sent to all group members except sender.
+- **Lobby message:** "New messages in your lobby" (`chat_lobby`, with `lobby_id`). Sent to all lobby members except sender.
+- **Party message:** "New messages in your party" (`chat_party`, with `party_id`). Sent to all party members except sender.
 
-Notifications use upsert semantics: multiple messages update the existing notification with the latest content rather than creating duplicates.
+Notifications use upsert semantics, keyed on the title: a new message marks the existing notification unread and adds 1 to `metadata.message_count` rather than creating a duplicate.
 
 ## Quest completion notifications
 
 When a user completes a quest, a notification is automatically created:
 
-- **Title:** "Quest completed: " ("Achievement unlocked: " for quests categorised `achievement`)
+- **Title:** "Quest completed: {quest_title}" ("Achievement unlocked: {quest_title}" for quests categorised `achievement`)
 - **Metadata:** `{type: "quest_completed", quest_key, category, quest_title}`
 
 Progress increments do not generate notifications; only completion does. The notification is a self-notification (sender = recipient) since it is system-generated.

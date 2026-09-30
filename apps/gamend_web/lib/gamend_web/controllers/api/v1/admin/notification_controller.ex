@@ -5,41 +5,10 @@ defmodule GamendWeb.Api.V1.Admin.NotificationController do
   import GamendWeb.Helpers.ParamParser
 
   alias Gamend.Notifications
-  alias GamendWeb.Pagination
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{NotificationPage, NotificationResponse, OkResponse}
   alias GamendWeb.Serializers
   alias OpenApiSpex.Schema
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
-
-  @notification_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid, description: "Notification ID"},
-      sender_id: %Schema{type: :string, format: :uuid, description: "User ID of the sender"},
-      sender_name: %Schema{type: :string, description: "Display name of the sender"},
-      recipient_id: %Schema{type: :string, format: :uuid, description: "User ID of the recipient"},
-      title: %Schema{type: :string, description: "Notification title"},
-      content: %Schema{type: :string, description: "Notification body text"},
-      metadata: %Schema{type: :object, description: "Arbitrary metadata"},
-      inserted_at: %Schema{
-        type: :string,
-        format: "date-time",
-        description: "Timestamp (UTC) when the notification was created"
-      }
-    }
-  }
-
-  @meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      count: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer},
-      has_more: %Schema{type: :boolean}
-    }
-  }
 
   tags(["Admin – Notifications"])
 
@@ -82,15 +51,7 @@ defmodule GamendWeb.Api.V1.Admin.NotificationController do
       ]
     ],
     responses: [
-      ok:
-        {"Paginated list of notifications", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @notification_schema},
-             meta: @meta_schema
-           }
-         }}
+      ok: {"Paginated list of notifications", "application/json", NotificationPage}
     ]
   )
 
@@ -124,9 +85,9 @@ defmodule GamendWeb.Api.V1.Admin.NotificationController do
       }
     },
     responses: [
-      created: {"Notification created", "application/json", @notification_schema},
-      bad_request: {"Bad request", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", @error_schema}
+      created: {"Notification created", "application/json", NotificationResponse},
+      bad_request: Schemas.error("Bad request"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
@@ -143,8 +104,8 @@ defmodule GamendWeb.Api.V1.Admin.NotificationController do
       ]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -165,12 +126,14 @@ defmodule GamendWeb.Api.V1.Admin.NotificationController do
       Notifications.list_all_notifications(filters, page: page, page_size: page_size)
 
     total_count = Notifications.count_all_notifications(filters)
-    count = length(notifications)
 
-    json(conn, %{
-      data: Enum.map(notifications, &Serializers.serialize_notification/1),
-      meta: Pagination.meta(page, page_size, count, total_count)
-    })
+    reply_page(
+      conn,
+      Enum.map(notifications, &Serializers.serialize_notification/1),
+      page,
+      page_size,
+      total_count
+    )
   end
 
   def create(conn, params) do
@@ -179,33 +142,21 @@ defmodule GamendWeb.Api.V1.Admin.NotificationController do
 
     cond do
       is_nil(sender_id) ->
-        conn |> put_status(:bad_request) |> json(%{error: "sender_id is required"})
+        reply_error(conn, :bad_request, "missing_param", "sender_id is required")
 
       is_nil(recipient_id) ->
-        conn |> put_status(:bad_request) |> json(%{error: "recipient_id is required"})
+        reply_error(conn, :bad_request, "missing_param", "recipient_id is required")
 
       true ->
         case Notifications.admin_create_notification(sender_id, recipient_id, params) do
           {:ok, notification} ->
-            conn
-            |> put_status(:created)
-            |> json(Serializers.serialize_notification(notification))
+            reply_data(conn, :created, Serializers.serialize_notification(notification))
 
           {:error, %Ecto.Changeset{} = cs} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: "validation_failed",
-              errors:
-                Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
-                  Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-                    opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-                  end)
-                end)
-            })
+            unprocessable(conn, cs)
 
-          {:error, reason} ->
-            conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
+          {:error, reason} when is_atom(reason) ->
+            reply_error(conn, :bad_request, reason)
         end
     end
   end
@@ -215,13 +166,13 @@ defmodule GamendWeb.Api.V1.Admin.NotificationController do
 
     case Notifications.admin_delete_notification(notification_id) do
       {:ok, _} ->
-        json(conn, %{})
+        reply_ok(conn)
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       {:error, _} ->
-        conn |> put_status(:bad_request) |> json(%{error: "delete_failed"})
+        reply_error(conn, :bad_request, "delete_failed")
     end
   end
 

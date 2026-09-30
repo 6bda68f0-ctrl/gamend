@@ -8,12 +8,19 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
 
   alias Gamend.Economy
   alias Gamend.Inventory
-  alias GamendWeb.Pagination
+  alias GamendWeb.Schemas
+
+  alias GamendWeb.Schemas.{
+    AdminInventoryItemPage,
+    AdminLedgerEntryPage,
+    AdminWalletPage,
+    ItemQuantityResponse,
+    WalletBalanceResponse
+  }
+
   alias OpenApiSpex.Schema
 
   tags(["Admin – Economy"])
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
 
   @mutate_body {
     "Wallet change",
@@ -42,9 +49,9 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
       page_size: [in: :query, schema: %Schema{type: :integer, default: 25}, required: false]
     ],
     responses: [
-      ok: {"Wallets", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Wallets", "application/json", AdminWalletPage},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -61,14 +68,13 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
     wallets = Economy.list_wallets(filters)
     total = Economy.count_wallets(filters)
 
-    json(conn, %{
-      data:
-        Enum.map(
-          wallets,
-          &%{id: &1.id, user_id: &1.user_id, currency: &1.currency, balance: &1.balance}
-        ),
-      meta: Pagination.meta(page, page_size, length(wallets), total)
-    })
+    rows =
+      Enum.map(
+        wallets,
+        &%{id: &1.id, user_id: &1.user_id, currency: &1.currency, balance: &1.balance}
+      )
+
+    reply_page(conn, rows, page, page_size, total)
   end
 
   operation(:ledger,
@@ -82,9 +88,9 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
       page_size: [in: :query, schema: %Schema{type: :integer, default: 25}, required: false]
     ],
     responses: [
-      ok: {"Ledger", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Ledger, newest first", "application/json", AdminLedgerEntryPage},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -101,21 +107,21 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
     entries = Economy.list_ledger(filters)
     total = Economy.count_ledger(filters)
 
-    json(conn, %{
-      data:
-        Enum.map(entries, fn e ->
-          %{
-            id: e.id,
-            user_id: e.user_id,
-            currency: e.currency || "",
-            delta: e.delta,
-            balance_after: e.balance_after,
-            reason: e.reason,
-            inserted_at: e.inserted_at
-          }
-        end),
-      meta: Pagination.meta(page, page_size, length(entries), total)
-    })
+    rows =
+      Enum.map(entries, fn e ->
+        %{
+          id: e.id,
+          user_id: e.user_id,
+          currency: e.currency || "",
+          delta: e.delta,
+          balance_after: e.balance_after,
+          reason: e.reason || "",
+          metadata: e.metadata || %{},
+          inserted_at: e.inserted_at
+        }
+      end)
+
+    reply_page(conn, rows, page, page_size, total)
   end
 
   operation(:grant,
@@ -124,10 +130,12 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
     security: [%{"authorization" => []}],
     request_body: @mutate_body,
     responses: [
-      ok: {"Granted", "application/json", %Schema{type: :object}},
-      bad_request: {"Invalid request", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Granted: the balance after", "application/json", WalletBalanceResponse},
+      bad_request: Schemas.error("Missing or invalid fields"),
+      not_found: Schemas.error("No such user (user_not_found)"),
+      conflict: Schemas.error("That idempotency_key already applied (idempotent_replay)"),
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -139,10 +147,13 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
     security: [%{"authorization" => []}],
     request_body: @mutate_body,
     responses: [
-      ok: {"Spent", "application/json", %Schema{type: :object}},
-      bad_request: {"Invalid request / insufficient funds", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Spent: the balance after", "application/json", WalletBalanceResponse},
+      bad_request: Schemas.error("Missing or invalid fields"),
+      forbidden: Schemas.error("Admin required, or insufficient funds (insufficient_funds)"),
+      not_found: Schemas.error("No such user (user_not_found)"),
+      conflict: Schemas.error("That idempotency_key already applied (idempotent_replay)"),
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -159,21 +170,27 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
 
     with amount when is_integer(amount) and amount > 0 <- amount,
          {:ok, balance} <- apply(Economy, op, [uid, currency, amount, opts]) do
-      json(conn, %{ok: true, user_id: uid, currency: currency, balance: balance})
+      reply_data(conn, %{user_id: uid, currency: currency, balance: balance})
     else
+      {:error, :user_not_found} ->
+        reply_error(conn, :not_found, "user_not_found")
+
       {:error, reason} ->
-        conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
+        refusal(conn, reason)
 
       _ ->
-        conn |> put_status(:bad_request) |> json(%{error: "amount must be a positive integer"})
+        reply_error(conn, :bad_request, "invalid_amount", "amount must be a positive integer")
     end
   end
 
   defp mutate(conn, _params, _op),
     do:
-      conn
-      |> put_status(:bad_request)
-      |> json(%{error: "user_id, currency and amount are required"})
+      reply_error(
+        conn,
+        :bad_request,
+        "missing_param",
+        "user_id, currency and amount are required"
+      )
 
   operation(:items,
     operation_id: "admin_list_inventory",
@@ -186,9 +203,9 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
       page_size: [in: :query, schema: %Schema{type: :integer, default: 25}, required: false]
     ],
     responses: [
-      ok: {"Items", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Items", "application/json", AdminInventoryItemPage},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -199,20 +216,19 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
     items = Inventory.list_items(filters)
     total = Inventory.count_items(filters)
 
-    json(conn, %{
-      data:
-        Enum.map(
-          items,
-          &%{
-            id: &1.id,
-            user_id: &1.user_id,
-            item: &1.item,
-            quantity: &1.quantity,
-            metadata: &1.metadata
-          }
-        ),
-      meta: Pagination.meta(page, page_size, length(items), total)
-    })
+    rows =
+      Enum.map(
+        items,
+        &%{
+          id: &1.id,
+          user_id: &1.user_id,
+          item: &1.item,
+          quantity: &1.quantity,
+          metadata: &1.metadata || %{}
+        }
+      )
+
+    reply_page(conn, rows, page, page_size, total)
   end
 
   operation(:grant_item,
@@ -231,10 +247,11 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
          required: [:user_id, :item, :quantity]
        }},
     responses: [
-      ok: {"Granted", "application/json", %Schema{type: :object}},
-      bad_request: {"Invalid request", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Granted: the quantity after", "application/json", ItemQuantityResponse},
+      bad_request: Schemas.error("Missing or invalid fields"),
+      not_found: Schemas.error("No such user (user_not_found)"),
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -245,10 +262,12 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
     summary: "Consume items from a user (admin)",
     security: [%{"authorization" => []}],
     responses: [
-      ok: {"Consumed", "application/json", %Schema{type: :object}},
-      bad_request: {"Invalid request / insufficient items", "application/json", @error_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Consumed: the quantity after", "application/json", ItemQuantityResponse},
+      bad_request: Schemas.error("Missing or invalid fields"),
+      forbidden: Schemas.error("Admin required, or insufficient items (insufficient_items)"),
+      not_found: Schemas.error("No such user (user_not_found)"),
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -260,21 +279,30 @@ defmodule GamendWeb.Api.V1.Admin.EconomyController do
 
     with qty when is_integer(qty) and qty > 0 <- qty,
          {:ok, quantity} <- apply(Inventory, op, [uid, item, qty, []]) do
-      json(conn, %{ok: true, user_id: uid, item: item, quantity: quantity})
+      reply_data(conn, %{user_id: uid, item: item, quantity: quantity})
     else
+      {:error, :user_not_found} ->
+        reply_error(conn, :not_found, "user_not_found")
+
       {:error, reason} ->
-        conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
+        refusal(conn, reason)
 
       _ ->
-        conn |> put_status(:bad_request) |> json(%{error: "quantity must be a positive integer"})
+        reply_error(conn, :bad_request, "invalid_amount", "quantity must be a positive integer")
     end
   end
 
   defp item_mutate(conn, _params, _op),
     do:
-      conn
-      |> put_status(:bad_request)
-      |> json(%{error: "user_id, item and quantity are required"})
+      reply_error(conn, :bad_request, "missing_param", "user_id, item and quantity are required")
+
+  # A refusal from `Gamend.Economy` / `Gamend.Inventory`; the status follows
+  # the rule in docs/specs/api-conventions.md.
+  defp refusal(conn, reason) when reason in [:insufficient_funds, :insufficient_items],
+    do: reply_error(conn, :forbidden, reason)
+
+  defp refusal(conn, :idempotent_replay), do: reply_error(conn, :conflict, "idempotent_replay")
+  defp refusal(conn, reason) when is_atom(reason), do: reply_error(conn, :bad_request, reason)
 
   defp parse_amount(n) when is_integer(n), do: n
 

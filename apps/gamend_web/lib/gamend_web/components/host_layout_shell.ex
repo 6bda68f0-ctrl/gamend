@@ -8,6 +8,7 @@ defmodule GamendWeb.HostLayoutShell do
   attr :current_path, :string, default: nil
   attr :current_query, :string, default: ""
   attr :flush, :boolean, default: false
+  attr :wide, :boolean, default: false
   attr :theme, :map, required: true
   attr :navigation, :map, default: %{}
   attr :footer, :map, default: %{}
@@ -83,6 +84,21 @@ defmodule GamendWeb.HostLayoutShell do
               loading="eager"
               decoding="sync"
               fetchpriority="high"
+              class={theme_logo_dark(@theme) && "[[data-theme=dark]_&]:hidden"}
+            />
+            <%!-- A mark drawn for a light page can vanish on a dark one. The
+                  theme's `logo_dark` takes its place, swapped by the same
+                  attribute the presentation images follow, so no script picks
+                  one and the two never both show. --%>
+            <img
+              :if={theme_logo_dark(@theme)}
+              src={theme_logo_dark(@theme)}
+              width="36"
+              height="36"
+              alt=""
+              loading="eager"
+              decoding="sync"
+              class="hidden [[data-theme=dark]_&]:block"
             />
             <span class="text-lg font-bold">{Map.get(@theme, "title")}</span>
             <span
@@ -174,8 +190,18 @@ defmodule GamendWeb.HostLayoutShell do
                 knocks a full-height hero off centre. `--breadcrumb-offset` is
                 the trail's own height plus the stack gap; a hero subtracts it
                 from `100dvh` so its first screen still ends at the fold. --%>
+          <%!-- Reading width by default. A `wide` page brings its own side
+                columns — a docs sidebar, a table of contents — and the article
+                between them is what should keep the reading width, so the
+                frame lets it out to the screen. --%>
           <div
-            class="mx-auto max-w-2xl md:max-w-3xl lg:max-w-4xl xl:max-w-6xl space-y-4"
+            class={[
+              "mx-auto space-y-4",
+              if(@wide,
+                do: "max-w-2xl md:max-w-3xl lg:max-w-5xl xl:max-w-7xl 2xl:max-w-screen-2xl",
+                else: "max-w-2xl md:max-w-3xl lg:max-w-4xl xl:max-w-6xl"
+              )
+            ]}
             style={if length(@breadcrumbs) > 1, do: "--breadcrumb-offset: 2.25rem"}
           >
             <.breadcrumbs trail={@breadcrumbs} />
@@ -251,6 +277,17 @@ defmodule GamendWeb.HostLayoutShell do
           one of its own: on flush pages `NavbarAutohide` sets the header's
           `pointer-events: none`, and that inherits — a dialog inside it would
           be visible and unclickable. --%>
+    <%!-- Not daisyUI's `.modal`: that centres its box in the viewport, and on a
+          desktop the palette belongs under the button that opened it, not
+          across the middle of the page. So the dialog positions itself —
+          `search_palette.js` measures the button and writes `left`/`top`/
+          `width` here — and these classes are the fallback it starts from and
+          returns to on a narrow screen: a sheet along the top edge.
+
+          `showModal()` still does the rest, which is why this stays a
+          `<dialog>`: the top layer (no z-index to lose), Esc, the focus trap,
+          and a real `::backdrop` whose clicks report the dialog itself as the
+          target — which is how clicking outside closes it. --%>
     <dialog
       id="gamend-search"
       phx-update="ignore"
@@ -258,9 +295,14 @@ defmodule GamendWeb.HostLayoutShell do
       data-index-url={@index_url}
       data-query-url={@query_url}
       aria-labelledby="gamend-search-label"
-      class="modal modal-top sm:modal-middle"
+      class="fixed inset-x-0 top-0 m-0 w-full max-w-none max-h-none border-0 bg-transparent p-2 backdrop:bg-base-300/50 sm:backdrop:bg-transparent"
     >
-      <div class="modal-box max-w-xl p-3">
+      <%!-- The panel, and the thing "outside" is measured against: a click
+            that does not land inside it closes the palette. --%>
+      <div
+        data-gamend-search-panel
+        class="mx-auto flex max-h-full w-full max-w-xl flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 p-2 shadow-xl"
+      >
         <h2 id="gamend-search-label" class="sr-only">
           {GamendWeb.HostLayouts.translate("Search")}
         </h2>
@@ -296,14 +338,21 @@ defmodule GamendWeb.HostLayoutShell do
 
         <%!-- `flex-nowrap`: daisyUI's `.menu` is `column wrap`, so a capped
               height wraps into a second column off to the side instead of
-              scrolling. --%>
+              scrolling.
+
+              `w-full min-w-0`: `.menu` is also `width: fit-content`, which is
+              right for a dropdown that hugs its items and wrong for a list
+              inside a fixed-width panel — it grew to the widest row (1260px
+              in a 576px box) and every row hung out over the right edge.
+              `min-w-0` is what then lets a long title actually truncate
+              instead of pushing the row back out again. --%>
         <ul
           id="gamend-search-results"
           data-gamend-search-results
           role="listbox"
           aria-label={GamendWeb.HostLayouts.translate("Search")}
           hidden
-          class="menu menu-sm mt-2 max-h-[60vh] flex-nowrap overflow-y-auto overflow-x-hidden overscroll-contain p-0"
+          class="menu menu-sm mt-2 max-h-[60vh] min-h-0 w-full min-w-0 flex-1 flex-nowrap overflow-y-auto overflow-x-hidden overscroll-contain p-0"
         >
         </ul>
 
@@ -318,19 +367,17 @@ defmodule GamendWeb.HostLayoutShell do
         </template>
 
         <template data-gamend-search-row>
-          <li>
-            <a role="option" class="flex items-center justify-between gap-3 rounded-lg px-3 py-2">
-              <span data-row-title class="truncate font-semibold"></span>
-              <span data-row-subtitle class="truncate text-xs opacity-60"></span>
+          <li class="w-full min-w-0">
+            <a
+              role="option"
+              class="flex w-full min-w-0 items-center justify-between gap-3 rounded-lg px-3 py-2"
+            >
+              <span data-row-title class="min-w-0 truncate font-semibold"></span>
+              <span data-row-subtitle class="min-w-0 truncate text-xs opacity-60"></span>
             </a>
           </li>
         </template>
       </div>
-
-      <%!-- A `<form method="dialog">` backdrop would be a second form inside
-            the LiveView DOM; the JS closes on a click that lands on the
-            dialog itself instead. --%>
-      <div class="modal-backdrop" data-gamend-search-backdrop></div>
     </dialog>
     """
   end
@@ -346,7 +393,11 @@ defmodule GamendWeb.HostLayoutShell do
   """
   def breadcrumbs(assigns) do
     ~H"""
-    <nav :if={length(@trail) > 1} aria-label="Breadcrumb" class="text-sm text-base-content/60">
+    <nav
+      :if={length(@trail) > 1}
+      aria-label={GamendWeb.HostLayouts.translate("Breadcrumb")}
+      class="text-sm text-base-content/60"
+    >
       <ol class="flex flex-wrap items-center gap-2">
         <li :for={{{label, path}, index} <- Enum.with_index(@trail)} class="flex items-center gap-2">
           <span :if={index > 0} aria-hidden="true">/</span>
@@ -363,6 +414,13 @@ defmodule GamendWeb.HostLayoutShell do
   defp theme_logo(theme) do
     logo = Map.get(theme, "logo")
     GamendWeb.SRI.versioned_path(logo) || logo
+  end
+
+  defp theme_logo_dark(theme) do
+    case Map.get(theme, "logo_dark") do
+      logo when is_binary(logo) and logo != "" -> GamendWeb.SRI.versioned_path(logo) || logo
+      _ -> nil
+    end
   end
 
   defp theme_tagline(theme) do

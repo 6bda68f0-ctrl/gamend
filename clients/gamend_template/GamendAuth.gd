@@ -41,6 +41,10 @@ var before_session_save: Callable = Callable()
 ## sends it exactly once, so the game reads it after apple_native_auth to
 ## apply its own display-name policy.
 var last_apple_full_name := ""
+## The parts of that name, sent to the server with the code so the account is
+## created with it (the name is not in Apple's token).
+var _apple_given_name := ""
+var _apple_family_name := ""
 
 var _api: GamendApi
 var _state := "initial"
@@ -121,19 +125,42 @@ func device_auth() -> String:
 
 ## Browser OAuth for any provider (GamendApi.PROVIDER_*): request the URL,
 ## open it (web popup / Apple web session / system browser), poll the session
-## until the site completes it, then save the session.
+## until the site completes it, then save the session. Always a sign-in, even
+## when a player is signed in already; provider_link adds a provider instead.
 func provider_auth(provider: String) -> String:
+	var error := await _provider_page(
+		func() -> GamendResult: return await _api.authenticate_oauth_request(provider),
+		func(session_id: String) -> GamendResult: return await _api.authenticate_oauth_session_status(session_id)
+	)
+	if not error.is_empty():
+		return error
+	return await save_session()
+
+
+## Link a provider to the signed-in account through its page, as provider_auth
+## signs in through it. The session does not change; the user channel's
+## user_updated carries the new linked_providers.
+func provider_link(provider: String) -> String:
+	return await _provider_page(
+		func() -> GamendResult: return await _api.authenticate_link_provider_request(provider),
+		func(session_id: String) -> GamendResult: return await _api.authenticate_link_session_status(session_id)
+	)
+
+
+## Open the page `start` answers and poll `status` until the player is done
+## there. "" once it completed, else the error to show.
+func _provider_page(start: Callable, status: Callable) -> String:
 	# On web, pre-open a blank popup BEFORE the async call. Browsers block
 	# window.open() if called after an await (the user gesture has expired).
 	var auth_popup: JavaScriptObject = null
 	if OS.has_feature("web") and not _apple_web:
 		auth_popup = JavaScriptBridge.eval("window.open('about:blank', '_blank')", true)
-	var response = await _api.authenticate_oauth_request(provider)
+	var response: GamendResult = await start.call()
 	if response.error:
 		if auth_popup:
 			auth_popup.close()
 		return "Error: " + str(response.error.message)
-	var result: OauthRequest200Response = response.response.data
+	var result: GamendOAuthAuthorization = response.response.data.data
 	var session_id = result.session_id
 	var open_error = null
 	if _apple_web:
@@ -145,14 +172,17 @@ func provider_auth(provider: String) -> String:
 	if open_error:
 		return "Error: Cannot open url to login. " + str(open_error)
 	for i in 30:
-		response = await _api.authenticate_oauth_session_status(session_id)
+		response = await status.call(session_id)
 		if response.response:
-			if response.response.data.status == "completed":
+			# GamendOAuthSessionStatus or GamendProviderLinkStatus: both say
+			# status, error and message.
+			var state = response.response.data.data
+			if state.status == "completed":
 				_cancel_apple_web()
-				return await save_session()
-			if response.response.data.status != "pending":
+				return ""
+			if state.status != "pending":
 				_cancel_apple_web()
-				return "Error: " + str(response.response.data.message)
+				return "Error: " + str(state.message if state.message else state.error)
 		await get_tree().create_timer(2.0).timeout
 	_cancel_apple_web()
 	if auth_popup:
@@ -165,37 +195,79 @@ func provider_auth(provider: String) -> String:
 ## Native Apple sign-in (iOS/macOS extension). No-op success on platforms
 ## without the extension. The captured name lands in last_apple_full_name.
 func apple_native_auth() -> String:
-	_apple_login_result = ""
-	_apple_login_error = ""
-	last_apple_full_name = ""
-	if not ClassDB.class_exists("ASAuthorizationController"):
-		return ""
-	_apple_sign_in.signin_with_scopes(["full_name", "email"])
-	if not await _wait_for_apple_auth_or_timeout(provider_timeout_sec):
-		return "Error: Apple Authorization timed out"
-	if _apple_login_error:
-		return _apple_login_error
-	var request = OauthCallbackApiAppleIosRequest.new()
-	request.code = _apple_login_result
+	var got: Array = await _apple_native_code()
+	if got[1] or got[0].is_empty():
+		return got[1]
+	var request = GamendOauthCallbackApiAppleIosRequest.new()
+	request.code = got[0]
+	request.given_name = _apple_given_name
+	request.family_name = _apple_family_name
 	var response = await _api.authenticate_oauth_callback_api_apple_ios(request)
 	if response.error:
 		return str(response.error.message)
 	return await save_session()
 
 
+## Link Apple to the signed-in account with the native flow.
+func apple_native_link() -> String:
+	var got: Array = await _apple_native_code()
+	if got[1] or got[0].is_empty():
+		return got[1]
+	var response = await _api.authenticate_link_apple_ios(got[0], _apple_given_name, _apple_family_name)
+	if response.error:
+		return "Error: " + str(response.error.message)
+	return ""
+
+
+## [code, error] from the native Apple sheet: ["", ""] where there is no
+## extension, as a no-op success.
+func _apple_native_code() -> Array:
+	_apple_login_result = ""
+	_apple_login_error = ""
+	last_apple_full_name = ""
+	_apple_given_name = ""
+	_apple_family_name = ""
+	if not ClassDB.class_exists("ASAuthorizationController"):
+		return ["", ""]
+	_apple_sign_in.signin_with_scopes(["full_name", "email"])
+	if not await _wait_for_apple_auth_or_timeout(provider_timeout_sec):
+		return ["", "Error: Apple Authorization timed out"]
+	if _apple_login_error:
+		return ["", _apple_login_error]
+	return [_apple_login_result, ""]
+
+
 ## Native Discord sign-in for embedded builds, via the injected discord_sdk.
 func discord_native_auth() -> String:
+	var code := await _discord_native_code()
+	if code.begins_with("Error"):
+		return code
+	var request = GamendOauthApiCallbackRequest.new()
+	request.code = code
+	var response = await _api.authenticate_oauth_api_callback(GamendApi.PROVIDER_DISCORD, request)
+	if response.error:
+		return "Error: " + str(response.error.message)
+	return await save_session()
+
+
+## Link Discord to the signed-in account with the embedded Discord SDK.
+func discord_native_link() -> String:
+	var code := await _discord_native_code()
+	if code.begins_with("Error"):
+		return code
+	var response = await _api.authenticate_link_provider(GamendApi.PROVIDER_DISCORD, code)
+	if response.error:
+		return "Error: " + str(response.error.message)
+	return ""
+
+
+func _discord_native_code() -> String:
 	if discord_sdk == null:
 		return "Error: No Discord SDK configured"
 	var auth = await discord_sdk.command_authorize("code", ["identify"], "")
 	if str(auth.get("code", "")).is_empty():
 		return "Error: Discord login failed"
-	var request = OauthApiCallbackRequest.new()
-	request.code = auth["code"]
-	var response = await _api.authenticate_oauth_api_callback(GamendApi.PROVIDER_DISCORD, request)
-	if response.error:
-		return "Error: " + str(response.error.message)
-	return await save_session()
+	return str(auth["code"])
 
 
 ## Post-login: persist the refresh token, start realtime, join the user
@@ -235,9 +307,12 @@ func _on_api_user_updated(user: Dictionary) -> void:
 func _on_apple_authorization_completed(credential: RefCounted) -> void:
 	if credential.is_class("ASAuthorizationAppleIDCredential"):
 		_apple_login_result = credential.authorization_code.get_string_from_utf8()
-		last_apple_full_name = (str(credential.full_name.get("given_name", "")) + " " + str(credential.full_name.get("family_name", ""))).strip_edges()
+		_apple_given_name = str(credential.full_name.get("given_name", "")).strip_edges()
+		_apple_family_name = str(credential.full_name.get("family_name", "")).strip_edges()
+		last_apple_full_name = (_apple_given_name + " " + _apple_family_name).strip_edges()
 		if last_apple_full_name.is_empty():
 			last_apple_full_name = str(credential.full_name.get("nickname", "")).strip_edges()
+			_apple_given_name = last_apple_full_name
 	else:
 		_apple_login_error = "Error: Failed to login with Apple. Wrong credential type."
 	_apple_auth_revision += 1

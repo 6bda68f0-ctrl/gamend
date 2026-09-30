@@ -4,7 +4,7 @@ icon: hero-shield-check
 
 # Security & Rate Limiting
 
-Requests pass through a fixed chain in the endpoint: the real client IP is extracted from proxy headers, banned IPs are rejected, security headers are set, CORS is applied, and the request is rate-limited, all before the router runs. This guide covers each layer, what it protects against, and what to configure for production.
+Requests pass through a fixed chain in the endpoint: security headers are set and static files are served first, then the real client IP is extracted from proxy headers, banned IPs are rejected, CORS is applied, and the request is rate-limited, all before the request body is parsed and before the router runs. A request over its limit is refused without its body being read. This guide covers each layer, what it protects against, and what to configure for production.
 
 ## The real client IP
 
@@ -14,7 +14,7 @@ The headers are only parsed when the connecting peer *is* a trusted proxy (loopb
 
 ## IP bans
 
-An IP ban is checked in ETS on every request: a banned address gets a bare `403` before any routing happens. Bans are persisted so they survive restarts, and broadcast over PubSub so every instance in a cluster applies them within moments of the ban being placed.
+An IP ban is checked in ETS on every request that reaches it: a banned address gets a bare `403` before any routing happens. An IPv6 address is banned by its /64 network, since one subscriber is usually given a whole /64 and can move around inside it; `ban("2001:db8::1")` is listed as `2001:db8::/64`. An IPv4 address is banned as itself. Static files are served earlier in the chain, so a ban does not cover them. Bans are persisted so they survive restarts, and broadcast over PubSub so every instance in a cluster applies them within moments of the ban being placed.
 
 Ban and unban from [/admin/rate_limiting](/admin/rate_limiting) (permanent or with a TTL), or from server code:
 
@@ -26,7 +26,7 @@ GamendWeb.Plugs.IpBan.unban("1.2.3.4")
 
 ## Rate limiting
 
-HTTP requests are throttled per client IP, realtime messages per user, using Hammer counters. Each surface has its own bucket so one cannot starve another:
+HTTP requests are throttled per client IP (an IPv6 client per /64, for the same reason as bans), realtime messages per user, using Hammer counters. Each surface has its own bucket so one cannot starve another:
 
 | Bucket | Scope | Default | Variables |
 |---|---|---|---|
@@ -36,6 +36,8 @@ HTTP requests are throttled per client IP, realtime messages per user, using Ham
 | WebSocket channel messages | per user | 60 / 10s | `GAMEND_RATELIMIT_WS_LIMIT`, `GAMEND_RATELIMIT_WS_WINDOW_MS` |
 | WebRTC DataChannel messages | per user | 300 / 10s | `GAMEND_RATELIMIT_DC_LIMIT`, `GAMEND_RATELIMIT_DC_WINDOW_MS` |
 | ICE candidates | per user | 150 / 30s | `GAMEND_RATELIMIT_ICE_LIMIT`, `GAMEND_RATELIMIT_ICE_WINDOW_MS` |
+| Peer-to-peer signaling messages | per user | 300 / 10s | `GAMEND_RATELIMIT_SIGNALING_WS_LIMIT`, `GAMEND_RATELIMIT_SIGNALING_WS_WINDOW_MS` |
+| Peer-to-peer ICE candidates | per user | 150 / 30s | `GAMEND_RATELIMIT_SIGNALING_ICE_LIMIT`, `GAMEND_RATELIMIT_SIGNALING_ICE_WINDOW_MS` |
 
 `GAMEND_RATELIMIT_ENABLED` is the master switch. An HTTP client over the limit gets `429 Too Many Requests` with a `Retry-After` header; a WebSocket client over its budget has the channel closed with a `rate_limited` error, and a flooding WebRTC peer is disconnected. Separate daily quotas cap chat messages and chat reports per user (`GAMEND_LIMITS_MAX_CHAT_MESSAGES_PER_DAY`, `GAMEND_LIMITS_MAX_CHAT_REPORTS_PER_USER_PER_DAY`).
 
@@ -50,7 +52,7 @@ Denied requests are counted in the `gamend_rate_limit_denies_total` metric, tagg
 
 ## Captcha
 
-The register and magic-link forms can require a [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/) challenge. These are the two paths that mail an address the submitter chose, where the abuse is not request volume (the rate limiter answers that) but a botnet spending your mail reputation an address at a time. Password login is deliberately not guarded, and the game SDKs never see the captcha: registration is browser-only and device login is untouched, so enabling it cannot break a shipped client.
+The register and magic-link forms can require a [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/) challenge. These are the two paths that mail an address the submitter chose, where the abuse is not request volume (the rate limiter answers that) but a botnet spending your mail reputation an address at a time. Password login is deliberately not guarded, and the game SDKs never see the captcha unless you ask: `POST /api/v1/register` is guarded only with `GAMEND_CAPTCHA_API_REGISTER=true`, and device login never is, so enabling it cannot break a shipped client.
 
 ```bash
 GAMEND_CAPTCHA_ENABLED=true
@@ -64,7 +66,7 @@ With the keys unset, dev and test fall back to Cloudflare's published dummy pair
 
 Every response carries baseline headers (`nosniff`, `SAMEORIGIN` framing, a strict referrer policy, a deny-by-default permissions policy, and same-origin resource policy), and every HTTPS response gets a one-year HSTS header. In production the `x-request-id` response header is stripped so internal correlation ids do not leak; the id stays available for log correlation.
 
-Browser pages run under a strict Content-Security-Policy (no inline or third-party scripts). Two admin-only scopes carry their own slightly wider policies for Swagger UI and Oban Web, and when the captcha is enabled the policy is widened at request time to admit the Turnstile script, so deployments that never enable it keep exactly the strict policy.
+Browser pages run under a strict Content-Security-Policy (no inline or third-party scripts). Two scopes carry their own slightly wider policies: Swagger UI at `/api/docs`, which is public unless `GAMEND_FEATURES_OPENAPI=false`, and the admin-only Oban Web. When the captcha is enabled the policy is widened at request time to admit the Turnstile script, so deployments that never enable it keep exactly the strict policy.
 
 ## CORS
 
@@ -98,6 +100,6 @@ GAMEND_TLS_FORCE=true
 
 ## Reference
 
-- **Every variable:** the [Settings guide](/docs/settings) — the Rate limiting, Captcha, TLS and Server & HTTP groups.
+- **Every variable:** the [Settings guide](/docs/settings) — the Rate limiting, Captcha, TLS & certificates and Server & HTTP groups.
 - **Admin pages:** [/admin/rate_limiting](/admin/rate_limiting), [/admin/users](/admin/users), [/admin/sessions](/admin/sessions).
 - **Scaling:** the [Scaling guide](/docs/scaling) for running the Redis-backed limiter under Docker Compose.

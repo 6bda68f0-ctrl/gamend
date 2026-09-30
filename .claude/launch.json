@@ -4,7 +4,28 @@
     {
       "name": "gamend-dev",
       "runtimeExecutable": "mix",
-      "runtimeArgs": ["phx.server"],
+      "runtimeArgs": [
+        "phx.server"
+      ],
+      "port": 4000,
+      "autoPort": true
+    },
+    {
+      "name": "gamend-bench",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "GAMEND_DEV_BENCH=1 MIX_BUILD_PATH=_build/bench PORT=4020 GAMEND_CONTENT_PLUGINS_DIR=modules/plugins_examples GAMEND_RATELIMIT_ENABLED=false GAMEND_FEATURES_LIST_LOBBIES_ENABLED=true GAMEND_FEATURES_LIST_GROUPS_ENABLED=true exec mix phx.server"
+      ],
+      "port": 4020
+    },
+    {
+      "name": "forge",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/dragosdaian/Documents/appsinacup/forge && exec mix phx.server"
+      ],
       "port": 4000,
       "autoPort": true
     }

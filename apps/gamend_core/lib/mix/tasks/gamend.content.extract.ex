@@ -59,7 +59,7 @@ defmodule Mix.Tasks.Gamend.Content.Extract do
         Mix.shell().info("no quest/leaderboard/tournament text found - nothing to extract")
 
       Keyword.get(opts, :check, false) ->
-        check(path, render(strings))
+        Gamend.Codegen.check!(path, render(strings), "gamend.content.extract")
 
       true ->
         File.mkdir_p!(Path.dirname(path))
@@ -87,14 +87,6 @@ defmodule Mix.Tasks.Gamend.Content.Extract do
       Mix.raise("could not read content: #{Exception.message(error)}")
   end
 
-  defp check(path, generated) do
-    case File.read(path) do
-      {:ok, ^generated} -> Mix.shell().info("#{path} is up to date")
-      {:ok, _stale} -> Mix.raise("#{path} is out of date. Run: mix gamend.content.extract")
-      {:error, _} -> Mix.raise("#{path} does not exist. Run: mix gamend.content.extract")
-    end
-  end
-
   @doc false
   def render(strings) do
     header = """
@@ -116,28 +108,8 @@ defmodule Mix.Tasks.Gamend.Content.Extract do
     """
 
     #. #{label}
-    msgid #{quote_po(text)}
+    msgid #{Gamend.Codegen.quote_po(text)}
     msgstr ""
     """
-  end
-
-  defp quote_po(string) do
-    escaped = string |> String.replace("\\", "\\\\") |> String.replace("\"", "\\\"")
-
-    case String.split(escaped, "\n") do
-      [single] ->
-        ~s("#{single}")
-
-      lines ->
-        body =
-          lines
-          |> Enum.with_index()
-          |> Enum.map_join("\n", fn {line, index} ->
-            suffix = if index == length(lines) - 1, do: "", else: "\\n"
-            ~s("#{line}#{suffix}")
-          end)
-
-        ~s("") <> "\n" <> body
-    end
   end
 end

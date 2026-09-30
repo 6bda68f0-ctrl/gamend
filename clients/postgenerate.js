@@ -16,12 +16,20 @@ const path = require('path')
 // This script runs from clients/ directory, so javascript/src/index.js is the target
 const indexPath = path.join(__dirname, 'javascript', 'src', 'index.js')
 
+// A sentinel that only this script writes. The previous guard looked for the
+// bare string "GameRealtime", which the OpenAPI description also contains (it
+// documents `import { GameRealtime } from '@ughuuu/gamend'`, and the generator
+// copies the description into the JSDoc header of index.js). So the guard
+// matched the doc comment, the injection was skipped silently, and the built
+// package exported no realtime classes at all.
+const MARKER = '── Real-time extensions (handcrafted, not auto-generated) ──'
+
 const additions = `
-// ── Real-time extensions (handcrafted, not auto-generated) ──────────────────
+// ${MARKER}
 
 /**
  * GameRealtime — Phoenix WebSocket channel manager.
- * Wraps Phoenix.Socket; requires the \`phoenix\` npm peer dependency.
+ * Wraps Phoenix.Socket. \`phoenix\` ships as a dependency of this package.
  */
 export { GameRealtime, GameRealtime as default_GameRealtime } from './realtime';
 
@@ -34,7 +42,7 @@ export { GameWebRTC, GameWebRTC as default_GameWebRTC } from './webrtc';
 
 let content = fs.readFileSync(indexPath, 'utf8')
 
-if (content.includes('GameRealtime')) {
+if (content.includes(MARKER)) {
   console.log('postgenerate: real-time exports already present in index.js — skipping')
   process.exit(0)
 }

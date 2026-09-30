@@ -11,6 +11,8 @@ defmodule Gamend.Accounts.UsernameGenerator do
   the suffix.
   """
 
+  alias Gamend.Accounts.Username
+
   # Curated list for generated handles: lowercase a-z only, short, neutral.
   @words ~w(
     acorn alder alpaca amber antler apricot aspen aster auburn aurora
@@ -59,24 +61,48 @@ defmodule Gamend.Accounts.UsernameGenerator do
   end
 
   @doc """
-  Best-effort ASCII slug of a display name in username format; `nil` when
-  too little survives transliteration.
+  Best-effort slug of a display name in username format; `nil` when too
+  little survives. A name that transliterates to ASCII keeps doing so
+  (`Drágoș` -> `dragos`, easier to type); one that does not (`山田太郎`,
+  `Дмитрий`) keeps its own script, as long as it is a valid handle.
   """
   @spec slug(term()) :: String.t() | nil
   def slug(name) when is_binary(name) do
-    slug =
+    ascii =
       name
       |> String.normalize(:nfkd)
       |> String.replace(~r/[^\x00-\x7F]/, "")
       |> String.downcase()
-      |> String.replace(~r/[^a-z0-9._-]+/, "-")
-      |> String.replace(~r/[._-]{2,}/, "-")
-      |> String.replace(~r/^[._-]+|[._-]+$/, "")
+      |> tidy(~r/[^a-z0-9._-]+/)
 
-    if String.length(slug) >= Gamend.Limits.get(:min_username), do: slug, else: nil
+    unicode =
+      name
+      |> Username.normalize()
+      |> tidy(~r/[^\p{L}\p{M}\p{Nd}._-]+/u)
+
+    # No max-length check: `generate/2` slices the base to fit its suffix.
+    min = Gamend.Limits.get(:min_username)
+
+    cond do
+      String.length(ascii) >= min and Username.validate(ascii) == :ok ->
+        ascii
+
+      String.length(unicode) >= min and Username.validate(unicode) == :ok ->
+        unicode
+
+      true ->
+        nil
+    end
   end
 
   def slug(_), do: nil
+
+  defp tidy(slug, disallowed) do
+    slug
+    |> String.replace(disallowed, "-")
+    |> String.replace(~r/[._-]{2,}/, "-")
+    |> String.replace(~r/^[._-]+|[._-]+$/, "")
+  end
 
   defp suffix(digits) do
     limit = Integer.pow(10, digits)

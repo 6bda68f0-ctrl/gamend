@@ -12,6 +12,13 @@ const FORMATS = {
   date: {dateStyle: "medium"},
   time: {timeStyle: "short"},
   full: {dateStyle: "medium", timeStyle: "medium"},
+  // A calendar date or month (a blog post's publication day) is not an instant.
+  // Pinned to UTC so it is only *translated*, never shifted: in the reader's own
+  // zone "2026-09-16" would print as the 15th anywhere west of Greenwich. The
+  // server used to skip these entirely to avoid that shift, which left every
+  // date on the site in English.
+  "calendar-date": {dateStyle: "medium", timeZone: "UTC"},
+  "calendar-month": {month: "long", timeZone: "UTC"},
 }
 
 // Marks what a node was last rendered from, so re-running over a page that has
@@ -31,7 +38,9 @@ function localize(el) {
   const stamp = `${iso}|${format}`
   if (el.dataset[RENDERED] === stamp) return
 
-  const date = new Date(iso)
+  // `2026-09` is a valid HTML month string but not every engine parses it as a
+  // date; anchoring it to the first keeps it on the calendar-month path.
+  const date = new Date(/^\d{4}-\d{2}$/.test(iso) ? `${iso}-01` : iso)
   if (isNaN(date.getTime())) return
 
   try {

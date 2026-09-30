@@ -13,14 +13,14 @@ defmodule Gamend.Hooks.LifecycleHooksTest do
   end
 
   defmodule VetoPartyJoinHooks do
-    use GamendWeb.TestSupport.NoopHooks
+    use Gamend.TestSupport.NoopHooks
 
     @impl true
     def before_party_join(_user, _party), do: {:error, :party_join_vetoed}
   end
 
   defmodule ScoreListenerHooks do
-    use GamendWeb.TestSupport.NoopHooks
+    use Gamend.TestSupport.NoopHooks
 
     @impl true
     def after_score_submitted(record) do

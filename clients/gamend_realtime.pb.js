@@ -3,7 +3,7 @@ import $protobuf from "protobufjs/minimal.js";
 
 // Common aliases
 const $Reader = $protobuf.Reader, $Writer = $protobuf.Writer, $util = $protobuf.util;
-const $Object = $util.global.Object, $undefined = $util.global.undefined, $Error = $util.global.Error, $TypeError = $util.global.TypeError, $Boolean = $util.global.Boolean, $String = $util.global.String, $parseInt = $util.global.parseInt, $Array = $util.global.Array, $BigInt = $util.global.BigInt, $Number = $util.global.Number;
+const $Object = $util.global.Object, $undefined = $util.global.undefined, $Error = $util.global.Error, $RangeError = $util.global.RangeError, $TypeError = $util.global.TypeError, $Boolean = $util.global.Boolean, $String = $util.global.String, $parseInt = $util.global.parseInt, $Array = $util.global.Array, $BigInt = $util.global.BigInt, $Number = $util.global.Number;
 
 // Exported root namespace
 const $root = $protobuf.roots["default"] || ($protobuf.roots["default"] = {});
@@ -46,6 +46,7 @@ export const gamend = $root.gamend = (() => {
                  * @property {boolean|null} [apple] LinkedProviders apple
                  * @property {boolean|null} [steam] LinkedProviders steam
                  * @property {boolean|null} [device] LinkedProviders device
+                 * @property {boolean|null} [github] LinkedProviders github
                  * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
                  */
 
@@ -126,6 +127,14 @@ export const gamend = $root.gamend = (() => {
                 LinkedProviders.prototype.device = false;
 
                 /**
+                 * LinkedProviders github.
+                 * @member {boolean} github
+                 * @memberof gamend.realtime.v1.LinkedProviders
+                 * @instance
+                 */
+                LinkedProviders.prototype.github = false;
+
+                /**
                  * Encodes the specified LinkedProviders message. Does not implicitly {@link gamend.realtime.v1.LinkedProviders.verify|verify} messages.
                  * @function encode
                  * @memberof gamend.realtime.v1.LinkedProviders
@@ -153,6 +162,8 @@ export const gamend = $root.gamend = (() => {
                         writer.uint32(/* id 5, wireType 0 =*/40).bool(message.steam);
                     if (message.device != null && $Object.hasOwnProperty.call(message, "device") && message.device !== false)
                         writer.uint32(/* id 6, wireType 0 =*/48).bool(message.device);
+                    if (message.github != null && $Object.hasOwnProperty.call(message, "github") && message.github !== false)
+                        writer.uint32(/* id 7, wireType 0 =*/56).bool(message.github);
                     if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
                         for (let i = 0; i < message.$unknowns.length; ++i)
                             writer.raw(message.$unknowns[i]);
@@ -177,7 +188,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.LinkedProviders(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.LinkedProviders();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -241,12 +262,26 @@ export const gamend = $root.gamend = (() => {
                                     delete message.device;
                                 continue;
                             }
+                        case 7: {
+                                if (wireType !== 0)
+                                    break;
+                                if (value = reader.bool())
+                                    message.github = value;
+                                else
+                                    delete message.github;
+                                continue;
+                            }
                         }
                         reader.skipType(wireType, _depth, tag);
                         if (!reader.discardUnknown) {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -289,6 +324,9 @@ export const gamend = $root.gamend = (() => {
                     if (object.device != null)
                         if (object.device)
                             message.device = $Boolean(object.device);
+                    if (object.github != null)
+                        if (object.github)
+                            message.github = $Boolean(object.github);
                     return message;
                 };
 
@@ -316,6 +354,7 @@ export const gamend = $root.gamend = (() => {
                         object.apple = false;
                         object.steam = false;
                         object.device = false;
+                        object.github = false;
                     }
                     if (message.google != null && $Object.hasOwnProperty.call(message, "google"))
                         object.google = message.google;
@@ -329,6 +368,8 @@ export const gamend = $root.gamend = (() => {
                         object.steam = message.steam;
                     if (message.device != null && $Object.hasOwnProperty.call(message, "device"))
                         object.device = message.device;
+                    if (message.github != null && $Object.hasOwnProperty.call(message, "github"))
+                        object.github = message.github;
                     return object;
                 };
 
@@ -660,7 +701,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.User();
+                    let end, message;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.User();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -767,6 +818,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -1006,7 +1062,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.FriendUpdate(), key, value;
+                    let end, message, key, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.FriendUpdate();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -1022,6 +1088,9 @@ export const gamend = $root.gamend = (() => {
                                 if (message.friends === $util.emptyObject)
                                     message.friends = {};
                                 let end2 = reader.uint32() + reader.pos;
+                                if (end2 > reader.len)
+                                    throw $RangeError("index out of range");
+                                reader.len = end2;
                                 key = "";
                                 value = null;
                                 while (reader.pos < end2) {
@@ -1041,6 +1110,9 @@ export const gamend = $root.gamend = (() => {
                                     }
                                     reader.skipType(wireType, _depth, tag2);
                                 }
+                                if (reader.pos !== end2)
+                                    throw $RangeError("index out of range");
+                                reader.len = end;
                                 if (key === "__proto__")
                                     $util.makeProp(message.friends, key);
                                 message.friends[key] = value || new $root.gamend.realtime.v1.User();
@@ -1052,6 +1124,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -1382,7 +1459,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.UserBrief();
+                    let end, message;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.UserBrief();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -1461,6 +1548,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -1603,6 +1695,7 @@ export const gamend = $root.gamend = (() => {
                  * @property {string|null} [content] Notification content
                  * @property {Uint8Array|null} [metadata_json] Notification metadata_json
                  * @property {number|Long|null} [inserted_at_ms] Notification inserted_at_ms
+                 * @property {string|null} [icon_url] Notification icon_url
                  * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
                  */
 
@@ -1699,6 +1792,14 @@ export const gamend = $root.gamend = (() => {
                 Notification.prototype.inserted_at_ms = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
 
                 /**
+                 * Notification icon_url.
+                 * @member {string} icon_url
+                 * @memberof gamend.realtime.v1.Notification
+                 * @instance
+                 */
+                Notification.prototype.icon_url = "";
+
+                /**
                  * Encodes the specified Notification message. Does not implicitly {@link gamend.realtime.v1.Notification.verify|verify} messages.
                  * @function encode
                  * @memberof gamend.realtime.v1.Notification
@@ -1730,6 +1831,8 @@ export const gamend = $root.gamend = (() => {
                         writer.uint32(/* id 7, wireType 2 =*/58).bytes(message.metadata_json);
                     if (message.inserted_at_ms != null && $Object.hasOwnProperty.call(message, "inserted_at_ms") && (typeof message.inserted_at_ms === "object" ? message.inserted_at_ms.low || message.inserted_at_ms.high : message.inserted_at_ms !== 0))
                         writer.uint32(/* id 8, wireType 0 =*/64).int64(message.inserted_at_ms);
+                    if (message.icon_url != null && $Object.hasOwnProperty.call(message, "icon_url") && message.icon_url !== "")
+                        writer.uint32(/* id 9, wireType 2 =*/74).string(message.icon_url);
                     if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
                         for (let i = 0; i < message.$unknowns.length; ++i)
                             writer.raw(message.$unknowns[i]);
@@ -1754,7 +1857,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.Notification(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.Notification();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -1836,12 +1949,26 @@ export const gamend = $root.gamend = (() => {
                                     delete message.inserted_at_ms;
                                 continue;
                             }
+                        case 9: {
+                                if (wireType !== 2)
+                                    break;
+                                if ((value = reader.stringVerify()).length)
+                                    message.icon_url = value;
+                                else
+                                    delete message.icon_url;
+                                continue;
+                            }
                         }
                         reader.skipType(wireType, _depth, tag);
                         if (!reader.discardUnknown) {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -1900,6 +2027,9 @@ export const gamend = $root.gamend = (() => {
                                 message.inserted_at_ms = object.inserted_at_ms;
                             else if (typeof object.inserted_at_ms === "object")
                                 message.inserted_at_ms = new $util.LongBits(object.inserted_at_ms.low >>> 0, object.inserted_at_ms.high >>> 0).toNumber();
+                    if (object.icon_url != null)
+                        if (typeof object.icon_url !== "string" || object.icon_url.length)
+                            message.icon_url = $String(object.icon_url);
                     return message;
                 };
 
@@ -1939,6 +2069,7 @@ export const gamend = $root.gamend = (() => {
                             object.inserted_at_ms = options.longs === $String ? long.toString() : options.longs === $Number ? long.toNumber() : typeof $BigInt !== "undefined" && options.longs === $BigInt ? long.toBigInt() : long;
                         } else
                             object.inserted_at_ms = options.longs === $String ? "0" : typeof $BigInt !== "undefined" && options.longs === $BigInt ? $BigInt("0") : 0;
+                        object.icon_url = "";
                     }
                     if (message.id != null && $Object.hasOwnProperty.call(message, "id"))
                         object.id = message.id;
@@ -1961,6 +2092,8 @@ export const gamend = $root.gamend = (() => {
                             object.inserted_at_ms = options.longs === $String ? $String(message.inserted_at_ms) : message.inserted_at_ms;
                         else
                             object.inserted_at_ms = options.longs === $String ? $util.Long.prototype.toString.call(message.inserted_at_ms) : options.longs === $Number ? new $util.LongBits(message.inserted_at_ms.low >>> 0, message.inserted_at_ms.high >>> 0).toNumber() : message.inserted_at_ms;
+                    if (message.icon_url != null && $Object.hasOwnProperty.call(message, "icon_url"))
+                        object.icon_url = message.icon_url;
                     return object;
                 };
 
@@ -2193,7 +2326,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.ChatMessage(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.ChatMessage();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -2295,6 +2438,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -2679,7 +2827,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.QuestProgress(), key, value;
+                    let end, message, key, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.QuestProgress();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -2731,6 +2889,9 @@ export const gamend = $root.gamend = (() => {
                                 if (message.objective_progress === $util.emptyObject)
                                     message.objective_progress = {};
                                 let end2 = reader.uint32() + reader.pos;
+                                if (end2 > reader.len)
+                                    throw $RangeError("index out of range");
+                                reader.len = end2;
                                 key = "";
                                 value = $util.Long ? $util.Long.fromNumber(0, false) : 0;
                                 while (reader.pos < end2) {
@@ -2750,6 +2911,9 @@ export const gamend = $root.gamend = (() => {
                                     }
                                     reader.skipType(wireType, _depth, tag2);
                                 }
+                                if (reader.pos !== end2)
+                                    throw $RangeError("index out of range");
+                                reader.len = end;
                                 if (key === "__proto__")
                                     $util.makeProp(message.objective_progress, key);
                                 message.objective_progress[key] = value;
@@ -2811,6 +2975,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -3062,6 +3231,8 @@ export const gamend = $root.gamend = (() => {
                  * @property {Array.<gamend.realtime.v1.UserBrief.$Properties>|null} [members] Lobby members
                  * @property {boolean|null} [has_members] Lobby has_members
                  * @property {Uint8Array|null} [metadata_pb] Lobby metadata_pb
+                 * @property {string|null} [state] Lobby state
+                 * @property {number|Long|null} [state_changed_at_ms] Lobby state_changed_at_ms
                  * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
                  */
 
@@ -3214,6 +3385,22 @@ export const gamend = $root.gamend = (() => {
                  */
                 Lobby.prototype.metadata_pb = null;
 
+                /**
+                 * Lobby state.
+                 * @member {string|null|undefined} state
+                 * @memberof gamend.realtime.v1.Lobby
+                 * @instance
+                 */
+                Lobby.prototype.state = null;
+
+                /**
+                 * Lobby state_changed_at_ms.
+                 * @member {number|Long|null|undefined} state_changed_at_ms
+                 * @memberof gamend.realtime.v1.Lobby
+                 * @instance
+                 */
+                Lobby.prototype.state_changed_at_ms = null;
+
                 // OneOf field names bound to virtual getters and setters
                 let $oneOfFields;
 
@@ -3301,6 +3488,18 @@ export const gamend = $root.gamend = (() => {
                     set: $util.oneOfSetter($oneOfFields)
                 });
 
+                // Virtual OneOf for proto3 optional field
+                $Object.defineProperty(Lobby.prototype, "_state", {
+                    get: $util.oneOfGetter($oneOfFields = ["state"]),
+                    set: $util.oneOfSetter($oneOfFields)
+                });
+
+                // Virtual OneOf for proto3 optional field
+                $Object.defineProperty(Lobby.prototype, "_state_changed_at_ms", {
+                    get: $util.oneOfGetter($oneOfFields = ["state_changed_at_ms"]),
+                    set: $util.oneOfSetter($oneOfFields)
+                });
+
                 /**
                  * Encodes the specified Lobby message. Does not implicitly {@link gamend.realtime.v1.Lobby.verify|verify} messages.
                  * @function encode
@@ -3348,6 +3547,10 @@ export const gamend = $root.gamend = (() => {
                         writer.uint32(/* id 14, wireType 0 =*/112).bool(message.has_members);
                     if (message.metadata_pb != null && $Object.hasOwnProperty.call(message, "metadata_pb"))
                         writer.uint32(/* id 15, wireType 2 =*/122).bytes(message.metadata_pb);
+                    if (message.state != null && $Object.hasOwnProperty.call(message, "state"))
+                        writer.uint32(/* id 16, wireType 2 =*/130).string(message.state);
+                    if (message.state_changed_at_ms != null && $Object.hasOwnProperty.call(message, "state_changed_at_ms"))
+                        writer.uint32(/* id 17, wireType 0 =*/136).int64(message.state_changed_at_ms);
                     if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
                         for (let i = 0; i < message.$unknowns.length; ++i)
                             writer.raw(message.$unknowns[i]);
@@ -3372,7 +3575,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.Lobby();
+                    let end, message;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.Lobby();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -3488,12 +3701,31 @@ export const gamend = $root.gamend = (() => {
                                 message._metadata_pb = "metadata_pb";
                                 continue;
                             }
+                        case 16: {
+                                if (wireType !== 2)
+                                    break;
+                                message.state = reader.stringVerify();
+                                message._state = "state";
+                                continue;
+                            }
+                        case 17: {
+                                if (wireType !== 0)
+                                    break;
+                                message.state_changed_at_ms = reader.int64();
+                                message._state_changed_at_ms = "state_changed_at_ms";
+                                continue;
+                            }
                         }
                         reader.skipType(wireType, _depth, tag);
                         if (!reader.discardUnknown) {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -3562,6 +3794,17 @@ export const gamend = $root.gamend = (() => {
                             $util.base64.decode(object.metadata_pb, message.metadata_pb = $util.newBuffer($util.base64.length(object.metadata_pb)), 0);
                         else if (object.metadata_pb.length >= 0)
                             message.metadata_pb = object.metadata_pb;
+                    if (object.state != null)
+                        message.state = $String(object.state);
+                    if (object.state_changed_at_ms != null)
+                        if ($util.Long)
+                            message.state_changed_at_ms = $util.Long.fromValue(object.state_changed_at_ms, false);
+                        else if (typeof object.state_changed_at_ms === "string")
+                            message.state_changed_at_ms = $parseInt(object.state_changed_at_ms, 10);
+                        else if (typeof object.state_changed_at_ms === "number")
+                            message.state_changed_at_ms = object.state_changed_at_ms;
+                        else if (typeof object.state_changed_at_ms === "object")
+                            message.state_changed_at_ms = new $util.LongBits(object.state_changed_at_ms.low >>> 0, object.state_changed_at_ms.high >>> 0).toNumber();
                     return message;
                 };
 
@@ -3617,6 +3860,15 @@ export const gamend = $root.gamend = (() => {
                         object.has_members = message.has_members;
                     if (message.metadata_pb != null && $Object.hasOwnProperty.call(message, "metadata_pb"))
                         object.metadata_pb = options.bytes === $String ? $util.base64.encode(message.metadata_pb, 0, message.metadata_pb.length) : options.bytes === $Array ? $Array.prototype.slice.call(message.metadata_pb) : message.metadata_pb;
+                    if (message.state != null && $Object.hasOwnProperty.call(message, "state"))
+                        object.state = message.state;
+                    if (message.state_changed_at_ms != null && $Object.hasOwnProperty.call(message, "state_changed_at_ms"))
+                        if (typeof $BigInt !== "undefined" && options.longs === $BigInt)
+                            object.state_changed_at_ms = typeof message.state_changed_at_ms === "number" ? $BigInt(message.state_changed_at_ms) : $util.Long.fromBits(message.state_changed_at_ms.low >>> 0, message.state_changed_at_ms.high >>> 0, false).toBigInt();
+                        else if (typeof message.state_changed_at_ms === "number")
+                            object.state_changed_at_ms = options.longs === $String ? $String(message.state_changed_at_ms) : message.state_changed_at_ms;
+                        else
+                            object.state_changed_at_ms = options.longs === $String ? $util.Long.prototype.toString.call(message.state_changed_at_ms) : options.longs === $Number ? new $util.LongBits(message.state_changed_at_ms.low >>> 0, message.state_changed_at_ms.high >>> 0).toNumber() : message.state_changed_at_ms;
                     return object;
                 };
 
@@ -3666,6 +3918,7 @@ export const gamend = $root.gamend = (() => {
                  * @property {number|Long|null} [inserted_at_ms] Group inserted_at_ms
                  * @property {number|Long|null} [updated_at_ms] Group updated_at_ms
                  * @property {Uint8Array|null} [metadata_pb] Group metadata_pb
+                 * @property {string|null} [icon_url] Group icon_url
                  * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
                  */
 
@@ -3801,6 +4054,14 @@ export const gamend = $root.gamend = (() => {
                  */
                 Group.prototype.metadata_pb = null;
 
+                /**
+                 * Group icon_url.
+                 * @member {string|null|undefined} icon_url
+                 * @memberof gamend.realtime.v1.Group
+                 * @instance
+                 */
+                Group.prototype.icon_url = null;
+
                 // OneOf field names bound to virtual getters and setters
                 let $oneOfFields;
 
@@ -3882,6 +4143,12 @@ export const gamend = $root.gamend = (() => {
                     set: $util.oneOfSetter($oneOfFields)
                 });
 
+                // Virtual OneOf for proto3 optional field
+                $Object.defineProperty(Group.prototype, "_icon_url", {
+                    get: $util.oneOfGetter($oneOfFields = ["icon_url"]),
+                    set: $util.oneOfSetter($oneOfFields)
+                });
+
                 /**
                  * Encodes the specified Group message. Does not implicitly {@link gamend.realtime.v1.Group.verify|verify} messages.
                  * @function encode
@@ -3924,6 +4191,8 @@ export const gamend = $root.gamend = (() => {
                         writer.uint32(/* id 12, wireType 0 =*/96).int64(message.updated_at_ms);
                     if (message.metadata_pb != null && $Object.hasOwnProperty.call(message, "metadata_pb"))
                         writer.uint32(/* id 13, wireType 2 =*/106).bytes(message.metadata_pb);
+                    if (message.icon_url != null && $Object.hasOwnProperty.call(message, "icon_url"))
+                        writer.uint32(/* id 14, wireType 2 =*/114).string(message.icon_url);
                     if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
                         for (let i = 0; i < message.$unknowns.length; ++i)
                             writer.raw(message.$unknowns[i]);
@@ -3948,7 +4217,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.Group();
+                    let end, message;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.Group();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -4049,12 +4328,24 @@ export const gamend = $root.gamend = (() => {
                                 message._metadata_pb = "metadata_pb";
                                 continue;
                             }
+                        case 14: {
+                                if (wireType !== 2)
+                                    break;
+                                message.icon_url = reader.stringVerify();
+                                message._icon_url = "icon_url";
+                                continue;
+                            }
                         }
                         reader.skipType(wireType, _depth, tag);
                         if (!reader.discardUnknown) {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -4125,6 +4416,8 @@ export const gamend = $root.gamend = (() => {
                             $util.base64.decode(object.metadata_pb, message.metadata_pb = $util.newBuffer($util.base64.length(object.metadata_pb)), 0);
                         else if (object.metadata_pb.length >= 0)
                             message.metadata_pb = object.metadata_pb;
+                    if (object.icon_url != null)
+                        message.icon_url = $String(object.icon_url);
                     return message;
                 };
 
@@ -4181,6 +4474,8 @@ export const gamend = $root.gamend = (() => {
                             object.updated_at_ms = options.longs === $String ? $util.Long.prototype.toString.call(message.updated_at_ms) : options.longs === $Number ? new $util.LongBits(message.updated_at_ms.low >>> 0, message.updated_at_ms.high >>> 0).toNumber() : message.updated_at_ms;
                     if (message.metadata_pb != null && $Object.hasOwnProperty.call(message, "metadata_pb"))
                         object.metadata_pb = options.bytes === $String ? $util.base64.encode(message.metadata_pb, 0, message.metadata_pb.length) : options.bytes === $Array ? $Array.prototype.slice.call(message.metadata_pb) : message.metadata_pb;
+                    if (message.icon_url != null && $Object.hasOwnProperty.call(message, "icon_url"))
+                        object.icon_url = message.icon_url;
                     return object;
                 };
 
@@ -4457,7 +4752,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.Party();
+                    let end, message;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.Party();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -4544,6 +4849,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -4962,7 +5272,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.MemberEvent(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.MemberEvent();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -5057,6 +5377,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -5284,7 +5609,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.EntityId(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.EntityId();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -5309,6 +5644,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -5478,7 +5818,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.PartyRef(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.PartyRef();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -5503,6 +5853,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -5683,7 +6038,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.HostChanged(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.HostChanged();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -5717,6 +6082,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -5806,6 +6176,311 @@ export const gamend = $root.gamend = (() => {
                 return HostChanged;
             })();
 
+            v1.LobbyStateChanged = (function() {
+
+                /**
+                 * Properties of a LobbyStateChanged.
+                 * @typedef {Object} gamend.realtime.v1.LobbyStateChanged.$Properties
+                 * @property {string|null} [lobby_id] LobbyStateChanged lobby_id
+                 * @property {string|null} [from] LobbyStateChanged from
+                 * @property {string|null} [to] LobbyStateChanged to
+                 * @property {number|Long|null} [state_changed_at_ms] LobbyStateChanged state_changed_at_ms
+                 * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
+                 */
+
+                /**
+                 * Properties of a LobbyStateChanged.
+                 * @memberof gamend.realtime.v1
+                 * @interface ILobbyStateChanged
+                 * @augments gamend.realtime.v1.LobbyStateChanged.$Properties
+                 * @deprecated Use gamend.realtime.v1.LobbyStateChanged.$Properties instead.
+                 */
+
+                /**
+                 * Shape of a LobbyStateChanged.
+                 * @typedef {gamend.realtime.v1.LobbyStateChanged.$Properties} gamend.realtime.v1.LobbyStateChanged.$Shape
+                 */
+
+                /**
+                 * Constructs a new LobbyStateChanged.
+                 * @memberof gamend.realtime.v1
+                 * @classdesc Represents a LobbyStateChanged.
+                 * @constructor
+                 * @param {gamend.realtime.v1.LobbyStateChanged.$Properties=} [properties] Properties to set
+                 * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
+                 */
+                const LobbyStateChanged = function (properties) {
+                    if (properties)
+                        for (let keys = $Object.keys(properties), i = 0; i < keys.length; ++i)
+                            if (properties[keys[i]] != null && keys[i] !== "__proto__")
+                                this[keys[i]] = properties[keys[i]];
+                };
+
+                /**
+                 * LobbyStateChanged lobby_id.
+                 * @member {string} lobby_id
+                 * @memberof gamend.realtime.v1.LobbyStateChanged
+                 * @instance
+                 */
+                LobbyStateChanged.prototype.lobby_id = "";
+
+                /**
+                 * LobbyStateChanged from.
+                 * @member {string} from
+                 * @memberof gamend.realtime.v1.LobbyStateChanged
+                 * @instance
+                 */
+                LobbyStateChanged.prototype.from = "";
+
+                /**
+                 * LobbyStateChanged to.
+                 * @member {string} to
+                 * @memberof gamend.realtime.v1.LobbyStateChanged
+                 * @instance
+                 */
+                LobbyStateChanged.prototype.to = "";
+
+                /**
+                 * LobbyStateChanged state_changed_at_ms.
+                 * @member {number|Long|null|undefined} state_changed_at_ms
+                 * @memberof gamend.realtime.v1.LobbyStateChanged
+                 * @instance
+                 */
+                LobbyStateChanged.prototype.state_changed_at_ms = null;
+
+                // OneOf field names bound to virtual getters and setters
+                let $oneOfFields;
+
+                // Virtual OneOf for proto3 optional field
+                $Object.defineProperty(LobbyStateChanged.prototype, "_state_changed_at_ms", {
+                    get: $util.oneOfGetter($oneOfFields = ["state_changed_at_ms"]),
+                    set: $util.oneOfSetter($oneOfFields)
+                });
+
+                /**
+                 * Encodes the specified LobbyStateChanged message. Does not implicitly {@link gamend.realtime.v1.LobbyStateChanged.verify|verify} messages.
+                 * @function encode
+                 * @memberof gamend.realtime.v1.LobbyStateChanged
+                 * @static
+                 * @param {gamend.realtime.v1.LobbyStateChanged.$Properties} message LobbyStateChanged message or plain object to encode
+                 * @param {$protobuf.Writer} [writer] Writer to encode to
+                 * @returns {$protobuf.Writer} Writer
+                 */
+                LobbyStateChanged.encode = function (message, writer, _depth) {
+                    if (!writer)
+                        writer = $Writer.create();
+                    if (_depth === $undefined)
+                        _depth = 0;
+                    if (_depth > $util.recursionLimit)
+                        throw $Error("max depth exceeded");
+                    if (message.lobby_id != null && $Object.hasOwnProperty.call(message, "lobby_id") && message.lobby_id !== "")
+                        writer.uint32(/* id 1, wireType 2 =*/10).string(message.lobby_id);
+                    if (message.from != null && $Object.hasOwnProperty.call(message, "from") && message.from !== "")
+                        writer.uint32(/* id 2, wireType 2 =*/18).string(message.from);
+                    if (message.to != null && $Object.hasOwnProperty.call(message, "to") && message.to !== "")
+                        writer.uint32(/* id 3, wireType 2 =*/26).string(message.to);
+                    if (message.state_changed_at_ms != null && $Object.hasOwnProperty.call(message, "state_changed_at_ms"))
+                        writer.uint32(/* id 4, wireType 0 =*/32).int64(message.state_changed_at_ms);
+                    if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
+                        for (let i = 0; i < message.$unknowns.length; ++i)
+                            writer.raw(message.$unknowns[i]);
+                    return writer;
+                };
+
+                /**
+                 * Decodes a LobbyStateChanged message from the specified reader or buffer.
+                 * @function decode
+                 * @memberof gamend.realtime.v1.LobbyStateChanged
+                 * @static
+                 * @param {$protobuf.Reader|Uint8Array} reader Reader or buffer to decode from
+                 * @param {number} [length] Message length if known beforehand
+                 * @returns {gamend.realtime.v1.LobbyStateChanged & gamend.realtime.v1.LobbyStateChanged.$Shape} LobbyStateChanged
+                 * @throws {Error} If the payload is not a reader or valid buffer
+                 * @throws {$protobuf.util.ProtocolError} If required fields are missing
+                 */
+                LobbyStateChanged.decode = function (reader, length, _end, _depth, _target) {
+                    if (!(reader instanceof $Reader))
+                        reader = $Reader.create(reader);
+                    if (_depth === $undefined)
+                        _depth = 0;
+                    if (_depth > $Reader.recursionLimit)
+                        throw $Error("max depth exceeded");
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.LobbyStateChanged();
+                    while (reader.pos < end) {
+                        let start = reader.pos;
+                        let tag = reader.tag();
+                        if (tag === _end) {
+                            _end = $undefined;
+                            break;
+                        }
+                        let wireType = tag & 7;
+                        switch (tag >>>= 3) {
+                        case 1: {
+                                if (wireType !== 2)
+                                    break;
+                                if ((value = reader.stringVerify()).length)
+                                    message.lobby_id = value;
+                                else
+                                    delete message.lobby_id;
+                                continue;
+                            }
+                        case 2: {
+                                if (wireType !== 2)
+                                    break;
+                                if ((value = reader.stringVerify()).length)
+                                    message.from = value;
+                                else
+                                    delete message.from;
+                                continue;
+                            }
+                        case 3: {
+                                if (wireType !== 2)
+                                    break;
+                                if ((value = reader.stringVerify()).length)
+                                    message.to = value;
+                                else
+                                    delete message.to;
+                                continue;
+                            }
+                        case 4: {
+                                if (wireType !== 0)
+                                    break;
+                                message.state_changed_at_ms = reader.int64();
+                                message._state_changed_at_ms = "state_changed_at_ms";
+                                continue;
+                            }
+                        }
+                        reader.skipType(wireType, _depth, tag);
+                        if (!reader.discardUnknown) {
+                            $util.makeProp(message, "$unknowns", false);
+                            (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
+                        }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
+                    }
+                    if (_end !== $undefined)
+                        throw $Error("missing end group");
+                    return message;
+                };
+
+                /**
+                 * Creates a LobbyStateChanged message from a plain object. Also converts values to their respective internal types.
+                 * @function fromObject
+                 * @memberof gamend.realtime.v1.LobbyStateChanged
+                 * @static
+                 * @param {Object.<string,*>} object Plain object
+                 * @returns {gamend.realtime.v1.LobbyStateChanged} LobbyStateChanged
+                 */
+                LobbyStateChanged.fromObject = function (object, _depth) {
+                    if (object instanceof $root.gamend.realtime.v1.LobbyStateChanged)
+                        return object;
+                    if (!$util.isObject(object))
+                        throw $TypeError(".gamend.realtime.v1.LobbyStateChanged: object expected");
+                    if (_depth === $undefined)
+                        _depth = 0;
+                    if (_depth > $util.recursionLimit)
+                        throw $Error("max depth exceeded");
+                    let message = new $root.gamend.realtime.v1.LobbyStateChanged();
+                    if (object.lobby_id != null)
+                        if (typeof object.lobby_id !== "string" || object.lobby_id.length)
+                            message.lobby_id = $String(object.lobby_id);
+                    if (object.from != null)
+                        if (typeof object.from !== "string" || object.from.length)
+                            message.from = $String(object.from);
+                    if (object.to != null)
+                        if (typeof object.to !== "string" || object.to.length)
+                            message.to = $String(object.to);
+                    if (object.state_changed_at_ms != null)
+                        if ($util.Long)
+                            message.state_changed_at_ms = $util.Long.fromValue(object.state_changed_at_ms, false);
+                        else if (typeof object.state_changed_at_ms === "string")
+                            message.state_changed_at_ms = $parseInt(object.state_changed_at_ms, 10);
+                        else if (typeof object.state_changed_at_ms === "number")
+                            message.state_changed_at_ms = object.state_changed_at_ms;
+                        else if (typeof object.state_changed_at_ms === "object")
+                            message.state_changed_at_ms = new $util.LongBits(object.state_changed_at_ms.low >>> 0, object.state_changed_at_ms.high >>> 0).toNumber();
+                    return message;
+                };
+
+                /**
+                 * Creates a plain object from a LobbyStateChanged message. Also converts values to other types if specified.
+                 * @function toObject
+                 * @memberof gamend.realtime.v1.LobbyStateChanged
+                 * @static
+                 * @param {gamend.realtime.v1.LobbyStateChanged} message LobbyStateChanged
+                 * @param {$protobuf.IConversionOptions} [options] Conversion options
+                 * @returns {Object.<string,*>} Plain object
+                 */
+                LobbyStateChanged.toObject = function (message, options, _depth) {
+                    if (!options)
+                        options = {};
+                    if (_depth === $undefined)
+                        _depth = 0;
+                    if (_depth > $util.recursionLimit)
+                        throw $Error("max depth exceeded");
+                    let object = {};
+                    if (options.defaults) {
+                        object.lobby_id = "";
+                        object.from = "";
+                        object.to = "";
+                    }
+                    if (message.lobby_id != null && $Object.hasOwnProperty.call(message, "lobby_id"))
+                        object.lobby_id = message.lobby_id;
+                    if (message.from != null && $Object.hasOwnProperty.call(message, "from"))
+                        object.from = message.from;
+                    if (message.to != null && $Object.hasOwnProperty.call(message, "to"))
+                        object.to = message.to;
+                    if (message.state_changed_at_ms != null && $Object.hasOwnProperty.call(message, "state_changed_at_ms"))
+                        if (typeof $BigInt !== "undefined" && options.longs === $BigInt)
+                            object.state_changed_at_ms = typeof message.state_changed_at_ms === "number" ? $BigInt(message.state_changed_at_ms) : $util.Long.fromBits(message.state_changed_at_ms.low >>> 0, message.state_changed_at_ms.high >>> 0, false).toBigInt();
+                        else if (typeof message.state_changed_at_ms === "number")
+                            object.state_changed_at_ms = options.longs === $String ? $String(message.state_changed_at_ms) : message.state_changed_at_ms;
+                        else
+                            object.state_changed_at_ms = options.longs === $String ? $util.Long.prototype.toString.call(message.state_changed_at_ms) : options.longs === $Number ? new $util.LongBits(message.state_changed_at_ms.low >>> 0, message.state_changed_at_ms.high >>> 0).toNumber() : message.state_changed_at_ms;
+                    return object;
+                };
+
+                /**
+                 * Converts this LobbyStateChanged to JSON.
+                 * @function toJSON
+                 * @memberof gamend.realtime.v1.LobbyStateChanged
+                 * @instance
+                 * @returns {Object.<string,*>} JSON object
+                 */
+                LobbyStateChanged.prototype.toJSON = function() {
+                    return LobbyStateChanged.toObject(this, $protobuf.util.toJSONOptions);
+                };
+
+                /**
+                 * Gets the type url for LobbyStateChanged
+                 * @function getTypeUrl
+                 * @memberof gamend.realtime.v1.LobbyStateChanged
+                 * @static
+                 * @param {string} [prefix] Custom type url prefix, defaults to `"type.googleapis.com"`
+                 * @returns {string} The type url
+                 */
+                LobbyStateChanged.getTypeUrl = function(prefix) {
+                    if (prefix === $undefined)
+                        prefix = "type.googleapis.com";
+                    return prefix + "/gamend.realtime.v1.LobbyStateChanged";
+                };
+
+                return LobbyStateChanged;
+            })();
+
             v1.GroupInviteEvent = (function() {
 
                 /**
@@ -5893,7 +6568,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.GroupInviteEvent(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.GroupInviteEvent();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -5918,6 +6603,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -6098,7 +6788,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.PartyInviteEvent(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.PartyInviteEvent();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -6132,6 +6832,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -6330,7 +7035,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.WalletChange(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.WalletChange();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -6373,6 +7088,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -6609,7 +7329,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.InventoryChange(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.InventoryChange();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -6652,6 +7382,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -6786,7 +7521,7 @@ export const gamend = $root.gamend = (() => {
                  * @typedef {Object} gamend.realtime.v1.ChatMute.$Properties
                  * @property {string|null} [scope] ChatMute scope
                  * @property {string|null} [scope_ref_id] ChatMute scope_ref_id
-                 * @property {number|Long|null} [expires_at] ChatMute expires_at
+                 * @property {number|Long|null} [expires_at_seconds] ChatMute expires_at_seconds
                  * @property {string|null} [reason] ChatMute reason
                  * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
                  */
@@ -6836,12 +7571,12 @@ export const gamend = $root.gamend = (() => {
                 ChatMute.prototype.scope_ref_id = "";
 
                 /**
-                 * ChatMute expires_at.
-                 * @member {number|Long} expires_at
+                 * ChatMute expires_at_seconds.
+                 * @member {number|Long} expires_at_seconds
                  * @memberof gamend.realtime.v1.ChatMute
                  * @instance
                  */
-                ChatMute.prototype.expires_at = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+                ChatMute.prototype.expires_at_seconds = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
 
                 /**
                  * ChatMute reason.
@@ -6871,8 +7606,8 @@ export const gamend = $root.gamend = (() => {
                         writer.uint32(/* id 1, wireType 2 =*/10).string(message.scope);
                     if (message.scope_ref_id != null && $Object.hasOwnProperty.call(message, "scope_ref_id") && message.scope_ref_id !== "")
                         writer.uint32(/* id 2, wireType 2 =*/18).string(message.scope_ref_id);
-                    if (message.expires_at != null && $Object.hasOwnProperty.call(message, "expires_at") && (typeof message.expires_at === "object" ? message.expires_at.low || message.expires_at.high : message.expires_at !== 0))
-                        writer.uint32(/* id 3, wireType 0 =*/24).int64(message.expires_at);
+                    if (message.expires_at_seconds != null && $Object.hasOwnProperty.call(message, "expires_at_seconds") && (typeof message.expires_at_seconds === "object" ? message.expires_at_seconds.low || message.expires_at_seconds.high : message.expires_at_seconds !== 0))
+                        writer.uint32(/* id 3, wireType 0 =*/24).int64(message.expires_at_seconds);
                     if (message.reason != null && $Object.hasOwnProperty.call(message, "reason") && message.reason !== "")
                         writer.uint32(/* id 4, wireType 2 =*/34).string(message.reason);
                     if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
@@ -6899,7 +7634,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.ChatMute(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.ChatMute();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -6931,9 +7676,9 @@ export const gamend = $root.gamend = (() => {
                                 if (wireType !== 0)
                                     break;
                                 if (typeof (value = reader.int64()) === "object" ? value.low || value.high : value !== 0)
-                                    message.expires_at = value;
+                                    message.expires_at_seconds = value;
                                 else
-                                    delete message.expires_at;
+                                    delete message.expires_at_seconds;
                                 continue;
                             }
                         case 4: {
@@ -6951,6 +7696,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -6981,16 +7731,16 @@ export const gamend = $root.gamend = (() => {
                     if (object.scope_ref_id != null)
                         if (typeof object.scope_ref_id !== "string" || object.scope_ref_id.length)
                             message.scope_ref_id = $String(object.scope_ref_id);
-                    if (object.expires_at != null)
-                        if (typeof object.expires_at === "object" ? object.expires_at.low || object.expires_at.high : $Number(object.expires_at) !== 0)
+                    if (object.expires_at_seconds != null)
+                        if (typeof object.expires_at_seconds === "object" ? object.expires_at_seconds.low || object.expires_at_seconds.high : $Number(object.expires_at_seconds) !== 0)
                             if ($util.Long)
-                                message.expires_at = $util.Long.fromValue(object.expires_at, false);
-                            else if (typeof object.expires_at === "string")
-                                message.expires_at = $parseInt(object.expires_at, 10);
-                            else if (typeof object.expires_at === "number")
-                                message.expires_at = object.expires_at;
-                            else if (typeof object.expires_at === "object")
-                                message.expires_at = new $util.LongBits(object.expires_at.low >>> 0, object.expires_at.high >>> 0).toNumber();
+                                message.expires_at_seconds = $util.Long.fromValue(object.expires_at_seconds, false);
+                            else if (typeof object.expires_at_seconds === "string")
+                                message.expires_at_seconds = $parseInt(object.expires_at_seconds, 10);
+                            else if (typeof object.expires_at_seconds === "number")
+                                message.expires_at_seconds = object.expires_at_seconds;
+                            else if (typeof object.expires_at_seconds === "object")
+                                message.expires_at_seconds = new $util.LongBits(object.expires_at_seconds.low >>> 0, object.expires_at_seconds.high >>> 0).toNumber();
                     if (object.reason != null)
                         if (typeof object.reason !== "string" || object.reason.length)
                             message.reason = $String(object.reason);
@@ -7019,22 +7769,22 @@ export const gamend = $root.gamend = (() => {
                         object.scope_ref_id = "";
                         if ($util.Long) {
                             let long = new $util.Long(0, 0, false);
-                            object.expires_at = options.longs === $String ? long.toString() : options.longs === $Number ? long.toNumber() : typeof $BigInt !== "undefined" && options.longs === $BigInt ? long.toBigInt() : long;
+                            object.expires_at_seconds = options.longs === $String ? long.toString() : options.longs === $Number ? long.toNumber() : typeof $BigInt !== "undefined" && options.longs === $BigInt ? long.toBigInt() : long;
                         } else
-                            object.expires_at = options.longs === $String ? "0" : typeof $BigInt !== "undefined" && options.longs === $BigInt ? $BigInt("0") : 0;
+                            object.expires_at_seconds = options.longs === $String ? "0" : typeof $BigInt !== "undefined" && options.longs === $BigInt ? $BigInt("0") : 0;
                         object.reason = "";
                     }
                     if (message.scope != null && $Object.hasOwnProperty.call(message, "scope"))
                         object.scope = message.scope;
                     if (message.scope_ref_id != null && $Object.hasOwnProperty.call(message, "scope_ref_id"))
                         object.scope_ref_id = message.scope_ref_id;
-                    if (message.expires_at != null && $Object.hasOwnProperty.call(message, "expires_at"))
+                    if (message.expires_at_seconds != null && $Object.hasOwnProperty.call(message, "expires_at_seconds"))
                         if (typeof $BigInt !== "undefined" && options.longs === $BigInt)
-                            object.expires_at = typeof message.expires_at === "number" ? $BigInt(message.expires_at) : $util.Long.fromBits(message.expires_at.low >>> 0, message.expires_at.high >>> 0, false).toBigInt();
-                        else if (typeof message.expires_at === "number")
-                            object.expires_at = options.longs === $String ? $String(message.expires_at) : message.expires_at;
+                            object.expires_at_seconds = typeof message.expires_at_seconds === "number" ? $BigInt(message.expires_at_seconds) : $util.Long.fromBits(message.expires_at_seconds.low >>> 0, message.expires_at_seconds.high >>> 0, false).toBigInt();
+                        else if (typeof message.expires_at_seconds === "number")
+                            object.expires_at_seconds = options.longs === $String ? $String(message.expires_at_seconds) : message.expires_at_seconds;
                         else
-                            object.expires_at = options.longs === $String ? $util.Long.prototype.toString.call(message.expires_at) : options.longs === $Number ? new $util.LongBits(message.expires_at.low >>> 0, message.expires_at.high >>> 0).toNumber() : message.expires_at;
+                            object.expires_at_seconds = options.longs === $String ? $util.Long.prototype.toString.call(message.expires_at_seconds) : options.longs === $Number ? new $util.LongBits(message.expires_at_seconds.low >>> 0, message.expires_at_seconds.high >>> 0).toNumber() : message.expires_at_seconds;
                     if (message.reason != null && $Object.hasOwnProperty.call(message, "reason"))
                         object.reason = message.reason;
                     return object;
@@ -7166,7 +7916,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.ChatUnmute(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.ChatUnmute();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -7200,6 +7960,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -7398,7 +8163,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.TournamentEvent(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.TournamentEvent();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -7441,6 +8216,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -7545,7 +8325,7 @@ export const gamend = $root.gamend = (() => {
                  * @property {string|null} [slug] TournamentMatchEvent slug
                  * @property {string|null} [match_id] TournamentMatchEvent match_id
                  * @property {number|null} [round] TournamentMatchEvent round
-                 * @property {number|Long|null} [deadline_ms] TournamentMatchEvent deadline_ms
+                 * @property {number|Long|null} [deadline_at_ms] TournamentMatchEvent deadline_at_ms
                  * @property {string|null} [winner_entry_id] TournamentMatchEvent winner_entry_id
                  * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
                  */
@@ -7611,12 +8391,12 @@ export const gamend = $root.gamend = (() => {
                 TournamentMatchEvent.prototype.round = 0;
 
                 /**
-                 * TournamentMatchEvent deadline_ms.
-                 * @member {number|Long} deadline_ms
+                 * TournamentMatchEvent deadline_at_ms.
+                 * @member {number|Long} deadline_at_ms
                  * @memberof gamend.realtime.v1.TournamentMatchEvent
                  * @instance
                  */
-                TournamentMatchEvent.prototype.deadline_ms = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+                TournamentMatchEvent.prototype.deadline_at_ms = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
 
                 /**
                  * TournamentMatchEvent winner_entry_id.
@@ -7650,8 +8430,8 @@ export const gamend = $root.gamend = (() => {
                         writer.uint32(/* id 3, wireType 2 =*/26).string(message.match_id);
                     if (message.round != null && $Object.hasOwnProperty.call(message, "round") && message.round !== 0)
                         writer.uint32(/* id 4, wireType 0 =*/32).int32(message.round);
-                    if (message.deadline_ms != null && $Object.hasOwnProperty.call(message, "deadline_ms") && (typeof message.deadline_ms === "object" ? message.deadline_ms.low || message.deadline_ms.high : message.deadline_ms !== 0))
-                        writer.uint32(/* id 5, wireType 0 =*/40).int64(message.deadline_ms);
+                    if (message.deadline_at_ms != null && $Object.hasOwnProperty.call(message, "deadline_at_ms") && (typeof message.deadline_at_ms === "object" ? message.deadline_at_ms.low || message.deadline_at_ms.high : message.deadline_at_ms !== 0))
+                        writer.uint32(/* id 5, wireType 0 =*/40).int64(message.deadline_at_ms);
                     if (message.winner_entry_id != null && $Object.hasOwnProperty.call(message, "winner_entry_id") && message.winner_entry_id !== "")
                         writer.uint32(/* id 6, wireType 2 =*/50).string(message.winner_entry_id);
                     if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
@@ -7678,7 +8458,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.TournamentMatchEvent(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.TournamentMatchEvent();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -7728,9 +8518,9 @@ export const gamend = $root.gamend = (() => {
                                 if (wireType !== 0)
                                     break;
                                 if (typeof (value = reader.int64()) === "object" ? value.low || value.high : value !== 0)
-                                    message.deadline_ms = value;
+                                    message.deadline_at_ms = value;
                                 else
-                                    delete message.deadline_ms;
+                                    delete message.deadline_at_ms;
                                 continue;
                             }
                         case 6: {
@@ -7748,6 +8538,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -7784,16 +8579,16 @@ export const gamend = $root.gamend = (() => {
                     if (object.round != null)
                         if ($Number(object.round) !== 0)
                             message.round = object.round | 0;
-                    if (object.deadline_ms != null)
-                        if (typeof object.deadline_ms === "object" ? object.deadline_ms.low || object.deadline_ms.high : $Number(object.deadline_ms) !== 0)
+                    if (object.deadline_at_ms != null)
+                        if (typeof object.deadline_at_ms === "object" ? object.deadline_at_ms.low || object.deadline_at_ms.high : $Number(object.deadline_at_ms) !== 0)
                             if ($util.Long)
-                                message.deadline_ms = $util.Long.fromValue(object.deadline_ms, false);
-                            else if (typeof object.deadline_ms === "string")
-                                message.deadline_ms = $parseInt(object.deadline_ms, 10);
-                            else if (typeof object.deadline_ms === "number")
-                                message.deadline_ms = object.deadline_ms;
-                            else if (typeof object.deadline_ms === "object")
-                                message.deadline_ms = new $util.LongBits(object.deadline_ms.low >>> 0, object.deadline_ms.high >>> 0).toNumber();
+                                message.deadline_at_ms = $util.Long.fromValue(object.deadline_at_ms, false);
+                            else if (typeof object.deadline_at_ms === "string")
+                                message.deadline_at_ms = $parseInt(object.deadline_at_ms, 10);
+                            else if (typeof object.deadline_at_ms === "number")
+                                message.deadline_at_ms = object.deadline_at_ms;
+                            else if (typeof object.deadline_at_ms === "object")
+                                message.deadline_at_ms = new $util.LongBits(object.deadline_at_ms.low >>> 0, object.deadline_at_ms.high >>> 0).toNumber();
                     if (object.winner_entry_id != null)
                         if (typeof object.winner_entry_id !== "string" || object.winner_entry_id.length)
                             message.winner_entry_id = $String(object.winner_entry_id);
@@ -7824,9 +8619,9 @@ export const gamend = $root.gamend = (() => {
                         object.round = 0;
                         if ($util.Long) {
                             let long = new $util.Long(0, 0, false);
-                            object.deadline_ms = options.longs === $String ? long.toString() : options.longs === $Number ? long.toNumber() : typeof $BigInt !== "undefined" && options.longs === $BigInt ? long.toBigInt() : long;
+                            object.deadline_at_ms = options.longs === $String ? long.toString() : options.longs === $Number ? long.toNumber() : typeof $BigInt !== "undefined" && options.longs === $BigInt ? long.toBigInt() : long;
                         } else
-                            object.deadline_ms = options.longs === $String ? "0" : typeof $BigInt !== "undefined" && options.longs === $BigInt ? $BigInt("0") : 0;
+                            object.deadline_at_ms = options.longs === $String ? "0" : typeof $BigInt !== "undefined" && options.longs === $BigInt ? $BigInt("0") : 0;
                         object.winner_entry_id = "";
                     }
                     if (message.tournament_id != null && $Object.hasOwnProperty.call(message, "tournament_id"))
@@ -7837,13 +8632,13 @@ export const gamend = $root.gamend = (() => {
                         object.match_id = message.match_id;
                     if (message.round != null && $Object.hasOwnProperty.call(message, "round"))
                         object.round = message.round;
-                    if (message.deadline_ms != null && $Object.hasOwnProperty.call(message, "deadline_ms"))
+                    if (message.deadline_at_ms != null && $Object.hasOwnProperty.call(message, "deadline_at_ms"))
                         if (typeof $BigInt !== "undefined" && options.longs === $BigInt)
-                            object.deadline_ms = typeof message.deadline_ms === "number" ? $BigInt(message.deadline_ms) : $util.Long.fromBits(message.deadline_ms.low >>> 0, message.deadline_ms.high >>> 0, false).toBigInt();
-                        else if (typeof message.deadline_ms === "number")
-                            object.deadline_ms = options.longs === $String ? $String(message.deadline_ms) : message.deadline_ms;
+                            object.deadline_at_ms = typeof message.deadline_at_ms === "number" ? $BigInt(message.deadline_at_ms) : $util.Long.fromBits(message.deadline_at_ms.low >>> 0, message.deadline_at_ms.high >>> 0, false).toBigInt();
+                        else if (typeof message.deadline_at_ms === "number")
+                            object.deadline_at_ms = options.longs === $String ? $String(message.deadline_at_ms) : message.deadline_at_ms;
                         else
-                            object.deadline_ms = options.longs === $String ? $util.Long.prototype.toString.call(message.deadline_ms) : options.longs === $Number ? new $util.LongBits(message.deadline_ms.low >>> 0, message.deadline_ms.high >>> 0).toNumber() : message.deadline_ms;
+                            object.deadline_at_ms = options.longs === $String ? $util.Long.prototype.toString.call(message.deadline_at_ms) : options.longs === $Number ? new $util.LongBits(message.deadline_at_ms.low >>> 0, message.deadline_at_ms.high >>> 0).toNumber() : message.deadline_at_ms;
                     if (message.winner_entry_id != null && $Object.hasOwnProperty.call(message, "winner_entry_id"))
                         object.winner_entry_id = message.winner_entry_id;
                     return object;
@@ -7977,7 +8772,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.MatchmakingFound(), key, value;
+                    let end, message, key, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.MatchmakingFound();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -8002,6 +8807,9 @@ export const gamend = $root.gamend = (() => {
                                 if (message.match_params === $util.emptyObject)
                                     message.match_params = {};
                                 let end2 = reader.uint32() + reader.pos;
+                                if (end2 > reader.len)
+                                    throw $RangeError("index out of range");
+                                reader.len = end2;
                                 key = "";
                                 value = "";
                                 while (reader.pos < end2) {
@@ -8021,6 +8829,9 @@ export const gamend = $root.gamend = (() => {
                                     }
                                     reader.skipType(wireType, _depth, tag2);
                                 }
+                                if (reader.pos !== end2)
+                                    throw $RangeError("index out of range");
+                                reader.len = end;
                                 if (key === "__proto__")
                                     $util.makeProp(message.match_params, key);
                                 message.match_params[key] = value;
@@ -8032,6 +8843,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -8143,6 +8959,7 @@ export const gamend = $root.gamend = (() => {
                  * @property {string|null} [user_id] ReadyCheckParticipant user_id
                  * @property {string|null} [display_name] ReadyCheckParticipant display_name
                  * @property {string|null} [state] ReadyCheckParticipant state
+                 * @property {number|Long|null} [responded_at_ms] ReadyCheckParticipant responded_at_ms
                  * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
                  */
 
@@ -8199,6 +9016,14 @@ export const gamend = $root.gamend = (() => {
                 ReadyCheckParticipant.prototype.state = "";
 
                 /**
+                 * ReadyCheckParticipant responded_at_ms.
+                 * @member {number|Long} responded_at_ms
+                 * @memberof gamend.realtime.v1.ReadyCheckParticipant
+                 * @instance
+                 */
+                ReadyCheckParticipant.prototype.responded_at_ms = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+
+                /**
                  * Encodes the specified ReadyCheckParticipant message. Does not implicitly {@link gamend.realtime.v1.ReadyCheckParticipant.verify|verify} messages.
                  * @function encode
                  * @memberof gamend.realtime.v1.ReadyCheckParticipant
@@ -8220,6 +9045,8 @@ export const gamend = $root.gamend = (() => {
                         writer.uint32(/* id 2, wireType 2 =*/18).string(message.display_name);
                     if (message.state != null && $Object.hasOwnProperty.call(message, "state") && message.state !== "")
                         writer.uint32(/* id 3, wireType 2 =*/26).string(message.state);
+                    if (message.responded_at_ms != null && $Object.hasOwnProperty.call(message, "responded_at_ms") && (typeof message.responded_at_ms === "object" ? message.responded_at_ms.low || message.responded_at_ms.high : message.responded_at_ms !== 0))
+                        writer.uint32(/* id 4, wireType 0 =*/32).int64(message.responded_at_ms);
                     if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
                         for (let i = 0; i < message.$unknowns.length; ++i)
                             writer.raw(message.$unknowns[i]);
@@ -8244,7 +9071,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.ReadyCheckParticipant(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.ReadyCheckParticipant();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -8281,12 +9118,26 @@ export const gamend = $root.gamend = (() => {
                                     delete message.state;
                                 continue;
                             }
+                        case 4: {
+                                if (wireType !== 0)
+                                    break;
+                                if (typeof (value = reader.int64()) === "object" ? value.low || value.high : value !== 0)
+                                    message.responded_at_ms = value;
+                                else
+                                    delete message.responded_at_ms;
+                                continue;
+                            }
                         }
                         reader.skipType(wireType, _depth, tag);
                         if (!reader.discardUnknown) {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -8320,6 +9171,16 @@ export const gamend = $root.gamend = (() => {
                     if (object.state != null)
                         if (typeof object.state !== "string" || object.state.length)
                             message.state = $String(object.state);
+                    if (object.responded_at_ms != null)
+                        if (typeof object.responded_at_ms === "object" ? object.responded_at_ms.low || object.responded_at_ms.high : $Number(object.responded_at_ms) !== 0)
+                            if ($util.Long)
+                                message.responded_at_ms = $util.Long.fromValue(object.responded_at_ms, false);
+                            else if (typeof object.responded_at_ms === "string")
+                                message.responded_at_ms = $parseInt(object.responded_at_ms, 10);
+                            else if (typeof object.responded_at_ms === "number")
+                                message.responded_at_ms = object.responded_at_ms;
+                            else if (typeof object.responded_at_ms === "object")
+                                message.responded_at_ms = new $util.LongBits(object.responded_at_ms.low >>> 0, object.responded_at_ms.high >>> 0).toNumber();
                     return message;
                 };
 
@@ -8344,6 +9205,11 @@ export const gamend = $root.gamend = (() => {
                         object.user_id = "";
                         object.display_name = "";
                         object.state = "";
+                        if ($util.Long) {
+                            let long = new $util.Long(0, 0, false);
+                            object.responded_at_ms = options.longs === $String ? long.toString() : options.longs === $Number ? long.toNumber() : typeof $BigInt !== "undefined" && options.longs === $BigInt ? long.toBigInt() : long;
+                        } else
+                            object.responded_at_ms = options.longs === $String ? "0" : typeof $BigInt !== "undefined" && options.longs === $BigInt ? $BigInt("0") : 0;
                     }
                     if (message.user_id != null && $Object.hasOwnProperty.call(message, "user_id"))
                         object.user_id = message.user_id;
@@ -8351,6 +9217,13 @@ export const gamend = $root.gamend = (() => {
                         object.display_name = message.display_name;
                     if (message.state != null && $Object.hasOwnProperty.call(message, "state"))
                         object.state = message.state;
+                    if (message.responded_at_ms != null && $Object.hasOwnProperty.call(message, "responded_at_ms"))
+                        if (typeof $BigInt !== "undefined" && options.longs === $BigInt)
+                            object.responded_at_ms = typeof message.responded_at_ms === "number" ? $BigInt(message.responded_at_ms) : $util.Long.fromBits(message.responded_at_ms.low >>> 0, message.responded_at_ms.high >>> 0, false).toBigInt();
+                        else if (typeof message.responded_at_ms === "number")
+                            object.responded_at_ms = options.longs === $String ? $String(message.responded_at_ms) : message.responded_at_ms;
+                        else
+                            object.responded_at_ms = options.longs === $String ? $util.Long.prototype.toString.call(message.responded_at_ms) : options.longs === $Number ? new $util.LongBits(message.responded_at_ms.low >>> 0, message.responded_at_ms.high >>> 0).toNumber() : message.responded_at_ms;
                     return object;
                 };
 
@@ -8391,13 +9264,15 @@ export const gamend = $root.gamend = (() => {
                  * @property {string|null} [kind] ReadyCheckState kind
                  * @property {string|null} [status] ReadyCheckState status
                  * @property {string|null} [lobby_id] ReadyCheckState lobby_id
-                 * @property {number|Long|null} [deadline_ms] ReadyCheckState deadline_ms
+                 * @property {number|Long|null} [deadline_at_ms] ReadyCheckState deadline_at_ms
                  * @property {number|null} [total] ReadyCheckState total
                  * @property {number|null} [ready_count] ReadyCheckState ready_count
                  * @property {string|null} [your_state] ReadyCheckState your_state
                  * @property {string|null} [reason] ReadyCheckState reason
                  * @property {Array.<gamend.realtime.v1.ReadyCheckParticipant.$Properties>|null} [participants] ReadyCheckState participants
                  * @property {string|null} [party_id] ReadyCheckState party_id
+                 * @property {string|null} [opened_by] ReadyCheckState opened_by
+                 * @property {Uint8Array|null} [metadata_json] ReadyCheckState metadata_json
                  * @property {Array.<Uint8Array>} [$unknowns] Unknown fields preserved while decoding when enabled
                  */
 
@@ -8463,12 +9338,12 @@ export const gamend = $root.gamend = (() => {
                 ReadyCheckState.prototype.lobby_id = "";
 
                 /**
-                 * ReadyCheckState deadline_ms.
-                 * @member {number|Long} deadline_ms
+                 * ReadyCheckState deadline_at_ms.
+                 * @member {number|Long} deadline_at_ms
                  * @memberof gamend.realtime.v1.ReadyCheckState
                  * @instance
                  */
-                ReadyCheckState.prototype.deadline_ms = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+                ReadyCheckState.prototype.deadline_at_ms = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
 
                 /**
                  * ReadyCheckState total.
@@ -8519,6 +9394,22 @@ export const gamend = $root.gamend = (() => {
                 ReadyCheckState.prototype.party_id = "";
 
                 /**
+                 * ReadyCheckState opened_by.
+                 * @member {string} opened_by
+                 * @memberof gamend.realtime.v1.ReadyCheckState
+                 * @instance
+                 */
+                ReadyCheckState.prototype.opened_by = "";
+
+                /**
+                 * ReadyCheckState metadata_json.
+                 * @member {Uint8Array} metadata_json
+                 * @memberof gamend.realtime.v1.ReadyCheckState
+                 * @instance
+                 */
+                ReadyCheckState.prototype.metadata_json = $util.newBuffer([]);
+
+                /**
                  * Encodes the specified ReadyCheckState message. Does not implicitly {@link gamend.realtime.v1.ReadyCheckState.verify|verify} messages.
                  * @function encode
                  * @memberof gamend.realtime.v1.ReadyCheckState
@@ -8542,8 +9433,8 @@ export const gamend = $root.gamend = (() => {
                         writer.uint32(/* id 3, wireType 2 =*/26).string(message.status);
                     if (message.lobby_id != null && $Object.hasOwnProperty.call(message, "lobby_id") && message.lobby_id !== "")
                         writer.uint32(/* id 4, wireType 2 =*/34).string(message.lobby_id);
-                    if (message.deadline_ms != null && $Object.hasOwnProperty.call(message, "deadline_ms") && (typeof message.deadline_ms === "object" ? message.deadline_ms.low || message.deadline_ms.high : message.deadline_ms !== 0))
-                        writer.uint32(/* id 5, wireType 0 =*/40).int64(message.deadline_ms);
+                    if (message.deadline_at_ms != null && $Object.hasOwnProperty.call(message, "deadline_at_ms") && (typeof message.deadline_at_ms === "object" ? message.deadline_at_ms.low || message.deadline_at_ms.high : message.deadline_at_ms !== 0))
+                        writer.uint32(/* id 5, wireType 0 =*/40).int64(message.deadline_at_ms);
                     if (message.total != null && $Object.hasOwnProperty.call(message, "total") && message.total !== 0)
                         writer.uint32(/* id 6, wireType 0 =*/48).int32(message.total);
                     if (message.ready_count != null && $Object.hasOwnProperty.call(message, "ready_count") && message.ready_count !== 0)
@@ -8557,6 +9448,10 @@ export const gamend = $root.gamend = (() => {
                             $root.gamend.realtime.v1.ReadyCheckParticipant.encode(message.participants[i], writer.uint32(/* id 10, wireType 2 =*/82).fork(), _depth + 1).ldelim();
                     if (message.party_id != null && $Object.hasOwnProperty.call(message, "party_id") && message.party_id !== "")
                         writer.uint32(/* id 11, wireType 2 =*/90).string(message.party_id);
+                    if (message.opened_by != null && $Object.hasOwnProperty.call(message, "opened_by") && message.opened_by !== "")
+                        writer.uint32(/* id 12, wireType 2 =*/98).string(message.opened_by);
+                    if (message.metadata_json != null && $Object.hasOwnProperty.call(message, "metadata_json") && message.metadata_json.length)
+                        writer.uint32(/* id 13, wireType 2 =*/106).bytes(message.metadata_json);
                     if (message.$unknowns != null && $Object.hasOwnProperty.call(message, "$unknowns"))
                         for (let i = 0; i < message.$unknowns.length; ++i)
                             writer.raw(message.$unknowns[i]);
@@ -8581,7 +9476,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.ReadyCheckState(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.ReadyCheckState();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -8631,9 +9536,9 @@ export const gamend = $root.gamend = (() => {
                                 if (wireType !== 0)
                                     break;
                                 if (typeof (value = reader.int64()) === "object" ? value.low || value.high : value !== 0)
-                                    message.deadline_ms = value;
+                                    message.deadline_at_ms = value;
                                 else
-                                    delete message.deadline_ms;
+                                    delete message.deadline_at_ms;
                                 continue;
                             }
                         case 6: {
@@ -8689,12 +9594,35 @@ export const gamend = $root.gamend = (() => {
                                     delete message.party_id;
                                 continue;
                             }
+                        case 12: {
+                                if (wireType !== 2)
+                                    break;
+                                if ((value = reader.stringVerify()).length)
+                                    message.opened_by = value;
+                                else
+                                    delete message.opened_by;
+                                continue;
+                            }
+                        case 13: {
+                                if (wireType !== 2)
+                                    break;
+                                if ((value = reader.bytes()).length)
+                                    message.metadata_json = value;
+                                else
+                                    delete message.metadata_json;
+                                continue;
+                            }
                         }
                         reader.skipType(wireType, _depth, tag);
                         if (!reader.discardUnknown) {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -8731,16 +9659,16 @@ export const gamend = $root.gamend = (() => {
                     if (object.lobby_id != null)
                         if (typeof object.lobby_id !== "string" || object.lobby_id.length)
                             message.lobby_id = $String(object.lobby_id);
-                    if (object.deadline_ms != null)
-                        if (typeof object.deadline_ms === "object" ? object.deadline_ms.low || object.deadline_ms.high : $Number(object.deadline_ms) !== 0)
+                    if (object.deadline_at_ms != null)
+                        if (typeof object.deadline_at_ms === "object" ? object.deadline_at_ms.low || object.deadline_at_ms.high : $Number(object.deadline_at_ms) !== 0)
                             if ($util.Long)
-                                message.deadline_ms = $util.Long.fromValue(object.deadline_ms, false);
-                            else if (typeof object.deadline_ms === "string")
-                                message.deadline_ms = $parseInt(object.deadline_ms, 10);
-                            else if (typeof object.deadline_ms === "number")
-                                message.deadline_ms = object.deadline_ms;
-                            else if (typeof object.deadline_ms === "object")
-                                message.deadline_ms = new $util.LongBits(object.deadline_ms.low >>> 0, object.deadline_ms.high >>> 0).toNumber();
+                                message.deadline_at_ms = $util.Long.fromValue(object.deadline_at_ms, false);
+                            else if (typeof object.deadline_at_ms === "string")
+                                message.deadline_at_ms = $parseInt(object.deadline_at_ms, 10);
+                            else if (typeof object.deadline_at_ms === "number")
+                                message.deadline_at_ms = object.deadline_at_ms;
+                            else if (typeof object.deadline_at_ms === "object")
+                                message.deadline_at_ms = new $util.LongBits(object.deadline_at_ms.low >>> 0, object.deadline_at_ms.high >>> 0).toNumber();
                     if (object.total != null)
                         if ($Number(object.total) !== 0)
                             message.total = object.total | 0;
@@ -8766,6 +9694,15 @@ export const gamend = $root.gamend = (() => {
                     if (object.party_id != null)
                         if (typeof object.party_id !== "string" || object.party_id.length)
                             message.party_id = $String(object.party_id);
+                    if (object.opened_by != null)
+                        if (typeof object.opened_by !== "string" || object.opened_by.length)
+                            message.opened_by = $String(object.opened_by);
+                    if (object.metadata_json != null)
+                        if (object.metadata_json.length)
+                            if (typeof object.metadata_json === "string")
+                                $util.base64.decode(object.metadata_json, message.metadata_json = $util.newBuffer($util.base64.length(object.metadata_json)), 0);
+                            else if (object.metadata_json.length >= 0)
+                                message.metadata_json = object.metadata_json;
                     return message;
                 };
 
@@ -8795,14 +9732,22 @@ export const gamend = $root.gamend = (() => {
                         object.lobby_id = "";
                         if ($util.Long) {
                             let long = new $util.Long(0, 0, false);
-                            object.deadline_ms = options.longs === $String ? long.toString() : options.longs === $Number ? long.toNumber() : typeof $BigInt !== "undefined" && options.longs === $BigInt ? long.toBigInt() : long;
+                            object.deadline_at_ms = options.longs === $String ? long.toString() : options.longs === $Number ? long.toNumber() : typeof $BigInt !== "undefined" && options.longs === $BigInt ? long.toBigInt() : long;
                         } else
-                            object.deadline_ms = options.longs === $String ? "0" : typeof $BigInt !== "undefined" && options.longs === $BigInt ? $BigInt("0") : 0;
+                            object.deadline_at_ms = options.longs === $String ? "0" : typeof $BigInt !== "undefined" && options.longs === $BigInt ? $BigInt("0") : 0;
                         object.total = 0;
                         object.ready_count = 0;
                         object.your_state = "";
                         object.reason = "";
                         object.party_id = "";
+                        object.opened_by = "";
+                        if (options.bytes === $String)
+                            object.metadata_json = "";
+                        else {
+                            object.metadata_json = [];
+                            if (options.bytes !== $Array)
+                                object.metadata_json = $util.newBuffer(object.metadata_json);
+                        }
                     }
                     if (message.id != null && $Object.hasOwnProperty.call(message, "id"))
                         object.id = message.id;
@@ -8812,13 +9757,13 @@ export const gamend = $root.gamend = (() => {
                         object.status = message.status;
                     if (message.lobby_id != null && $Object.hasOwnProperty.call(message, "lobby_id"))
                         object.lobby_id = message.lobby_id;
-                    if (message.deadline_ms != null && $Object.hasOwnProperty.call(message, "deadline_ms"))
+                    if (message.deadline_at_ms != null && $Object.hasOwnProperty.call(message, "deadline_at_ms"))
                         if (typeof $BigInt !== "undefined" && options.longs === $BigInt)
-                            object.deadline_ms = typeof message.deadline_ms === "number" ? $BigInt(message.deadline_ms) : $util.Long.fromBits(message.deadline_ms.low >>> 0, message.deadline_ms.high >>> 0, false).toBigInt();
-                        else if (typeof message.deadline_ms === "number")
-                            object.deadline_ms = options.longs === $String ? $String(message.deadline_ms) : message.deadline_ms;
+                            object.deadline_at_ms = typeof message.deadline_at_ms === "number" ? $BigInt(message.deadline_at_ms) : $util.Long.fromBits(message.deadline_at_ms.low >>> 0, message.deadline_at_ms.high >>> 0, false).toBigInt();
+                        else if (typeof message.deadline_at_ms === "number")
+                            object.deadline_at_ms = options.longs === $String ? $String(message.deadline_at_ms) : message.deadline_at_ms;
                         else
-                            object.deadline_ms = options.longs === $String ? $util.Long.prototype.toString.call(message.deadline_ms) : options.longs === $Number ? new $util.LongBits(message.deadline_ms.low >>> 0, message.deadline_ms.high >>> 0).toNumber() : message.deadline_ms;
+                            object.deadline_at_ms = options.longs === $String ? $util.Long.prototype.toString.call(message.deadline_at_ms) : options.longs === $Number ? new $util.LongBits(message.deadline_at_ms.low >>> 0, message.deadline_at_ms.high >>> 0).toNumber() : message.deadline_at_ms;
                     if (message.total != null && $Object.hasOwnProperty.call(message, "total"))
                         object.total = message.total;
                     if (message.ready_count != null && $Object.hasOwnProperty.call(message, "ready_count"))
@@ -8834,6 +9779,10 @@ export const gamend = $root.gamend = (() => {
                     }
                     if (message.party_id != null && $Object.hasOwnProperty.call(message, "party_id"))
                         object.party_id = message.party_id;
+                    if (message.opened_by != null && $Object.hasOwnProperty.call(message, "opened_by"))
+                        object.opened_by = message.opened_by;
+                    if (message.metadata_json != null && $Object.hasOwnProperty.call(message, "metadata_json"))
+                        object.metadata_json = options.bytes === $String ? $util.base64.encode(message.metadata_json, 0, message.metadata_json.length) : options.bytes === $Array ? $Array.prototype.slice.call(message.metadata_json) : message.metadata_json;
                     return object;
                 };
 
@@ -9040,7 +9989,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.KvEntry(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.KvEntry();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -9100,6 +10059,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -9366,7 +10330,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.RpcCall(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.RpcCall();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -9423,6 +10397,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -9669,7 +10648,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.RpcReply(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.RpcReply();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -9708,6 +10697,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -9908,7 +10902,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.RpcError(), value;
+                    let end, message, value;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.RpcError();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -9942,6 +10946,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");
@@ -10162,7 +11171,17 @@ export const gamend = $root.gamend = (() => {
                         _depth = 0;
                     if (_depth > $Reader.recursionLimit)
                         throw $Error("max depth exceeded");
-                    let end = length === $undefined ? reader.len : reader.pos + length, message = _target || new $root.gamend.realtime.v1.RtcEnvelope();
+                    let end, message;
+                    if (length === $undefined)
+                        end = reader.len;
+                    else {
+                        end = reader.pos + length;
+                        if (end > reader.len)
+                            throw $RangeError("index out of range");
+                        length = reader.len;
+                        reader.len = end;
+                    }
+                    message = _target || new $root.gamend.realtime.v1.RtcEnvelope();
                     while (reader.pos < end) {
                         let start = reader.pos;
                         let tag = reader.tag();
@@ -10199,6 +11218,11 @@ export const gamend = $root.gamend = (() => {
                             $util.makeProp(message, "$unknowns", false);
                             (message.$unknowns || (message.$unknowns = [])).push(reader.raw(start, reader.pos));
                         }
+                    }
+                    if (length !== $undefined) {
+                        if (reader.pos !== end)
+                            throw $RangeError("index out of range");
+                        reader.len = length;
                     }
                     if (_end !== $undefined)
                         throw $Error("missing end group");

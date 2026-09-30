@@ -10,6 +10,45 @@ defmodule GamendWeb.QuestsLiveCardTest do
 
   alias Gamend.Quests
 
+  # A host's own selector: it covers the "countries" group and not "seas",
+  # and its control only has to send "group" with a `group` param. It prints
+  # keys, never titles, so a test can tell a card from the picker.
+  defmodule HostPicker do
+    @behaviour GamendWeb.QuestGroupSelector
+
+    use Phoenix.Component
+
+    @impl true
+    def selectable?(%{key: key}), do: key == "countries"
+
+    @impl true
+    def selector(assigns) do
+      ~H"""
+      <form id="host-picker" phx-change="group">
+        <label :for={g <- @groups}>
+          <input type="radio" name="group" value={g.key} checked={g.key == @selected} />
+          {g.key}
+        </label>
+      </form>
+      """
+    end
+
+    # Answers "countries" only for the user the test expects, so the rendered
+    # page proves what the hook was handed — or whatever a test planted.
+    @impl true
+    def default_group(user_id) do
+      case :persistent_term.get({__MODULE__, :default}, nil) do
+        nil ->
+          if user_id == :persistent_term.get({__MODULE__, :expected_user}, :nobody),
+            do: "countries",
+            else: nil
+
+        planted ->
+          planted
+      end
+    end
+  end
+
   setup do
     for attrs <- [
           %{
@@ -117,6 +156,136 @@ defmodule GamendWeb.QuestsLiveCardTest do
 
       assert html =~ "???"
       refute html =~ "Visit Atlantis", "opening a group must not spoil a hidden member"
+    end
+  end
+
+  describe "the group selector" do
+    # Two groups of two, so picking one has something to drop, and the other
+    # is a real collapsed card (a group of one lists as the one).
+    setup do
+      for {id, group, title} <- [
+            {"ro", "countries", "Visit countries"},
+            {"es", "countries", "Visit countries"},
+            {"fr", "seas", "Sail the seas"},
+            {"it", "seas", "Sail the seas"}
+          ] do
+        {:ok, _} =
+          Quests.create_quest(%{
+            key: "visit_#{id}",
+            title: "Visit #{String.upcase(id)}",
+            description: "Visit every city.",
+            category: "exploration",
+            group_key: group,
+            group_title: title,
+            objectives: [%{event: "city_visited", target: 5, params: %{"country" => id}}]
+          })
+      end
+
+      orig_selector = Application.get_env(:gamend_web, :quest_group_selector)
+
+      on_exit(fn ->
+        restore(:quest_group_selector, orig_selector)
+        :persistent_term.erase({HostPicker, :default})
+        :persistent_term.erase({HostPicker, :expected_user})
+      end)
+
+      :ok
+    end
+
+    defp restore(key, nil), do: Application.delete_env(:gamend_web, key)
+    defp restore(key, value), do: Application.put_env(:gamend_web, key, value)
+
+    # The plain select prints every group's title as an option, so a title's
+    # presence says nothing about its card: count it. One is the option alone.
+    defp occurrences(html, text), do: length(String.split(html, text)) - 1
+
+    test "the plain select offers every group behind an All that keeps the cards collapsed",
+         %{conn: conn} do
+      html = page(conn)
+
+      assert html =~ ~s(<select name="group")
+      assert occurrences(html, "Visit countries") == 2, "the option, and the collapsed card"
+      assert occurrences(html, "Sail the seas") == 2
+      refute html =~ "Visit RO", "All is the collapsed cards, as before"
+    end
+
+    test "picking a group lists its members and drops the other groups", %{conn: conn} do
+      for conn <- [conn, log_in_user(conn, Gamend.AccountsFixtures.user_fixture())] do
+        {:ok, view, _html} = live(conn, ~p"/quests")
+
+        html = view |> element("#quest-groups") |> render_change(%{"group" => "countries"})
+
+        assert html =~ "Visit RO"
+        assert html =~ "Visit ES"
+
+        assert occurrences(html, "Sail the seas") == 1,
+               "the unpicked group is off the page, not collapsed: its option alone remains"
+
+        refute html =~ "Visit FR"
+        # The ungrouped quests stay.
+        assert html =~ "Daily check-in"
+
+        html = view |> element("#quest-groups") |> render_change(%{"group" => ""})
+        refute html =~ "Visit RO"
+        assert occurrences(html, "Sail the seas") == 2, "All: the card is back"
+      end
+    end
+
+    test "no selector renders when the view has no groups", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/quests")
+      html = render_click(view, "category", %{"category" => "Daily"})
+
+      refute html =~ ~s(<select name="group")
+    end
+
+    test "a host selector covers its groups; the rest keep their card", %{conn: conn} do
+      Application.put_env(:gamend_web, :quest_group_selector, HostPicker)
+
+      for conn <- [conn, log_in_user(conn, Gamend.AccountsFixtures.user_fixture())] do
+        {:ok, view, html} = live(conn, ~p"/quests")
+
+        assert html =~ "host-picker"
+        assert html =~ ~s(value="countries")
+        refute html =~ ~s(value="seas"), "not the selector's, so not in it"
+        refute html =~ ~s(<select name="group"), "the host's control replaces the plain one"
+        refute html =~ "Visit countries", "nothing picked: the selector's group is off the page"
+        assert html =~ "Sail the seas", "a group the selector does not cover is still its card"
+        refute html =~ "Visit FR", "…collapsed, not opened"
+        assert html =~ "Daily check-in"
+
+        # Picking through the host's control lists the members; the other card stays.
+        html = view |> element("#host-picker") |> render_change(%{"group" => "countries"})
+        assert html =~ "Visit RO"
+        assert html =~ "Visit ES"
+        assert html =~ "Sail the seas"
+        refute html =~ "Visit FR"
+      end
+    end
+
+    test "the host's default group opens on mount, for the signed-in user", %{conn: conn} do
+      Application.put_env(:gamend_web, :quest_group_selector, HostPicker)
+
+      user = Gamend.AccountsFixtures.user_fixture()
+      :persistent_term.put({HostPicker, :expected_user}, user.id)
+
+      # A visitor is not that user: nothing picked, the selector's group off the page.
+      refute page(conn) =~ "Visit RO"
+
+      {:ok, _view, html} = live(log_in_user(conn, user), ~p"/quests")
+      assert html =~ "Visit RO"
+      assert html =~ "Sail the seas"
+    end
+
+    test "a default the viewer's groups do not hold is ignored", %{conn: conn} do
+      Application.put_env(:gamend_web, :quest_group_selector, HostPicker)
+      :persistent_term.put({HostPicker, :default}, "atlantis")
+
+      html = page(conn)
+
+      # Nothing picked, then: the selector's group off the page, the other's card up.
+      refute html =~ "Visit countries"
+      refute html =~ "Visit RO"
+      assert html =~ "Sail the seas"
     end
   end
 

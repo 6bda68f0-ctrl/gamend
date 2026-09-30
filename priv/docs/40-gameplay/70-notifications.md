@@ -16,15 +16,23 @@ game client tracks its own seen state or deletes what it has handled.
 
 ## Notification schema
 
-```text
-  id": 1, "sender_id": 42, "sender_name": "SomePlayer", "recipient_id": "01977f5a-0007-7000-8000-3f6a2d8c0a07", "title": "New Group Invite", "content": "You've been invited to join Cool Guild", "metadata": { "type": "group_invite", "group_id": "01977f5a-0005-7000-8000-3f6a2d8c0a05,
-    "inserted_at":  "2026-02-22T12:00:00Z"
-  }
+```json
+{
+  "id": "01977f5a-0009-7000-8000-3f6a2d8c0a09",
+  "sender_id": "01977f5a-0001-7000-8000-3f6a2d8c0a01",
+  "sender_name": "SomePlayer",
+  "recipient_id": "01977f5a-0007-7000-8000-3f6a2d8c0a07",
+  "title": "New Group Invite",
+  "content": "You've been invited to join Cool Guild",
+  "icon_url": "",
+  "metadata": {"type": "group_invite", "group_id": "01977f5a-0005-7000-8000-3f6a2d8c0a05"},
+  "inserted_at": "2026-02-22T12:00:00Z"
+}
 ```
 
 ## Notification types (metadata.type)
 
-All system-generated notifications include a type string in metadata for client-side routing. Below is the full list grouped by domain.
+All system-generated notifications include a type string in metadata for client-side routing. The set is closed: core's codes are below, plugins add theirs with `notification_types/0` (see [server scripting](/docs/server-scripting)), and a notification whose `metadata.type` is neither is rejected when it is written. The admin Runtime page lists every registered code. Below is core's list grouped by domain.
 
 ### Friends
 
@@ -41,19 +49,19 @@ All system-generated notifications include a type string in metadata for client-
 ### Groups
 
 ```text
-  ┌──────────────────────┬──────────────────────────────────────────────┐
-  │ Type                 │ Description                                  │
-  ├──────────────────────┼──────────────────────────────────────────────┤
-  │ group_invite         │ Invited to join a group                      │
-  │ group_invite_accepted│ Your group invite was accepted               │
-  │ group_invite_declined│ Your group invite was declined               │
-  │ group_join_request   │ Someone requested to join your group (admin) │
-  │ group_join_request_approved  │ Your group join request was approved          │
-  │ group_join_request_rejected  │ Your group join request was declined          │
-  │ group_kicked         │ You were removed from a group                │
-  │ group_promoted       │ You were promoted to admin                   │
-  │ group_demoted        │ You were demoted to member                   │
-  └──────────────────────┴──────────────────────────────────────────────┘
+  ┌─────────────────────────────┬──────────────────────────────────────────────┐
+  │ Type                        │ Description                                  │
+  ├─────────────────────────────┼──────────────────────────────────────────────┤
+  │ group_invite                │ Invited to join a group                      │
+  │ group_invite_accepted       │ Your group invite was accepted               │
+  │ group_invite_declined       │ Your group invite was declined               │
+  │ group_join_request          │ Someone requested to join your group (admin) │
+  │ group_join_request_approved │ Your group join request was approved         │
+  │ group_join_request_rejected │ Your group join request was declined         │
+  │ group_kicked                │ You were removed from a group                │
+  │ group_promoted              │ You were promoted to admin                   │
+  │ group_demoted               │ You were demoted to member                   │
+  └─────────────────────────────┴──────────────────────────────────────────────┘
 ```
 
 ### Parties
@@ -94,22 +102,47 @@ Chat notifications include a message_count field in metadata indicating how many
   └──────────────────────┴──────────────────────────────────────────────┘
 ```
 
+### Chat moderation
+
+```text
+  ┌──────────────────────┬──────────────────────────────────────────────┐
+  │ Type                 │ Description                                  │
+  ├──────────────────────┼──────────────────────────────────────────────┤
+  │ chat_report          │ A chat report is waiting (sent to admins)    │
+  │ chat_report_resolved │ A report you filed was reviewed              │
+  │ chat_warning         │ A moderator sent you a warning               │
+  │ chat_mute            │ You were muted in chat                       │
+  └──────────────────────┴──────────────────────────────────────────────┘
+```
+
+### Quests
+
+```text
+  ┌──────────────────────┬──────────────────────────────────────────────┐
+  │ Type                 │ Description                                  │
+  ├──────────────────────┼──────────────────────────────────────────────┤
+  │ quest_completed      │ A quest or achievement was completed         │
+  └──────────────────────┴──────────────────────────────────────────────┘
+```
+
+`quest_completed` carries `quest_key`, `category` and `quest_title`.
+
 ## Behaviour notes
 
 - Notifications upsert on (sender_id, recipient_id, title): sending the same notification again updates the existing one.
 - Cancelling a friend request, group invite, or party invite automatically retracts (deletes) the original notification.
 - Notifications are delivered in real time via PubSub on the "user:" topic and persisted to the database.
-- Custom notifications can be sent between friends via POST /api/v1/notifications with any title, content, and metadata.
+- Custom notifications can be sent between friends via POST /api/v1/notifications with any title, content, and metadata. A `metadata.type`, if present, must be a registered code.
 
 ## Real-time (WebSocket)
 
-Connect to the UserChannel to receive notifications in real time. Notifications are broadcast on the "user:" topic.
+Connect to the UserChannel to receive notifications in real time. Each one arrives as a `notification_created` event on the "user:" topic; on join the channel replays the most recent 50, oldest first.
 
 ```javascript
   // JavaScript — join the user channel
   const channel = socket.channel("user:" + userId, {});
-  channel.on("notification", (payload) => {
-    console.log("New notification:", payload.type, payload);
+  channel.on("notification_created", (payload) => {
+    console.log("New notification:", payload.metadata.type, payload);
   });
 ```
 

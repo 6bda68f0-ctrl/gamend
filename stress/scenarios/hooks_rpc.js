@@ -92,7 +92,7 @@ export default function (ctx) {
     const read = kvGet(session.token, ctx.key);
     t.kv_api.add(read.timings.duration);
     ok(read, 'kv api read');
-    readsBack(read, (v) => v.writer, 'stress', 'locked write');
+    readsBack(read, (e) => e.data && e.data.writer, 'stress', 'locked write');
   } else if (MODE === 'all' || MODE === 'kv_api') {
     const read = kvGet(session.token, ctx.key);
     t.kv_api.add(read.timings.duration);

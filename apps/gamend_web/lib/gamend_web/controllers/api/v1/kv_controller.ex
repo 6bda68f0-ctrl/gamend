@@ -6,13 +6,9 @@ defmodule GamendWeb.Api.V1.KvController do
   alias Gamend.Accounts.User
   alias Gamend.Hooks
   alias Gamend.KV
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.KvEntryResponse
   alias OpenApiSpex.Schema
-
-  @kv_schema %Schema{
-    type: :object,
-    properties: %{data: %Schema{type: :object}, metadata: %Schema{type: :object}}
-  }
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
 
   tags(["KV"])
 
@@ -36,10 +32,10 @@ defmodule GamendWeb.Api.V1.KvController do
       ]
     ],
     responses: [
-      ok: {"KV entry", "application/json", @kv_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema},
-      forbidden: {"Forbidden", "application/json", @error_schema}
+      ok: {"KV entry", "application/json", KvEntryResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      not_found: Schemas.error("No entry for that key and owner"),
+      forbidden: Schemas.error("The key's access rule, or `before_kv_get`, refused")
     ]
   )
 
@@ -94,15 +90,21 @@ defmodule GamendWeb.Api.V1.KvController do
   defp caller_admin?(%User{is_admin: true}), do: true
   defp caller_admin?(_caller), do: false
 
-  defp forbidden(conn), do: conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
+  defp forbidden(conn), do: reply_error(conn, :forbidden, "forbidden")
 
   defp do_get(conn, key, user_id, lobby_id) do
     case KV.get(key, user_id: user_id, lobby_id: lobby_id) do
       {:ok, %{value: value, metadata: metadata}} ->
-        json(conn, %{data: value, metadata: metadata})
+        reply_data(conn, %{
+          key: key,
+          user_id: user_id || "",
+          lobby_id: lobby_id || "",
+          data: value,
+          metadata: metadata
+        })
 
       :error ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
     end
   end
 end

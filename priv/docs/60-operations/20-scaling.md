@@ -13,15 +13,24 @@ icon: hero-arrows-pointing-out
 
 ## Docker Compose (local / self-host)
 
-Docker Compose is a simple way to run the app with PostgreSQL and Redis.
+The default `docker-compose.yml` runs one instance on SQLite.
+`docker-compose.multi.yml` is the scaled-out variant: PostgreSQL, Redis and an
+nginx proxy in front of the app replicas. It already sets the shared cache and
+the shared rate limiter:
 
 ```bash
-docker compose up
+docker compose -f docker-compose.multi.yml up --scale app=3
 
+# set in docker-compose.multi.yml
 GAMEND_CACHE_MODE=multi
 GAMEND_CACHE_L2=redis
 GAMEND_CACHE_REDIS_URL="redis://redis:6379/0"
+GAMEND_RATELIMIT_BACKEND=redis
 ```
+
+The database adapter is chosen at compile time, so the image has to be built
+for Postgres with the `GAMEND_DB_ADAPTER=postgres` build arg (see
+[PostgreSQL setup](/docs/postgresql-setup)).
 
 If you want to use `GAMEND_CACHE_L2=partitioned` under Compose, you also need to configure Erlang distribution + node discovery for your app containers.
 
@@ -49,4 +58,4 @@ When a client exceeds the limit, the server returns HTTP 429 Too Many Requests w
 
 ### WebSocket & WebRTC rate limiting
 
-WebSocket channel messages are rate-limited per user (60 messages per 10 seconds by default). When exceeded, the channel is closed with a "rate_limited" error. WebRTC DataChannel messages have a separate, higher limit (300 messages per 10 seconds). Exceeding it disconnects the WebRTC peer connection. Unrecognized WebSocket events also close the channel immediately to prevent abuse.
+WebSocket channel messages are rate-limited per user (60 messages per 10 seconds by default). When exceeded, the channel is closed with a "rate_limited" error. WebRTC DataChannel messages have a separate, higher limit (300 messages per 10 seconds). Exceeding it disconnects the WebRTC peer connection. An unrecognized WebSocket event gets an `unknown_event` error reply; the channel stays open.

@@ -89,6 +89,46 @@ defmodule GamendWeb.SearchIndexControllerTest do
       assert get_resp_header(conn, "cache-control") == ["private, max-age=600"]
     end
 
+    test "how long is a setting", %{conn: conn} do
+      Gamend.SettingsHelpers.put(:gamend_web, GamendWeb.SearchIndex, :index_max_age_seconds, 3600)
+
+      on_exit(fn ->
+        Gamend.SettingsHelpers.delete(:gamend_web, GamendWeb.SearchIndex, :index_max_age_seconds)
+      end)
+
+      conn = get(conn, "/search/index.json")
+
+      assert get_resp_header(conn, "cache-control") == ["private, max-age=3600"]
+    end
+
+    test "asking again for an unchanged index is a 304 with no body", %{conn: conn} do
+      first = get(conn, "/search/index.json")
+      assert [etag] = get_resp_header(first, "etag")
+
+      again =
+        build_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get("/search/index.json")
+
+      assert again.status == 304
+      assert again.resp_body == ""
+      assert get_resp_header(again, "etag") == [etag]
+    end
+
+    test "a changed index is sent in full", %{conn: conn} do
+      stub([%{title: "One", href: "/one"}])
+      [etag] = conn |> get("/search/index.json") |> get_resp_header("etag")
+
+      stub([%{title: "Two", href: "/two"}])
+
+      changed =
+        build_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get("/search/index.json")
+
+      assert %{"entries" => [%{"href" => "/two"}]} = json_response(changed, 200)
+    end
+
     test "a client asking for JSON is not turned away", %{conn: conn} do
       conn =
         conn

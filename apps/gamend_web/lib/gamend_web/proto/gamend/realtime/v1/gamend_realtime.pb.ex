@@ -12,6 +12,7 @@ defmodule Gamend.Realtime.V1.LinkedProviders do
   field :apple, 4, type: :bool
   field :steam, 5, type: :bool
   field :device, 6, type: :bool
+  field :github, 7, type: :bool
 end
 
 defmodule Gamend.Realtime.V1.User do

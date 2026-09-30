@@ -5,6 +5,7 @@ defmodule GamendWeb.PresentationPage do
 
   use GamendWeb, :html
 
+  alias GamendWeb.ProjectStatic
   alias Phoenix.HTML.Safe
 
   @bold_pattern ~r/\*\*(.+?)\*\*/
@@ -81,7 +82,12 @@ defmodule GamendWeb.PresentationPage do
   """
   @spec cached_body(map(), list(), String.t() | nil, String.t()) :: iodata()
   def cached_body(page_map, background_icons, locale, path) do
-    fingerprint = :erlang.phash2({page_map, background_icons})
+    # The static generation is an input too: the srcsets list only the width
+    # variants on disk, and those can be cut after boot (see
+    # `GamendWeb.ResponsiveImages`) without the page map changing at all.
+    fingerprint =
+      :erlang.phash2({page_map, background_icons, ProjectStatic.generation()})
+
     key = {__MODULE__, :body, locale, path}
 
     case :persistent_term.get(key, :miss) do
@@ -116,6 +122,7 @@ defmodule GamendWeb.PresentationPage do
       assign(assigns,
         hero: Map.get(assigns.page, "hero", %{}),
         sections: sections,
+        sections_columns: sections_columns(assigns.page),
         background_icon_bands: background_icon_bands(sections)
       )
 
@@ -167,7 +174,7 @@ defmodule GamendWeb.PresentationPage do
           <a
             :if={@sections != []}
             href="#more-content"
-            aria-label="Scroll to content"
+            aria-label={gettext("Scroll to content")}
             class="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 text-base-content/55 transition hover:text-base-content motion-safe:animate-bounce"
           >
             <.dynamic_icon name="hero-chevron-down-solid" class="size-9" />
@@ -180,6 +187,7 @@ defmodule GamendWeb.PresentationPage do
           :if={@sections != []}
           class={[
             "relative z-10 mx-auto grid w-full gap-y-4 px-4 sm:px-6 lg:px-8",
+            sections_columns_class(@sections_columns),
             content_width_class()
           ]}
         >
@@ -218,7 +226,7 @@ defmodule GamendWeb.PresentationPage do
       <a
         :if={@sections != []}
         href="#more-content"
-        aria-label="Scroll to content"
+        aria-label={gettext("Scroll to content")}
         class="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 text-white/70 transition hover:text-white motion-safe:animate-bounce"
       >
         <.dynamic_icon name="hero-chevron-down-solid" class="size-9" />
@@ -468,6 +476,77 @@ defmodule GamendWeb.PresentationPage do
   end
 
   defp has_links?(_item), do: false
+
+  attr :cards, :list, default: []
+
+  @doc """
+  A section's `"cards"`: a grid of small cards, each an icon, a title and a
+  line of text, optionally a link.
+
+  For the section whose point is a *set* — twelve features, five personas,
+  the four things a product does — where a paragraph would list them and a
+  reader would skim past. Three across from `lg`, two from `sm`, one below.
+  `icon` is a heroicon name; `href` makes the whole card the link.
+  """
+  def card_grid(assigns) do
+    cards = if is_list(assigns.cards), do: assigns.cards, else: []
+
+    assigns = assign(assigns, cards: Enum.filter(cards, &non_empty_string(&1["title"])))
+
+    ~H"""
+    <ul :if={@cards != []} class="grid w-full gap-4 text-start sm:grid-cols-2 lg:grid-cols-3">
+      <li :for={card <- @cards} class="h-full">
+        <.card_body card={card} />
+      </li>
+    </ul>
+    """
+  end
+
+  attr :card, :map, required: true
+
+  # One card, a link when it has somewhere to go. The two markups differ only
+  # in the outer element, so the inner block is written once below.
+  defp card_body(%{card: %{"href" => href}} = assigns) when is_binary(href) and href != "" do
+    ~H"""
+    <a
+      href={@card["href"]}
+      class="flex h-full flex-col gap-2 rounded-xl border border-base-300 bg-base-100/80 p-4 transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+    >
+      <.card_inner card={@card} />
+    </a>
+    """
+  end
+
+  defp card_body(assigns) do
+    ~H"""
+    <div class="flex h-full flex-col gap-2 rounded-xl border border-base-300 bg-base-100/80 p-4">
+      <.card_inner card={@card} />
+    </div>
+    """
+  end
+
+  attr :card, :map, required: true
+
+  defp card_inner(assigns) do
+    ~H"""
+    <span :if={non_empty_string(@card["icon"])} class="text-primary">
+      <.icon name={@card["icon"]} class="size-6" />
+    </span>
+    <span class="font-bold">{@card["title"]}</span>
+    <span :if={non_empty_string(@card["text"])} class="text-sm leading-relaxed text-base-content/75">
+      {rich_text(@card["text"])}
+    </span>
+    """
+  end
+
+  defp has_cards?(item) when is_map(item) do
+    case Map.get(item, "cards") do
+      cards when is_list(cards) -> cards != []
+      _ -> false
+    end
+  end
+
+  defp has_cards?(_item), do: false
 
   attr :item, :map, required: true
   attr :variant, :string, default: "section"
@@ -719,6 +798,7 @@ defmodule GamendWeb.PresentationPage do
           {rich_text(Map.get(@section, "text", ""))}
         </div>
         <.link_chips :if={has_links?(@section)} links={Map.get(@section, "links")} align="center" />
+        <.card_grid :if={has_cards?(@section)} cards={Map.get(@section, "cards")} />
         <div :if={has_buttons?(@section)} class="pt-1">
           <.buttons buttons={Map.get(@section, "buttons", [])} />
         </div>
@@ -751,6 +831,7 @@ defmodule GamendWeb.PresentationPage do
           {rich_text(Map.get(@section, "text", ""))}
         </div>
         <.link_chips :if={has_links?(@section)} links={Map.get(@section, "links")} />
+        <.card_grid :if={has_cards?(@section)} cards={Map.get(@section, "cards")} />
         <div :if={has_buttons?(@section)} class="pt-1 md:pt-2">
           <.buttons buttons={Map.get(@section, "buttons", [])} />
         </div>
@@ -824,6 +905,25 @@ defmodule GamendWeb.PresentationPage do
   end
 
   defp section_height(section), do: Map.get(section, "height", "compact")
+
+  # `"sections_columns": 2` lays the sections out two-up from `md` and stays
+  # one-up below it. A list page \u2014 a blog index, say \u2014 gets longer with every
+  # entry, and a column of full-width rows is a lot of scrolling to see what is
+  # there; a hero plus a two-column grid shows twice as much per screen.
+  #
+  # Opt-in, and only 1 or 2. Three across leaves each card too narrow for a
+  # title and a sentence at the widths this grid actually runs at, and a page
+  # that does not ask for columns renders exactly as it did before.
+  defp sections_columns(page) do
+    case Map.get(page, "sections_columns") do
+      2 -> 2
+      "2" -> 2
+      _ -> 1
+    end
+  end
+
+  defp sections_columns_class(2), do: "gap-x-4 md:grid-cols-2"
+  defp sections_columns_class(_), do: nil
 
   defp background_icon_bands(sections) when is_list(sections), do: max(3, length(sections) + 2)
 
@@ -990,14 +1090,13 @@ defmodule GamendWeb.PresentationPage do
     String.replace_suffix(path, ext, "-#{width}#{ext}")
   end
 
+  # Only a variant from the directory that serves the original: a project that
+  # replaces the engine's `banner.webp` with its own must not have the engine's
+  # `banner-480.webp`, a cut of a different picture, offered in its srcset.
   defp variant_exists?(path, width) do
-    variant = width_variant_path(path, width)
-    clean = URI.parse(variant).path || variant
-
-    case static_file_path(clean) do
-      file when is_binary(file) -> File.regular?(file)
-      _ -> false
-    end
+    path
+    |> width_variant_path(width)
+    |> ProjectStatic.derived_from?(path)
   end
 
   # What share of the viewport the slot actually occupies, so the browser picks
@@ -1089,22 +1188,21 @@ defmodule GamendWeb.PresentationPage do
   defp positive_int(_value), do: nil
 
   defp image_src(path) do
-    path = non_empty_string(path)
-
-    cond do
-      is_nil(path) ->
-        nil
-
-      generated = generated_image_path(path) ->
-        if GamendWeb.SRI.integrity(generated) do
-          GamendWeb.SRI.versioned_path(generated) || generated
-        else
-          GamendWeb.SRI.versioned_path(path) || path
-        end
-
-      true ->
-        GamendWeb.SRI.versioned_path(path) || path
+    case non_empty_string(path) do
+      nil -> nil
+      path -> path |> optimized_image_path() |> versioned()
     end
+  end
+
+  defp versioned(path), do: GamendWeb.SRI.versioned_path(path) || path
+
+  # The WebP `mix host.optimize_images` made from a PNG or JPEG, when it was
+  # made from this one: a project's own `/images/logo.png` must not be swapped
+  # for the engine's WebP of the engine's logo.
+  defp optimized_image_path(path) do
+    generated = generated_image_path(path)
+
+    if generated && ProjectStatic.derived_from?(generated, path), do: generated, else: path
   end
 
   defp generated_image_path(path) do
@@ -1125,40 +1223,14 @@ defmodule GamendWeb.PresentationPage do
     end
   end
 
+  # `path_for/1` takes the path as configured, query and all, and answers nil
+  # for an absolute URL rather than measuring a local file that shares its path.
   defp image_dimensions(path) do
-    path = non_empty_string(path)
-    clean_path = path && (URI.parse(path).path || path)
-
-    with clean when is_binary(clean) <- clean_path,
-         file_path when is_binary(file_path) <- static_file_path(clean) do
-      read_image_dimensions(file_path)
-    else
-      _ -> {nil, nil}
+    case ProjectStatic.path_for(non_empty_string(path)) do
+      file_path when is_binary(file_path) -> read_image_dimensions(file_path)
+      nil -> {nil, nil}
     end
   end
-
-  defp static_file_path(clean_path) do
-    [
-      Application.get_env(:gamend_web, :asset_static_app, :gamend_web),
-      Application.get_env(:gamend_web, :host_static_app, :gamend_web),
-      :gamend_web
-    ]
-    |> Enum.uniq()
-    |> Enum.map(&app_static_dir/1)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.find_value(fn static_dir ->
-      file_path = Path.join(static_dir, String.trim_leading(clean_path, "/"))
-      if File.exists?(file_path), do: file_path
-    end)
-  end
-
-  defp app_static_dir(app) when is_atom(app) do
-    if Application.spec(app, :vsn) do
-      Application.app_dir(app, "priv/static")
-    end
-  end
-
-  defp app_static_dir(_app), do: nil
 
   defp read_image_dimensions(file_path) do
     case File.read(file_path) do

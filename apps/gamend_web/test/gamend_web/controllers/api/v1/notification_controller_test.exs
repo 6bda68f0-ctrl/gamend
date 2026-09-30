@@ -37,6 +37,7 @@ defmodule GamendWeb.Api.V1.NotificationControllerTest do
       |> auth_conn(a)
       |> post("/api/v1/notifications", %{user_id: b.id, title: "Hello!"})
       |> json_response(201)
+      |> Map.fetch!("data")
 
     assert resp["title"] == "Hello!"
     assert resp["sender_id"] == a.id
@@ -58,6 +59,7 @@ defmodule GamendWeb.Api.V1.NotificationControllerTest do
         metadata: %{"lobby_id" => 42}
       })
       |> json_response(201)
+      |> Map.fetch!("data")
 
     assert resp["title"] == "Game invite"
     assert resp["content"] == "Join my lobby!"
@@ -106,12 +108,14 @@ defmodule GamendWeb.Api.V1.NotificationControllerTest do
       |> auth_conn(a)
       |> post("/api/v1/notifications", %{user_id: b.id, title: "Invited to play", content: "v1"})
       |> json_response(201)
+      |> Map.fetch!("data")
 
     second =
       conn
       |> auth_conn(a)
       |> post("/api/v1/notifications", %{user_id: b.id, title: "Invited to play", content: "v2"})
       |> json_response(201)
+      |> Map.fetch!("data")
 
     # Upsert: same notification is updated in place
     assert second["title"] == "Invited to play"
@@ -268,6 +272,7 @@ defmodule GamendWeb.Api.V1.NotificationControllerTest do
       |> delete("/api/v1/notifications", %{})
       |> json_response(400)
 
-    assert resp["error"] =~ "ids"
+    assert resp["error"] == "missing_param"
+    assert resp["message"] =~ "ids"
   end
 end

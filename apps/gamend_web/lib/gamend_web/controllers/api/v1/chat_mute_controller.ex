@@ -14,39 +14,17 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
   use GamendWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
-  alias Gamend.Accounts.Scope
-  alias Gamend.Accounts.User
+  import GamendWeb.ControllerScope
+
   alias Gamend.Chat
   alias Gamend.Groups
   alias Gamend.Lobbies
   alias Gamend.Parties
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{ChatMuteRecordPage, ChatMuteRecordResponse, DeletedCountResponse}
   alias OpenApiSpex.Schema
 
   tags(["Chat"])
-
-  @mute_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      user_id: %Schema{type: :string, format: :uuid},
-      scope: %Schema{type: :string, enum: ["global", "lobby", "group", "party"]},
-      scope_ref_id: %Schema{type: :string},
-      expires_at: %Schema{type: :string, format: :"date-time", nullable: true},
-      reason: %Schema{type: :string},
-      muted_by: %Schema{type: :string},
-      inserted_at: %Schema{type: :string, format: :"date-time"}
-    }
-  }
-
-  @meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer}
-    }
-  }
 
   @mute_request %Schema{
     type: :object,
@@ -82,9 +60,9 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
     security: [%{"authorization" => []}],
     request_body: {"Mute", "application/json", @mute_request},
     responses: [
-      ok: {"Muted", "application/json", @mute_schema},
-      bad_request: {"Not in a lobby or invalid id", "application/json", %Schema{type: :object}},
-      forbidden: {"Not the lobby host", "application/json", %Schema{type: :object}}
+      ok: {"Muted", "application/json", ChatMuteRecordResponse},
+      bad_request: Schemas.error("Not in a lobby or invalid id"),
+      forbidden: Schemas.error("Not the lobby host")
     ]
   )
 
@@ -104,9 +82,9 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
     security: [%{"authorization" => []}],
     request_body: {"Unmute", "application/json", @unmute_request},
     responses: [
-      ok: {"Unmuted", "application/json", %Schema{type: :object}},
-      bad_request: {"Not in a lobby or invalid id", "application/json", %Schema{type: :object}},
-      forbidden: {"Not the lobby host", "application/json", %Schema{type: :object}}
+      ok: {"Unmuted", "application/json", DeletedCountResponse},
+      bad_request: Schemas.error("Not in a lobby or invalid id"),
+      forbidden: Schemas.error("Not the lobby host")
     ]
   )
 
@@ -133,13 +111,8 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
       ]
     ],
     responses: [
-      ok:
-        {"Mutes", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{data: %Schema{type: :array, items: @mute_schema}, meta: @meta_schema}
-         }},
-      forbidden: {"Not the lobby host", "application/json", %Schema{type: :object}}
+      ok: {"Mutes", "application/json", ChatMuteRecordPage},
+      forbidden: Schemas.error("Not the lobby host")
     ]
   )
 
@@ -170,9 +143,9 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
     ],
     request_body: {"Mute", "application/json", @mute_request},
     responses: [
-      ok: {"Muted", "application/json", @mute_schema},
-      bad_request: {"Invalid id", "application/json", %Schema{type: :object}},
-      forbidden: {"Not a group admin", "application/json", %Schema{type: :object}}
+      ok: {"Muted", "application/json", ChatMuteRecordResponse},
+      bad_request: Schemas.error("Invalid id"),
+      forbidden: Schemas.error("Not a group admin")
     ]
   )
 
@@ -196,9 +169,9 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
     ],
     request_body: {"Unmute", "application/json", @unmute_request},
     responses: [
-      ok: {"Unmuted", "application/json", %Schema{type: :object}},
-      bad_request: {"Invalid id", "application/json", %Schema{type: :object}},
-      forbidden: {"Not a group admin", "application/json", %Schema{type: :object}}
+      ok: {"Unmuted", "application/json", DeletedCountResponse},
+      bad_request: Schemas.error("Invalid id"),
+      forbidden: Schemas.error("Not a group admin")
     ]
   )
 
@@ -227,13 +200,8 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
       ]
     ],
     responses: [
-      ok:
-        {"Mutes", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{data: %Schema{type: :array, items: @mute_schema}, meta: @meta_schema}
-         }},
-      forbidden: {"Not a group admin", "application/json", %Schema{type: :object}}
+      ok: {"Mutes", "application/json", ChatMuteRecordPage},
+      forbidden: Schemas.error("Not a group admin")
     ]
   )
 
@@ -252,9 +220,9 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
     security: [%{"authorization" => []}],
     request_body: {"Mute", "application/json", @mute_request},
     responses: [
-      ok: {"Muted", "application/json", @mute_schema},
-      bad_request: {"Not in a party or invalid id", "application/json", %Schema{type: :object}},
-      forbidden: {"Not the party leader", "application/json", %Schema{type: :object}}
+      ok: {"Muted", "application/json", ChatMuteRecordResponse},
+      bad_request: Schemas.error("Not in a party or invalid id"),
+      forbidden: Schemas.error("Not the party leader")
     ]
   )
 
@@ -274,9 +242,9 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
     security: [%{"authorization" => []}],
     request_body: {"Unmute", "application/json", @unmute_request},
     responses: [
-      ok: {"Unmuted", "application/json", %Schema{type: :object}},
-      bad_request: {"Not in a party or invalid id", "application/json", %Schema{type: :object}},
-      forbidden: {"Not the party leader", "application/json", %Schema{type: :object}}
+      ok: {"Unmuted", "application/json", DeletedCountResponse},
+      bad_request: Schemas.error("Not in a party or invalid id"),
+      forbidden: Schemas.error("Not the party leader")
     ]
   )
 
@@ -303,13 +271,8 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
       ]
     ],
     responses: [
-      ok:
-        {"Mutes", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{data: %Schema{type: :array, items: @mute_schema}, meta: @meta_schema}
-         }},
-      forbidden: {"Not the party leader", "application/json", %Schema{type: :object}}
+      ok: {"Mutes", "application/json", ChatMuteRecordPage},
+      forbidden: Schemas.error("Not the party leader")
     ]
   )
 
@@ -328,7 +291,7 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
   defp do_mute(conn, params, scope, scope_ref_id, actor) do
     case target_id(params) do
       nil ->
-        conn |> put_status(:bad_request) |> json(%{error: "invalid_target_user_id"})
+        reply_error(conn, :bad_request, "invalid_target_user_id")
 
       target_user_id ->
         attrs = %{
@@ -339,15 +302,13 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
 
         case Chat.mute_user(target_user_id, scope, scope_ref_id, attrs) do
           {:ok, mute} ->
-            json(conn, %{data: serialize(mute)})
+            reply_data(conn, serialize(mute))
 
           {:error, %Ecto.Changeset{} = changeset} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: "invalid", details: changeset_errors(changeset)})
+            unprocessable(conn, changeset)
 
           {:error, reason} ->
-            conn |> put_status(:unprocessable_entity) |> json(%{error: to_string(reason)})
+            reply_error(conn, :unprocessable_entity, reason)
         end
     end
   end
@@ -355,11 +316,11 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
   defp do_unmute(conn, params, scope, scope_ref_id) do
     case target_id(params) do
       nil ->
-        conn |> put_status(:bad_request) |> json(%{error: "invalid_target_user_id"})
+        reply_error(conn, :bad_request, "invalid_target_user_id")
 
       target_user_id ->
         {:ok, count} = Chat.unmute_user(target_user_id, scope, scope_ref_id)
-        json(conn, %{ok: true, removed: count})
+        reply_data(conn, %{deleted: count})
     end
   end
 
@@ -370,10 +331,7 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
     mutes = Chat.list_mutes(filters, page: page, page_size: page_size)
     total_count = Chat.count_mutes(filters)
 
-    json(conn, %{
-      data: Enum.map(mutes, &serialize/1),
-      meta: GamendWeb.Pagination.meta(page, page_size, length(mutes), total_count)
-    })
+    reply_page(conn, Enum.map(mutes, &serialize/1), page, page_size, total_count)
   end
 
   defp serialize(mute) do
@@ -399,37 +357,11 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
     Map.get(params, key) || Map.get(params, String.to_atom(key))
   end
 
-  defp with_user(conn, fun) do
-    case Scope.user(conn.assigns[:current_scope]) do
-      %User{} = user -> fun.(user)
-      _ -> conn |> put_status(:unauthorized) |> json(%{error: "Not authenticated"})
-    end
-  end
-
-  defp with_lobby(conn, fun) do
-    with_user(conn, fn user ->
-      if is_nil(user.lobby_id) do
-        conn |> put_status(:bad_request) |> json(%{error: "not_in_lobby"})
-      else
-        fun.(user, Lobbies.get_lobby!(user.lobby_id))
-      end
-    end)
-  end
-
-  defp with_party(conn, fun) do
-    with_user(conn, fn user ->
-      case user.party_id && Parties.get_party(user.party_id) do
-        %Parties.Party{} = party -> fun.(user, party)
-        _ -> conn |> put_status(:bad_request) |> json(%{error: "not_in_party"})
-      end
-    end)
-  end
-
   defp with_group_admin(conn, group_id, fun) do
     with_user(conn, fn user ->
       case Gamend.UUIDv7.cast_or_nil(group_id) do
         nil ->
-          conn |> put_status(:bad_request) |> json(%{error: "invalid_id"})
+          reply_error(conn, :bad_request, "invalid_id")
 
         group_id ->
           if Groups.can_manage_group?(user.id, group_id) do
@@ -441,13 +373,5 @@ defmodule GamendWeb.Api.V1.ChatMuteController do
     end)
   end
 
-  defp forbidden(conn, reason), do: conn |> put_status(:forbidden) |> json(%{error: reason})
-
-  defp changeset_errors(%Ecto.Changeset{} = changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
-  end
+  defp forbidden(conn, reason), do: reply_error(conn, :forbidden, reason)
 end

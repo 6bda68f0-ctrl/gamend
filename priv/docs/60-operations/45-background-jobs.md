@@ -71,7 +71,7 @@ Six queues, sized in `config :gamend_core, Oban`:
 | `mailers` | 5 | Account email, e.g. inactivity warnings |
 | `storage` | 5 | Object-storage work, e.g. avatar mirroring |
 
-The engine is picked at runtime from the Repo's actual adapter: Postgres runs the Basic engine with the numbers above, SQLite runs the Lite engine with every queue capped at concurrency 2 and staging slowed to every 5 seconds. SQLite takes a single database-wide write lock, so Postgres-sized parallelism only converts into lock contention, so SQLite hosts get the same throughput without the pile-up.
+The engine is picked at boot from the adapter in the Repo's configuration: Postgres runs the Basic engine with the numbers above, SQLite runs the Lite engine with every queue capped at concurrency 2 and staging slowed to every 5 seconds. SQLite takes a single database-wide write lock, where Postgres-sized parallelism only turns into lock contention; the smaller numbers give SQLite hosts the same throughput without the pile-up.
 
 ## Operations
 

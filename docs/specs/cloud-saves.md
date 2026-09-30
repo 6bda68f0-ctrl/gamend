@@ -95,7 +95,7 @@ CloudSaves.delete_slot(user_id, slot)              # removes row + all version b
 Both dispatched after commit, never inside the update; RPC-blocked;
 SDK-mirrored in all six places.
 
-## Limits (`Gamend.Limits`, auto `LIMIT_*`, `@limit_categories`)
+## Limits (`Gamend.Limits`, auto `GAMEND_LIMITS_*`, `@limit_categories`)
 
 `max_save_slots_per_user`, `max_save_bytes`, `max_inline_save_bytes`,
 `max_save_versions_kept`.
@@ -112,9 +112,10 @@ SDK-mirrored in all six places.
 
 - **README** Features: Cloud saves. **CHANGELOG** `[added]` Cloud saves
   (versioned slots).
-- **.env.example** — the `LIMIT_*` caps (storage vars already documented).
-- **host_public_docs/** — new Cloud saves page (slots, versioning, conflict flow,
-  reuse of the presigned upload); Data Schema gains `save_slots` / `save_versions`.
+- **.env.example** — regenerate (`mix gamend.settings.env_example`) for the `GAMEND_LIMITS_*` caps (storage vars already documented).
+- **Guide** — new markdown page in `priv/docs/45-storage/` (slots, versioning,
+  conflict flow, reuse of the presigned upload); `priv/docs/10-setup/40-data-schema.md`
+  gains `save_slots` / `save_versions`.
 - **api_spec.ex** — feature list + save endpoints (+ realtime `save_updated`
   event if we push cross-device — see deferred).
 - **SDK** — `CloudSaves` stub + struct stubs; `@sdk_modules`, `gen.sdk`,

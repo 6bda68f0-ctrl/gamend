@@ -35,7 +35,10 @@ In your Facebook App dashboard:
 Go to "Facebook Login" → "Settings":
 
 1. Add these Valid OAuth Redirect URIs:
- Development: http://localhost:4000/auth/facebook/callback Production: https://example.com/auth/facebook/callback
+   ```text
+   Development: http://localhost:4000/auth/facebook/callback
+   Production:  https://example.com/auth/facebook/callback
+   ```
 2. Click "Save Changes"
 
 ## Get the app credentials
@@ -45,11 +48,12 @@ Go to "Settings" → "Basic":
 1. Copy the "App ID" (this is your Client ID)
 2. Click "Show" next to "App Secret" and copy it (this is your Client Secret)
 
-Your Credentials
+They look like this:
 
-App ID: 1234567890123456
-
+```text
+App ID:     1234567890123456
 App Secret: abcdef1234567890abcdef1234567890
+```
 
 ## Make the app public (production)
 
@@ -75,6 +79,6 @@ GAMEND_OAUTH_FACEBOOK_CLIENT_SECRET="your_app_secret"
 After deploying with the secrets:
 
 1. Go to your app's login page
-2. Click "Sign in with Facebook"
+2. Click "Log in with Facebook"
 3. Authorize the application with your Facebook account
 4. You should be redirected back and logged in

@@ -32,7 +32,6 @@ defmodule Gamend.Inventory do
 
   import Ecto.Query
 
-  alias Gamend.Accounts.User
   alias Gamend.Inventory.Item
   alias Gamend.Inventory.LedgerEntry
   alias Gamend.Repo
@@ -92,6 +91,13 @@ defmodule Gamend.Inventory do
       not valid_item?(item) ->
         {:error, :invalid_item}
 
+      # Checked before the write: SQLite cannot tell Ecto which constraint an
+      # INSERT violated, so the item stack's foreign key surfaced as a raised
+      # `Ecto.ConstraintError` rather than an error tuple — a 500 on an admin
+      # grant naming a stale user. See `Gamend.Accounts.user_exists?/1`.
+      not Gamend.Accounts.user_exists?(user_id) ->
+        {:error, :user_not_found}
+
       idem && idem_applied?(idem) ->
         {:ok, quantity(user_id, item)}
 
@@ -115,25 +121,11 @@ defmodule Gamend.Inventory do
   end
 
   defp run_change(user_id, item, delta, reason, idem, metadata) do
-    result =
-      Repo.transaction(fn ->
-        case apply_delta(user_id, item, delta) do
-          {:ok, new_qty} ->
-            record_ledger(user_id, item, delta, new_qty, reason, idem, metadata)
-            new_qty
-
-          {:error, err} ->
-            Repo.rollback(err)
-        end
-      end)
-
-    case result do
-      {:ok, new_qty} -> {:ok, new_qty}
-      # Lost the race to a concurrent request with the same idempotency key —
-      # the other one applied it; return the resulting quantity.
-      {:error, :idempotent_replay} -> {:ok, quantity(user_id, item)}
-      {:error, err} -> {:error, err}
-    end
+    Gamend.Ledger.change(
+      fn -> apply_delta(user_id, item, delta) end,
+      fn new_qty -> record_ledger(user_id, item, delta, new_qty, reason, idem, metadata) end,
+      fn -> quantity(user_id, item) end
+    )
   end
 
   defp apply_delta(user_id, item, delta) when delta > 0 do
@@ -178,13 +170,8 @@ defmodule Gamend.Inventory do
     })
     |> Repo.insert()
     |> case do
-      {:ok, entry} ->
-        entry
-
-      {:error, changeset} ->
-        if Keyword.has_key?(changeset.errors, :idempotency_key),
-          do: Repo.rollback(:idempotent_replay),
-          else: Repo.rollback({:ledger_error, changeset})
+      {:ok, entry} -> entry
+      {:error, changeset} -> Gamend.Ledger.rollback_insert_error(changeset, :ledger_error)
     end
   end
 
@@ -221,8 +208,7 @@ defmodule Gamend.Inventory do
   defp topic(user_id), do: @topic_prefix <> user_id
 
   defp broadcast(user_id, item, quantity, delta) do
-    Phoenix.PubSub.broadcast(
-      Gamend.PubSub,
+    Gamend.Broadcast.publish(
       topic(user_id),
       {:inventory_updated, %{item: item, quantity: quantity, delta: delta}}
     )
@@ -254,13 +240,7 @@ defmodule Gamend.Inventory do
 
   @doc false
   @spec list_ledger(keyword()) :: [LedgerEntry.t()]
-  def list_ledger(opts \\ []) do
-    ledger_query(opts)
-    |> order_by([l], desc: l.inserted_at, desc: l.id)
-    |> paginate(opts)
-    |> preload(:user)
-    |> Repo.all()
-  end
+  def list_ledger(opts \\ []), do: opts |> ledger_query() |> Gamend.Ledger.list_entries(opts)
 
   @doc false
   @spec count_ledger(keyword()) :: non_neg_integer()
@@ -275,31 +255,8 @@ defmodule Gamend.Inventory do
   end
 
   defp maybe_filter(query, _field, nil), do: query
-  defp maybe_filter(query, :user_id, value), do: filter_user(query, value)
+  defp maybe_filter(query, :user_id, value), do: Gamend.Query.filter_user(query, value)
   defp maybe_filter(query, :item, value), do: where(query, [q], q.item == ^value)
 
-  # Accept either an exact user id (UUID) or a username/display-name substring.
-  defp filter_user(query, value) do
-    case Ecto.UUID.cast(value) do
-      {:ok, uuid} ->
-        where(query, [q], q.user_id == ^uuid)
-
-      :error ->
-        pattern = "%" <> Repo.escape_like(String.downcase(value)) <> "%"
-
-        query
-        |> join(:inner, [q], u in User, on: u.id == q.user_id)
-        |> where(
-          [q, u],
-          fragment("lower(coalesce(?, '')) LIKE ? ESCAPE '\\'", u.username, ^pattern) or
-            fragment("lower(coalesce(?, '')) LIKE ? ESCAPE '\\'", u.display_name, ^pattern)
-        )
-    end
-  end
-
-  defp paginate(query, opts) do
-    page = max(Keyword.get(opts, :page, 1), 1)
-    page_size = Keyword.get(opts, :page_size, 25)
-    query |> limit(^page_size) |> offset(^((page - 1) * page_size))
-  end
+  defp paginate(query, opts), do: Gamend.Query.page(query, opts)
 end

@@ -510,15 +510,14 @@ defmodule Gamend.ClientLogs do
 
   Options: `:user_id`, `:platform`, `:build`, `:app_version`, `:lobby_id`,
   `:errors_only`, `:query` (matches session id or device id), `:since`,
-  `:until`, `:limit`, `:offset`.
+  `:until`, `:page`, `:page_size`.
   """
   @spec list_sessions(keyword()) :: [Session.t()]
   def list_sessions(opts \\ []) do
     Session
     |> filter_sessions(opts)
     |> order_by([s], desc: s.last_seen_at)
-    |> limit(^Keyword.get(opts, :limit, 100))
-    |> offset(^Keyword.get(opts, :offset, 0))
+    |> Gamend.Query.page(opts)
     |> preload(:user)
     |> Repo.all()
   end

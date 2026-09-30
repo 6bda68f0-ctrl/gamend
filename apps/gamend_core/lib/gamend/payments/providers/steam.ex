@@ -6,6 +6,9 @@ defmodule Gamend.Payments.Providers.Steam do
   API. Use `PAYMENTS_ENVIRONMENT=sandbox` while testing.
   """
 
+  @behaviour Gamend.Payments.Provider
+
+  alias Gamend.Payments.Params
   alias Gamend.Payments.ProviderConfig
 
   @production_base_url "https://partner.steam-api.com/ISteamMicroTxn"
@@ -24,7 +27,7 @@ defmodule Gamend.Payments.Providers.Steam do
   end
 
   def init_transaction(purchase, provider_product, attrs) do
-    attrs = normalize_params(attrs)
+    attrs = Params.normalize(attrs)
 
     with {:ok, key} <- required_api_key(),
          {:ok, appid} <- required_app_id(),
@@ -75,7 +78,7 @@ defmodule Gamend.Payments.Providers.Steam do
   end
 
   def validate_purchase(_user, attrs) when is_map(attrs) do
-    attrs = normalize_params(attrs)
+    attrs = Params.normalize(attrs)
 
     with {:ok, body} <- query_transaction(attrs) do
       {:ok, normalize_query_purchase(body)}
@@ -83,7 +86,7 @@ defmodule Gamend.Payments.Providers.Steam do
   end
 
   def query_transaction(attrs) when is_map(attrs) do
-    attrs = normalize_params(attrs)
+    attrs = Params.normalize(attrs)
 
     with {:ok, key} <- required_api_key(),
          {:ok, appid} <- required_app_id() do
@@ -104,7 +107,7 @@ defmodule Gamend.Payments.Providers.Steam do
   end
 
   def get_report(attrs \\ %{}) do
-    attrs = normalize_params(attrs)
+    attrs = Params.normalize(attrs)
 
     with {:ok, key} <- required_api_key(),
          {:ok, appid} <- required_app_id(),
@@ -171,7 +174,7 @@ defmodule Gamend.Payments.Providers.Steam do
 
     case http_client().post(url, form: form) do
       {:ok, %{status: status, body: body}} when status in 200..299 and is_map(body) ->
-        body = normalize_params(body)
+        body = Params.normalize(body)
 
         if steam_ok?(body) do
           {:ok, body}
@@ -192,7 +195,7 @@ defmodule Gamend.Payments.Providers.Steam do
 
     case http_client().get(url, params: params) do
       {:ok, %{status: status, body: body}} when status in 200..299 and is_map(body) ->
-        body = normalize_params(body)
+        body = Params.normalize(body)
 
         if steam_ok?(body) do
           {:ok, body}
@@ -278,7 +281,7 @@ defmodule Gamend.Payments.Providers.Steam do
   end
 
   defp http_client do
-    Application.get_env(:gamend_core, :payments_http_client, Req)
+    Application.get_env(:gamend_core, :payments_http_client, Gamend.HTTP)
   end
 
   # The app_key is the declared setting name, so this resolves through
@@ -288,18 +291,6 @@ defmodule Gamend.Payments.Providers.Steam do
   end
 
   defp present?(value), do: is_binary(value) and value != ""
-
-  defp normalize_params(attrs) when is_map(attrs) do
-    Map.new(attrs, fn
-      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-      {k, v} when is_map(v) -> {k, normalize_params(v)}
-      {k, v} when is_list(v) -> {k, Enum.map(v, &normalize_nested/1)}
-      {k, v} -> {k, v}
-    end)
-  end
-
-  defp normalize_nested(value) when is_map(value), do: normalize_params(value)
-  defp normalize_nested(value), do: value
 
   # Prefers the account's linked `steam_id`; falls back to the supplied one only
   # when the account has none linked yet, and then only if they agree.

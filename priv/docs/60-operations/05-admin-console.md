@@ -21,7 +21,7 @@ A user with `is_admin` set can open the console; everyone else gets redirected. 
 
 | Page | What it does |
 |---|---|
-| [/admin/lobbies](/admin/lobbies) | Browse, create, edit and delete lobbies; add or kick members; cancel a stuck ready check. `/admin/lobbies/live` is the same realtime lobby browser players see. |
+| [/admin/lobbies](/admin/lobbies) | Browse, create, edit and delete lobbies; add or kick members; cancel a stuck ready check. `/admin/lobbies/live` is a realtime lobby browser, admin-only. |
 | [/admin/parties](/admin/parties) | The same operations for parties: create, edit, disband, add and kick members. |
 | [/admin/groups](/admin/groups) | Group CRUD plus member management — promote, demote and kick from the members drawer. |
 | [/admin/blacklist](/admin/blacklist) | Every block in the system, filterable by a user on either side, with force-unblock for support cases. |

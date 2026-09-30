@@ -80,7 +80,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
       {:ok, group} = Groups.create_group(owner.id, %{"title" => "Shown"})
 
       conn = get(conn, "/api/v1/groups/#{group.id}")
-      resp = json_response(conn, 200)
+      resp = json_response(conn, 200)["data"]
       assert %{"id" => _, "title" => "Shown"} = resp
       assert Map.has_key?(resp, "creator_name")
     end
@@ -109,7 +109,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(user)
         |> post("/api/v1/groups", %{title: "Created", type: "public"})
 
-      resp = json_response(conn, 201)
+      resp = json_response(conn, 201)["data"]
       assert %{"id" => _, "title" => "Created"} = resp
       assert Map.has_key?(resp, "creator_name")
     end
@@ -142,7 +142,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         # update the title
         |> patch("/api/v1/groups/#{group.id}", %{title: "New"})
 
-      assert %{"title" => "New"} = json_response(conn, 200)
+      assert %{"title" => "New"} = json_response(conn, 200)["data"]
     end
 
     test "non-admin cannot update", %{conn: conn} do
@@ -188,7 +188,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(joiner)
         |> post("/api/v1/groups/#{group.id}/join")
 
-      assert %{"status" => "pending"} = json_response(conn, 201)
+      assert %{"status" => "pending"} = json_response(conn, 201)["data"]
       refute Groups.member?(group.id, joiner.id)
     end
 
@@ -352,6 +352,22 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
       assert json_response(conn, 200)
       assert Groups.can_manage_group?(target.id, group.id)
     end
+
+    test "answers 409 already_admin for an admin", %{conn: conn} do
+      owner = create_user()
+      target = create_user()
+      :ok = AccountsFixtures.befriend(owner, target)
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "PromoTwice", "type" => "public"})
+      {:ok, _} = Groups.join_group(target.id, group.id)
+      {:ok, _} = Groups.promote_member(owner.id, group.id, target.id)
+
+      conn =
+        conn
+        |> auth_conn(owner)
+        |> post("/api/v1/groups/#{group.id}/promote", %{target_user_id: target.id})
+
+      assert json_response(conn, 409)["error"] == "already_admin"
+    end
   end
 
   describe "POST /api/v1/groups/:id/demote" do
@@ -371,6 +387,21 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
       assert json_response(conn, 200)
       refute Groups.can_manage_group?(target.id, group.id)
     end
+
+    test "answers 409 already_member for a plain member", %{conn: conn} do
+      owner = create_user()
+      target = create_user()
+      :ok = AccountsFixtures.befriend(owner, target)
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "DemoTwice", "type" => "public"})
+      {:ok, _} = Groups.join_group(target.id, group.id)
+
+      conn =
+        conn
+        |> auth_conn(owner)
+        |> post("/api/v1/groups/#{group.id}/demote", %{target_user_id: target.id})
+
+      assert json_response(conn, 409)["error"] == "already_member"
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -388,7 +419,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(other)
         |> post("/api/v1/groups/#{group.id}/join")
 
-      assert %{"status" => "pending"} = json_response(conn, 201)
+      assert %{"status" => "pending"} = json_response(conn, 201)["data"]
     end
 
     test "returns 201 when user already requested (idempotent)", %{conn: conn} do
@@ -451,7 +482,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(owner)
         |> post("/api/v1/groups/#{group.id}/join_requests/#{request.id}/reject")
 
-      assert %{"status" => "rejected"} = json_response(conn, 200)
+      assert %{"status" => "rejected"} = json_response(conn, 200)["data"]
     end
   end
 
@@ -570,7 +601,22 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(owner)
         |> post("/api/v1/groups/#{group.id}/invite", %{target_user_id: target.id})
 
-      assert %{"status" => "invited"} = json_response(conn, 200)
+      assert %{"status" => "invited"} = json_response(conn, 200)["data"]
+    end
+
+    test "answers 409 already_member for a member", %{conn: conn} do
+      owner = create_user()
+      target = create_user()
+      :ok = AccountsFixtures.befriend(owner, target)
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "InvMember", "type" => "public"})
+      {:ok, _} = Groups.join_group(target.id, group.id)
+
+      conn =
+        conn
+        |> auth_conn(owner)
+        |> post("/api/v1/groups/#{group.id}/invite", %{target_user_id: target.id})
+
+      assert json_response(conn, 409)["error"] == "already_member"
     end
 
     test "auto-approves pending join request via invite endpoint", %{conn: conn} do
@@ -588,7 +634,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(owner)
         |> post("/api/v1/groups/#{group.id}/invite", %{target_user_id: target.id})
 
-      assert %{"status" => "request_approved"} = json_response(conn, 200)
+      assert %{"status" => "request_approved"} = json_response(conn, 200)["data"]
       assert Groups.member?(group.id, target.id)
     end
 
@@ -665,7 +711,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(target)
         |> post("/api/v1/groups/invitations/#{invite.id}/decline")
 
-      assert %{"status" => "declined"} = json_response(conn, 200)
+      assert %{"ok" => true} = json_response(conn, 200)
       refute Groups.member?(group.id, target.id)
     end
 
@@ -698,7 +744,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(owner)
         |> get("/api/v1/groups/sent_invitations")
 
-      assert %{"data" => [%{"group_name" => "InvGrp", "recipient_id" => _}]} =
+      assert %{"data" => [%{"group_title" => "InvGrp", "recipient_id" => _}]} =
                json_response(conn, 200)
     end
 
@@ -734,7 +780,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(owner)
         |> delete("/api/v1/groups/sent_invitations/#{inv_id}")
 
-      assert %{"status" => "cancelled"} = json_response(conn, 200)
+      assert %{"ok" => true} = json_response(conn, 200)
       assert Groups.list_sent_invitations(owner.id) == []
     end
 
@@ -852,7 +898,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(owner)
         |> post("/api/v1/groups/#{group.id}/icon/upload_url", %{"content_type" => "image/png"})
 
-      body = json_response(conn, 200)
+      body = json_response(conn, 200)["data"]
       assert String.starts_with?(body["key"], "icons/groups/#{group.id}/")
       assert String.ends_with?(body["key"], ".png")
     end
@@ -887,7 +933,7 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
         |> auth_conn(owner)
         |> post("/api/v1/groups/#{group.id}/icon", %{"key" => key})
 
-      body = json_response(conn, 200)
+      body = json_response(conn, 200)["data"]
       assert body["icon_url"] == Gamend.Storage.url(key)
     end
 

@@ -256,8 +256,8 @@ defmodule GamendWeb.Router.Shared do
 
       gamend_search_routes()
 
-      # Serve stored objects (local backend). With S3 the object URL points at the
-      # bucket and this route is unused.
+      # Serve stored objects. The local backend serves the bytes; a private S3
+      # bucket (no public_url) redirects to a freshly signed link.
       scope "/", GamendWeb.Api.V1, as: :api_v1 do
         pipe_through :browser
 
@@ -315,6 +315,7 @@ defmodule GamendWeb.Router.Shared do
         get "/health", HealthController, :index
         get "/time", TimeController, :show
         post "/login", SessionController, :create
+        post "/register", SessionController, :register
         post "/login/device", SessionController, :create_device
         post "/refresh", SessionController, :refresh
         delete "/logout", SessionController, :delete
@@ -505,6 +506,13 @@ defmodule GamendWeb.Router.Shared do
         post "/payments/checkout/steam", PaymentController, :steam_checkout
         post "/payments/steam/finalize", PaymentController, :steam_finalize
         post "/payments/validate/:provider", PaymentController, :validate
+        # Linking a provider to the signed-in account; signing in with one is
+        # `/api/v1/auth`. The fixed paths are declared before `:provider` ones.
+        post "/me/providers/google/id_token", ProviderController, :link_google_id_token
+        post "/me/providers/apple/ios", ProviderController, :link_apple_ios
+        get "/me/providers/sessions/:session_id", ProviderController, :link_session_status
+        post "/me/providers/:provider/authorize", ProviderController, :authorize
+        post "/me/providers/:provider", ProviderController, :link
         delete "/me/providers/:provider", ProviderController, :unlink
         post "/me/device", ProviderController, :link_device
         delete "/me/device", ProviderController, :unlink_device
@@ -709,6 +717,7 @@ defmodule GamendWeb.Router.Shared do
         delete "/sessions/:id", SessionController, :delete
         delete "/users/:id/sessions", SessionController, :delete_user_sessions
         get "/storage", StorageController, :index
+        get "/storage/usage", StorageController, :usage
         delete "/storage", StorageController, :delete
         put "/storage/object", StorageController, :upload
         get "/storage/object", StorageController, :download
@@ -747,6 +756,7 @@ defmodule GamendWeb.Router.Shared do
         post "/chat/mutes", ChatModerationController, :create_mute
         delete "/chat/mutes/:id", ChatModerationController, :delete_mute
         get "/chat/filter_words", ChatModerationController, :list_filter_words
+        get "/chat/filter_words/languages", ChatModerationController, :filter_languages
         post "/chat/filter_words", ChatModerationController, :create_filter_word
         patch "/chat/filter_words/:id", ChatModerationController, :update_filter_word
         delete "/chat/filter_words/:id", ChatModerationController, :delete_filter_word
@@ -971,6 +981,10 @@ defmodule GamendWeb.Router.Shared do
       if blog do
         quote do
           live "/blog", unquote(blog), :index
+          # The feeds before `:slug`, which would otherwise take "rss.xml"
+          # for a post and 404 it.
+          get "/blog/rss.xml", BlogFeedController, :rss
+          get "/blog/atom.xml", BlogFeedController, :atom
           live "/blog/:slug", unquote(blog), :show
         end
       end
@@ -980,7 +994,8 @@ defmodule GamendWeb.Router.Shared do
         pipe_through [:browser | unquote(extra_pipelines)]
 
         live_session :current_user,
-          on_mount: unquote(on_mount) do
+          on_mount: unquote(on_mount),
+          session: {GamendWeb.LiveHelpers, :client_ip_session, []} do
           unquote(host_routes)
 
           live "/users/register", UserLive.Registration, :new

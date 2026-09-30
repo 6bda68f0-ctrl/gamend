@@ -66,6 +66,26 @@ defmodule GamendWeb.SearchPaletteShellTest do
     assert html =~ ~s(data-index-url="/search/index.json?locale=de")
   end
 
+  # `search_palette.js` closes on "the click did not land in the panel", so the
+  # panel has to be findable. It is also the reason nothing may cover this
+  # dialog's `::backdrop`: daisyUI's `.modal-backdrop` div used to sit over it
+  # and swallow every click aimed at closing the palette.
+  #
+  # Scoped to the dialog, because the language sheet on the same page is a real
+  # daisyUI modal and brings a `.modal-backdrop` of its own.
+  test "the panel is marked, and nothing covers the backdrop", %{conn: conn} do
+    dialog = conn |> get("/privacy") |> html_response(200) |> search_dialog()
+
+    assert count(dialog, ~r/data-gamend-search-panel/) == 1
+    refute dialog =~ "modal-backdrop"
+  end
+
+  defp search_dialog(html) do
+    [_before, rest] = String.split(html, ~s(id="gamend-search"), parts: 2)
+    [dialog, _after] = String.split(rest, "</dialog>", parts: 2)
+    dialog
+  end
+
   @tag provider: false
   test "turning search off removes the button and the dialog", %{conn: conn} do
     html = conn |> get("/privacy") |> html_response(200)

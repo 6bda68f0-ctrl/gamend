@@ -92,23 +92,48 @@ defmodule GamendWeb.UserLive.Login do
               label={gettext("Password")}
               autocomplete="current-password"
             />
-            <.button class="btn btn-primary w-full" name={@form[:remember_me].name} value="true">
-              {gettext("Log in and remember me")} <span aria-hidden="true">→</span>
-            </.button>
-            <.button class="btn btn-primary btn-soft w-full mt-2">
-              {gettext("Log in")}
+            <%!-- `@form`, not `f`: a `:let` variable re-renders with the slot, and
+                  a re-render would put the box back to checked under the player. --%>
+            <div class="flex items-center justify-between gap-2">
+              <.input
+                field={@form[:remember_me]}
+                type="checkbox"
+                label={gettext("Remember me")}
+                checked
+              />
+              <%!-- There is no reset flow: a magic link logs the player in, and
+                    the Account page takes a new password without asking for the old one. --%>
+              <button
+                type="button"
+                id="forgot_password_link"
+                class="mb-2 text-sm font-semibold text-brand hover:underline"
+                phx-click={
+                  JS.show(to: "#forgot_password_hint")
+                  |> JS.focus(to: "#login_form_magic input[type=email]")
+                }
+              >
+                {gettext("Forgot password?")}
+              </button>
+            </div>
+            <p id="forgot_password_hint" class="hidden text-sm text-base-content/70 mb-2">
+              {gettext(
+                "Send yourself a magic link to log in, then set a new password on your Account page."
+              )}
+            </p>
+            <.button class="btn btn-primary w-full">
+              {gettext("Log in")} <span aria-hidden="true">→</span>
             </.button>
           </.form>
         </div>
 
-        <.oauth_buttons label={gettext("Log in")} />
+        <.oauth_buttons action={:login} />
       </div>
     </Layouts.app>
     """
   end
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     current_user = Scope.user(socket.assigns[:current_scope])
 
     email =
@@ -117,7 +142,7 @@ defmodule GamendWeb.UserLive.Login do
 
     form = to_form(%{"email" => email}, as: "user")
 
-    client_ip = GamendWeb.LiveHelpers.client_ip(socket)
+    client_ip = GamendWeb.LiveHelpers.client_ip(socket, session)
 
     {:ok,
      assign(socket,
@@ -150,7 +175,8 @@ defmodule GamendWeb.UserLive.Login do
         deliver_magic_link(user)
       end
 
-      info = gettext("Success.")
+      info =
+        gettext("If that email has an account, we sent it a login link. Check your inbox.")
 
       {:noreply,
        socket
@@ -166,7 +192,7 @@ defmodule GamendWeb.UserLive.Login do
     end
   end
 
-  # The player is always told "Success." so this cannot be used to probe which
+  # The player always gets the same message so this cannot be used to probe which
   # emails exist — which also means a failure here is invisible unless it is
   # logged. A raise (a locked database, an unreachable relay) would otherwise
   # only kill the event and look like the button did nothing.

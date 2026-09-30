@@ -17,6 +17,11 @@ defmodule Gamend.Theme.JSONConfig do
   The decoded file is cached in `:persistent_term`; translation happens per
   read, against the caller's current locale. Call `reload/0` after editing the
   file at runtime.
+
+  `reload/0` emits the telemetry event `[:gamend, :theme, :reload]` once the
+  cache is cleared, so work derived from the file can follow it without core
+  knowing who does it: the web app cuts the responsive image variants a new
+  config asks for (`GamendWeb.ResponsiveImages`).
   """
 
   @behaviour Gamend.Theme
@@ -81,7 +86,13 @@ defmodule Gamend.Theme.JSONConfig do
   # the caller's", which is a different answer per process, and keying on nil
   # would serve the first caller's language to everyone.
   defp translate(config, locale) do
-    backend = gettext_backend()
+    case gettext_backend() do
+      nil -> config
+      backend -> translate_with(config, backend, locale)
+    end
+  end
+
+  defp translate_with(config, backend, locale) do
     resolved = locale || Gettext.get_locale(backend)
 
     case :persistent_term.get({__MODULE__, :translated, backend, resolved}, :not_cached) do
@@ -107,10 +118,21 @@ defmodule Gamend.Theme.JSONConfig do
 
   # Resolved at runtime so a host can point the theme at its own backend, the
   # same one GettextSync drives for the rest of the UI.
+  #
+  # The last resort is `GamendWeb.Gettext`, which is the only place core reaches
+  # up into gamend_web — and gamend_core does not depend on gamend_web, so for a
+  # bare-core consumer that module does not exist. Resolved by name rather than
+  # referenced directly, so the theme is served untranslated there instead of
+  # raising UndefinedFunctionError.
   defp gettext_backend do
     Application.get_env(:gamend_core, :theme_gettext_backend) ||
       Application.get_env(:gamend_web, :host_gettext_backend) ||
-      GamendWeb.Gettext
+      default_backend()
+  end
+
+  defp default_backend do
+    backend = Module.concat([:GamendWeb, :Gettext])
+    if Code.ensure_loaded?(backend), do: backend
   end
 
   defp do_get_theme do
@@ -147,6 +169,10 @@ defmodule Gamend.Theme.JSONConfig do
     for {{mod, :translated, _backend, _locale} = key, _value} <- :persistent_term.get(),
         mod == __MODULE__,
         do: :persistent_term.erase(key)
+
+    :telemetry.execute([:gamend, :theme, :reload], %{system_time: System.system_time()}, %{
+      path: config_path()
+    })
 
     :ok
   end
@@ -185,13 +211,19 @@ defmodule Gamend.Theme.JSONConfig do
 
   defp normalize_path_env(_value), do: nil
 
+  # The web app ships the default theme files, but the core runs without it
+  # (its own suite, a host that only uses the contexts), where `priv_dir/1`
+  # answers `{:error, :bad_name}` rather than a path.
+  defp web_priv_candidate(path) do
+    case :code.priv_dir(:gamend_web) do
+      dir when is_list(dir) -> [Path.join(dir, path)]
+      {:error, _not_loaded} -> []
+    end
+  end
+
   defp read_json(path) when is_binary(path) do
     # If the path is relative to the project root, check it directly.
-    candidates = [
-      path,
-      Path.join(File.cwd!(), path),
-      Path.join(:code.priv_dir(:gamend_web), path)
-    ]
+    candidates = [path, Path.join(File.cwd!(), path)] ++ web_priv_candidate(path)
 
     Enum.find_value(candidates, :error, fn p ->
       try_decode_file(p)
@@ -209,7 +241,7 @@ defmodule Gamend.Theme.JSONConfig do
   end
 
   defp normalize_asset_paths(map) when is_map(map) do
-    Enum.reduce(["css", "logo", "banner", "favicon"], map, fn key, acc ->
+    Enum.reduce(["css", "logo", "logo_dark", "banner", "favicon"], map, fn key, acc ->
       case Map.get(acc, key) do
         value when is_binary(value) -> Map.put(acc, key, normalize_path(value))
         _ -> acc

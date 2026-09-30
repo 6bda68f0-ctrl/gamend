@@ -20,7 +20,7 @@ Every path in runs through the same guarded insert: the group's `max_members` ca
 
 The creator becomes an admin; everyone else starts as `member`. Admins - all of them, not just the creator - update the group, kick, promote, demote, invite, and handle join requests. Nobody promotes, demotes or kicks themselves.
 
-Leaving keeps the group governed: the last admin walking out promotes the longest-standing member before going, and the creator walking out passes `creator_id` to another admin. When the last member leaves, the group deletes itself - which is why DELETE on a group that still has members is refused with `has_members`.
+Leaving keeps the group governed: the last admin walking out promotes the longest-standing member before going, and the creator walking out passes `creator_id` to another admin. When the last member leaves, the group deletes itself, so players have no route to delete one. From server code, `Gamend.Groups.delete_group/2` refuses a group that still has members with `has_members`; the admin console and `DELETE /api/v1/admin/groups/:id` delete it outright.
 
 ## Join requests and invites
 

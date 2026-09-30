@@ -69,17 +69,18 @@ A Dictionary *without* `opts()` stays a map.
 
 | Works | Rejected at compile time |
 |---|---|
-| `func`, default arguments, `return` | `class_name`, `extends`, inner classes |
-| `var`, `const`, `=` `+=` `-=` `*=` `/=` `%=` | `signal` (use `Realtime.push_to_user`) |
-| `if` / `elif` / `else`, `match` (incl. `[a, b]` and `{"k": v}` patterns) | `Node`, `Resource`, any other engine type |
+| `func`, default arguments, `return` | `extends` at the top level (a script extends nothing) |
+| `class_name` at the top level ([more than one script](#more-than-one-script)) | a top-level `var` (no instance to hold it) |
+| `var`, `const`, `=` `+=` `-=` `*=` `/=` `%=` | `set` / `get` property accessors |
+| `if` / `elif` / `else`, `match` (incl. `[a, b]` and `{"k": v}` patterns) | `Node`, `Resource` or any other engine class used as a value (`Node.new()`) |
 | ternary (`x if c else y`), `is`, `as`, `assert()` | `preload`, `load`, `@onready`, `@tool` |
-| `for`, `while`, `break`, `continue`, `range()` | `_ready`, `_process` — there is no frame loop |
-| lambdas, `spawn()`, `await`, `signal` / `.emit()` | `Thread`, `WorkerThreadPool` |
-| inner `class` with `extends`, `Foo.new(...)` | `set` / `get` property accessors |
+| `for`, `while`, `break`, `continue`, `range()` | `Thread`, `WorkerThreadPool` (use `spawn()`) |
+| lambdas, `spawn()`, `await`, `signal` / `.emit()` | `d.key = v` — use `d["key"] = v` |
+| inner `class` (which may `extends` another inner class), `Foo.new(...)` | |
 | `Context.callv(name, args)` | |
-| `const` and `enum` at the top level, `static func` | a top-level `var` (no instance to hold it) |
+| `const` and `enum` at the top level, `static func` | |
 | `Array`, `Dictionary` (**by reference**), `Vector2`, `Vector3`, `Color` | |
-| `d[k] = v`, `d[k] += 1`, `xs[i] = v` | `d.key = v` — use `d["key"] = v` |
+| `d[k] = v`, `d[k] += 1`, `xs[i] = v` | |
 | methods — see below | |
 | `and` / `or` / `not`, comparisons, arithmetic, `%` formatting | |
 | single-line bodies (`if ready: return true`) | |
@@ -88,6 +89,10 @@ A Dictionary *without* `opts()` stays a map.
 
 Nothing is silently approximated. If a construct is not translated exactly, the
 compiler refuses it with a file and line.
+
+`_ready` and `_process` compile like any other `func`, but nothing calls them
+on its own: there is no frame loop, and a hook runs only when the server calls
+it.
 
 ## `match`
 
@@ -101,9 +106,11 @@ match reward.kind:
 		print("unhandled reward: " + unknown)
 ```
 
-Patterns are literals, `var name` to bind, `_` to catch everything, and
-comma-separated alternatives. Array and dictionary patterns are not supported.
-As in Godot, a `match` that matches nothing simply does nothing.
+Patterns are literals, `var name` to bind, `_` to catch everything,
+comma-separated alternatives, and array and dictionary patterns
+(`[var a, var b]`, `{"kind": var k}`). As in Godot, an array or dictionary
+pattern matches only a collection of exactly that shape, and a `match` that
+matches nothing simply does nothing.
 
 ## Lambdas, `spawn()` and `await`
 
@@ -126,7 +133,7 @@ cost one round trip instead of two:
 
 ```gdscript
 var gold = spawn(func(): return Economy.balance(user_id, "gold"))
-var items = spawn(func(): return Inventory.count_items(user_id))
+var items = spawn(func(): return Inventory.inventory(user_id))
 return {"gold": await gold, "items": await items}
 ```
 
@@ -147,8 +154,9 @@ var offset = Vector2(1, 2) + Vector2(3, 4)   # {"x": 4, "y": 6}
 var doubled = offset * 2                      # {"x": 8, "y": 12}
 ```
 
-`+`, `-` and `*` work component-wise (and scale by a number). There is no
-`v[0]` and no other engine method: these are data, not the engine's types.
+`+`, `-` and `*` work component-wise (and scale by a number). A vector is a
+Dictionary keyed by `x`, `y` and `z`, so `v[0]` is `null`: read `v.x`. The
+methods a vector carries are listed under [Vectors](#vectors).
 
 ## More than one script
 
@@ -275,7 +283,7 @@ for anything unparseable rather than raising, as in Godot. An unknown method is
 a compile error with a suggestion:
 
 ```
-my_game.gd:4: unknown method `.bnd()` -- did you mean `find`?
+my_game.gd:4: unknown method `.fnd()` -- did you mean `find`?
 ```
 
 Not carried over, and refused rather than approximated: the deep form of
@@ -319,8 +327,10 @@ exactly as in Godot. `extends` inherits fields, `_init` and methods, and an
 override wins. An instance is a Dictionary underneath, so returning one hands
 gamend plain data.
 
-`class_name` is accepted at the top level and dropped: the module is the
-class, and its name comes from the file.
+An inner class can only `extends` another inner class in the same file.
+`class_name` at the top level names the whole script for the other scripts in
+the plugin (see [More than one script](#more-than-one-script)); the generated
+module's name still comes from the file.
 
 ## Calling by name
 
@@ -343,9 +353,9 @@ awaited in another:
 ```gdscript
 signal level_up(user_id, level)
 
-func after_score_submitted(score):
-	if score.value > 1000:
-		level_up.emit(score.user_id, 5)
+func after_score_submitted(record):
+	if record.score > 1000:
+		level_up.emit(record.user_id, 5)
 
 func watch():
 	var payload = await level_up      # ["user-1", 5], or null after 30s
@@ -421,9 +431,9 @@ surprise:
 
 ## Performance
 
-A hook compiled from GDScript runs about **2-3x** a hand-written Elixir one,
-which is a few hundred nanoseconds against a Task the server spends ~3
-microseconds spawning. For a hook that reads a payload, decides something and
+A typical hook compiled from GDScript takes about **2-3x** as long as a
+hand-written Elixir one, which is a few hundred nanoseconds against a Task the
+server spends ~3 microseconds spawning. For a hook that reads a payload, decides something and
 calls gamend, the language you wrote it in does not show up in a profile.
 
 Two things do:
@@ -477,4 +487,7 @@ stack traces name, and reading its diff is how you see what a script change
 actually did. `mix gamend.gdscript.compile --check` fails when it is stale.
 
 Rebuild with `mix bundle` after every script change, since the server loads the
-bundled `ebin/`, not your source.
+bundled `ebin/`, not your source. On the downloadable engine, which has no Elixir
+installed, the admin Config page's **Build bundle** does the same inside the
+server: it regenerates `gen/` and compiles it (see
+[Building a plugin](/docs/server-scripting#building-a-plugin)).

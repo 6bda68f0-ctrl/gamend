@@ -5,43 +5,12 @@ defmodule GamendWeb.Api.V1.Admin.ChatController do
   import GamendWeb.Helpers.ParamParser
 
   alias Gamend.Chat
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{ChatMessagePage, DeletedCountResponse, OkResponse}
   alias GamendWeb.Serializers
   alias OpenApiSpex.Schema
 
   tags(["Admin – Chat"])
-
-  @error_schema %Schema{
-    type: :object,
-    properties: %{error: %Schema{type: :string}}
-  }
-
-  @meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      count: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer},
-      has_more: %Schema{type: :boolean}
-    }
-  }
-
-  @message_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      sender_id: %Schema{type: :string, format: :uuid},
-      sender_name: %Schema{type: :string},
-      sender_email: %Schema{type: :string},
-      content: %Schema{type: :string},
-      metadata: %Schema{type: :object},
-      chat_type: %Schema{type: :string, enum: ["lobby", "group", "friend", "party"]},
-      chat_ref_id: %Schema{type: :string, format: :uuid},
-      inserted_at: %Schema{type: :string, format: :"date-time"},
-      updated_at: %Schema{type: :string, format: :"date-time"}
-    }
-  }
 
   operation(:index,
     operation_id: "admin_list_chat_messages",
@@ -68,15 +37,7 @@ defmodule GamendWeb.Api.V1.Admin.ChatController do
       page_size: [in: :query, schema: %Schema{type: :integer}]
     ],
     responses: [
-      ok:
-        {"Chat messages list", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @message_schema},
-             meta: @meta_schema
-           }
-         }}
+      ok: {"Chat messages list", "application/json", ChatMessagePage}
     ]
   )
 
@@ -89,8 +50,8 @@ defmodule GamendWeb.Api.V1.Admin.ChatController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -108,15 +69,8 @@ defmodule GamendWeb.Api.V1.Admin.ChatController do
       chat_ref_id: [in: :query, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok:
-        {"Deleted count", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :object, properties: %{deleted: %Schema{type: :integer}}}
-           }
-         }},
-      unprocessable_entity: {"Missing params", "application/json", @error_schema}
+      ok: {"Deleted count", "application/json", DeletedCountResponse},
+      bad_request: Schemas.error("chat_type and chat_ref_id are required (missing_param)")
     ]
   )
 
@@ -143,25 +97,21 @@ defmodule GamendWeb.Api.V1.Admin.ChatController do
       )
 
     serialized = Enum.map(messages, &serialize_message/1)
-    count = length(serialized)
     total_count = Chat.count_all_messages(filters)
 
-    json(conn, %{
-      data: serialized,
-      meta: GamendWeb.Pagination.meta(page, page_size, count, total_count)
-    })
+    reply_page(conn, serialized, page, page_size, total_count)
   end
 
   def delete(conn, %{"id" => id}) do
     case parse_id(id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       message_id ->
         case Chat.admin_delete_message(message_id) do
-          {:ok, _} -> json(conn, %{})
-          {:error, :not_found} -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
-          {:error, _} -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
+          {:ok, _} -> reply_ok(conn)
+          {:error, :not_found} -> reply_error(conn, :not_found, "not_found")
+          {:error, _} -> reply_error(conn, :not_found, "not_found")
         end
     end
   end
@@ -171,12 +121,10 @@ defmodule GamendWeb.Api.V1.Admin.ChatController do
     chat_ref_id = Map.get(params, "chat_ref_id")
 
     if is_nil(chat_type) or is_nil(chat_ref_id) do
-      conn
-      |> put_status(:unprocessable_entity)
-      |> json(%{error: "chat_type and chat_ref_id are required"})
+      reply_error(conn, :bad_request, "missing_param", "chat_type and chat_ref_id are required")
     else
       {deleted, _} = Chat.delete_messages(chat_type, parse_id(chat_ref_id) || 0)
-      json(conn, %{data: %{deleted: deleted}})
+      reply_data(conn, %{deleted: deleted})
     end
   end
 

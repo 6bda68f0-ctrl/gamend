@@ -426,7 +426,8 @@ defmodule GamendWeb.EventCodec do
       discord: get(lp, :discord) || false,
       apple: get(lp, :apple) || false,
       steam: get(lp, :steam) || false,
-      device: get(lp, :device) || false
+      device: get(lp, :device) || false,
+      github: get(lp, :github) || false
     }
   end
 

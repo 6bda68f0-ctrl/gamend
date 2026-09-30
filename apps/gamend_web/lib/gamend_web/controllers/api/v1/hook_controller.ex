@@ -6,29 +6,39 @@ defmodule GamendWeb.Api.V1.HookController do
   alias Gamend.Hooks.DynamicRpcs
   alias Gamend.Hooks.HookSchemas
   alias Gamend.Hooks.PluginManager
+  alias GamendWeb.Pagination
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{HookCallResponse, HookFunctionPage}
+  alias OpenApiSpex.Schema
   require Logger
 
   operation(:index,
     operation_id: "list_hooks",
     summary: "List available hook functions",
+    description: "Every function `POST /hooks/call` accepts, by plugin then name.",
     tags: ["Hooks"],
     security: [%{"authorization" => []}],
+    parameters: [
+      page: [in: :query, schema: %Schema{type: :integer, default: 1}, required: false],
+      page_size: [in: :query, schema: %Schema{type: :integer, default: 25}, required: false]
+    ],
     responses: [
-      ok: {"OK", "application/json", %OpenApiSpex.Schema{type: :object}}
+      ok: {"Callable functions", "application/json", HookFunctionPage},
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
-  def index(conn, _params) do
+  def index(conn, params) do
     static_functions =
       PluginManager.hook_modules()
       |> Enum.flat_map(fn {plugin_name, mod} ->
         Gamend.Hooks.exported_functions(mod)
-        |> Enum.map(&Map.merge(&1, %{plugin: plugin_name, dynamic: false}))
+        |> Enum.map(&Map.merge(&1, %{plugin: plugin_name, dynamic: false, meta: %{}}))
       end)
 
     static_keys =
       static_functions
-      |> Enum.map(&{Map.get(&1, :plugin), Map.get(&1, :name)})
+      |> Enum.map(&{&1.plugin, &1.name})
       |> MapSet.new()
 
     dynamic_functions =
@@ -55,13 +65,13 @@ defmodule GamendWeb.Api.V1.HookController do
             plugin: plugin_name,
             name: export.hook,
             dynamic: true,
-            meta: export.meta,
+            meta: export.meta || %{},
             arities: [arity],
             signatures: [
               %{
                 arity: arity,
                 signature: signature,
-                doc: doc,
+                doc: doc || "",
                 example_args: Jason.encode!(arg_names)
               }
             ]
@@ -73,8 +83,33 @@ defmodule GamendWeb.Api.V1.HookController do
     functions =
       (static_functions ++ dynamic_functions)
       |> Enum.sort_by(&{&1.plugin, &1.name})
+      |> Enum.map(&serialize_function/1)
 
-    json(conn, %{data: functions})
+    {page, page_size} = Pagination.params(params)
+    rows = functions |> Enum.drop((page - 1) * page_size) |> Enum.take(page_size)
+
+    reply_page(conn, rows, page, page_size, length(functions))
+  end
+
+  # `fn`, as `call_hook` takes it: a thing is not called `name` (R16).
+  defp serialize_function(function) do
+    %{
+      plugin: to_string(function.plugin),
+      fn: to_string(function.name),
+      dynamic: function.dynamic,
+      arities: function.arities,
+      signatures: Enum.map(function.signatures, &serialize_signature/1),
+      meta: function.meta
+    }
+  end
+
+  defp serialize_signature(signature) do
+    %{
+      arity: signature.arity,
+      signature: to_string(signature.signature || ""),
+      doc: to_string(signature.doc || ""),
+      example_args: to_string(signature.example_args || "")
+    }
   end
 
   @json_schema %OpenApiSpex.Schema{
@@ -83,16 +118,18 @@ defmodule GamendWeb.Api.V1.HookController do
     additionalProperties: true
   }
 
-  @call_ok_schema %OpenApiSpex.Schema{
-    type: :object,
-    properties: %{
-      data: @json_schema
-    }
-  }
-
   operation(:invoke,
     operation_id: "call_hook",
     summary: "Invoke a hook function",
+    description: """
+    Calls `fn` in `plugin` with `args` and answers what it returned under
+    `data`. Refusals: `missing_param` (no `plugin` or `fn`), `too_many_args`,
+    `reserved_hook_name` (400); `args_too_large` (413); `plugin_not_found`,
+    `not_implemented` (404: no such plugin, or no such function at that arity);
+    `timeout` (504). An error the hook itself returns answers 400: its reason
+    as the code when that is a snake_case atom, otherwise `hook_error`, with
+    any detail in `message`.
+    """,
     tags: ["Hooks"],
     security: [%{"authorization" => []}],
     request_body:
@@ -107,19 +144,12 @@ defmodule GamendWeb.Api.V1.HookController do
          required: [:plugin, :fn]
        }},
     responses: [
-      ok: {"OK", "application/json", @call_ok_schema},
-      bad_request:
-        {"Bad Request", "application/json",
-         %OpenApiSpex.Schema{
-           type: :object,
-           properties: %{error: %OpenApiSpex.Schema{type: :string}}
-         }},
-      unauthorized:
-        {"Unauthorized", "application/json",
-         %OpenApiSpex.Schema{
-           type: :object,
-           properties: %{error: %OpenApiSpex.Schema{type: :string}}
-         }}
+      ok: {"What the hook returned", "application/json", HookCallResponse},
+      bad_request: Schemas.error("Malformed call, or the hook returned an error"),
+      not_found: Schemas.error("No such plugin or function"),
+      request_entity_too_large: Schemas.error("Arguments too large"),
+      gateway_timeout: Schemas.error("The hook timed out"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -146,21 +176,22 @@ defmodule GamendWeb.Api.V1.HookController do
     cond do
       args_too_many ->
         log_rejected(hook, "too_many_args (#{length(args)} > #{max_count})")
-        conn |> put_status(:bad_request) |> json(%{error: :too_many_args, max: max_count})
+        reply_error(conn, :bad_request, "too_many_args", "at most #{max_count} arguments")
 
       args_too_large ->
         log_rejected(hook, "args_too_large (> #{max_size} bytes)")
 
-        conn
-        |> put_status(:request_entity_too_large)
-        |> json(%{error: :args_too_large, max_bytes: max_size})
+        reply_error(
+          conn,
+          :request_entity_too_large,
+          "args_too_large",
+          "at most #{max_size} bytes"
+        )
 
       reserved_hook_name?(fn_name) ->
         log_rejected(hook, "reserved_hook_name")
 
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: :reserved_hook_name})
+        reply_error(conn, :bad_request, "reserved_hook_name")
 
       true ->
         # Typed hooks (registered <FnName>Request/<FnName>Reply schemas) accept
@@ -176,38 +207,37 @@ defmodule GamendWeb.Api.V1.HookController do
 
   def invoke(conn, _params) do
     log_rejected("(unparseable)", "invalid_request — missing or non-string plugin/fn")
-    conn |> put_status(:bad_request) |> json(%{error: :invalid_request})
+    reply_error(conn, :bad_request, "missing_param", "plugin and fn are required strings")
   end
 
   defp reply_to_hook_call(conn, result, hook) do
     case result do
       {:ok, res} ->
-        json(conn, %{data: res})
+        reply_data(conn, res)
 
       {:error, :not_implemented} ->
         # Almost always a version skew: the client calls a hook the deployed
         # plugin build does not export yet. Silent here, this cost an afternoon.
         log_rejected(hook, "not_implemented — plugin exports no such function/arity")
-        conn |> put_status(:bad_request) |> json(%{error: :not_implemented})
+        reply_error(conn, :not_found, "not_implemented")
 
       {:error, :not_found} ->
         log_rejected(hook, "plugin_not_found")
-        conn |> put_status(:bad_request) |> json(%{error: :plugin_not_found})
+        reply_error(conn, :not_found, "plugin_not_found")
 
       {:error, :missing_hooks_module} ->
         log_rejected(hook, "missing_hooks_module")
-        conn |> put_status(:bad_request) |> json(%{error: :missing_hooks_module})
+        reply_error(conn, :not_found, "missing_hooks_module")
 
       {:error, :timeout} ->
         log_rejected(hook, "timeout")
-        conn |> put_status(:bad_request) |> json(%{error: :timeout})
+        reply_error(conn, :gateway_timeout, "timeout")
 
       {:error, reason} ->
         log_rejected(hook, inspect(reason))
 
-        conn
-        |> put_status(:bad_request)
-        |> json(normalize_hook_error(reason))
+        {code, message} = hook_error(reason)
+        reply_error(conn, :bad_request, code, message)
     end
   end
 
@@ -215,7 +245,7 @@ defmodule GamendWeb.Api.V1.HookController do
 
   # Every rejected hook call says which hook and why. Deliberately no argument
   # values: they carry user data, and the hook plus arity is what identifies the
-  # problem. The client only ever sees "denied with a 400", so without this line
+  # problem. The client only ever sees a 4xx status, so without this line
   # a rejection is invisible on both ends.
   defp log_rejected(hook, reason) do
     Logger.warning("hooks/call rejected: #{hook} — #{reason}")
@@ -226,23 +256,26 @@ defmodule GamendWeb.Api.V1.HookController do
     |> Enum.any?(fn atom -> to_string(atom) == fn_name end)
   end
 
-  defp normalize_hook_error({:function_clause, message}) when is_binary(message) do
-    %{error: "function_clause", details: message}
+  # The hook's own `{:error, reason}`: a snake_case atom is the code a game
+  # switches on; a crash or any other term is `hook_error`, or its kind, with
+  # the detail as the message.
+  defp hook_error({:function_clause, message}) when is_binary(message),
+    do: {"function_clause", message}
+
+  defp hook_error({:exception, message}) when is_binary(message), do: {"exception", message}
+
+  defp hook_error({kind, reason}) when is_atom(kind) do
+    if code?(kind),
+      do: {Atom.to_string(kind), inspect(reason)},
+      else: {"hook_error", inspect({kind, reason})}
   end
 
-  defp normalize_hook_error({:exception, message}) when is_binary(message) do
-    %{error: "exception", details: message}
+  defp hook_error(reason) when is_atom(reason) do
+    if code?(reason), do: {Atom.to_string(reason), nil}, else: {"hook_error", inspect(reason)}
   end
 
-  defp normalize_hook_error({kind, reason}) when is_atom(kind) do
-    %{error: Atom.to_string(kind), details: inspect(reason)}
-  end
+  defp hook_error(reason) when is_binary(reason), do: {"hook_error", reason}
+  defp hook_error(reason), do: {"hook_error", inspect(reason)}
 
-  defp normalize_hook_error(reason) when is_atom(reason) do
-    %{error: Atom.to_string(reason)}
-  end
-
-  defp normalize_hook_error(reason) do
-    %{error: "unexpected_error", details: inspect(reason)}
-  end
+  defp code?(atom), do: Atom.to_string(atom) =~ ~r/^[a-z][a-z0-9_]*$/
 end

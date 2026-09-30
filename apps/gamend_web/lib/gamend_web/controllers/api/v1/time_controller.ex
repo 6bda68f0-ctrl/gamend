@@ -9,7 +9,7 @@ defmodule GamendWeb.Api.V1.TimeController do
   use GamendWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
-  alias OpenApiSpex.Schema
+  alias GamendWeb.Schemas.ServerTimeResponse
 
   tags(["Time"])
 
@@ -20,16 +20,9 @@ defmodule GamendWeb.Api.V1.TimeController do
       "Milliseconds since the Unix epoch. Sample a few times and average to " <>
         "estimate the offset; a single reading includes one-way network latency.",
     responses: [
-      ok:
-        {"Server time", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             server_now: %Schema{type: :integer, description: "ms since the Unix epoch"}
-           }
-         }}
+      ok: {"Server time", "application/json", ServerTimeResponse}
     ]
   )
 
-  def show(conn, _params), do: json(conn, %{server_now: Gamend.Time.now_ms()})
+  def show(conn, _params), do: reply_data(conn, %{server_now: Gamend.Time.now_ms()})
 end

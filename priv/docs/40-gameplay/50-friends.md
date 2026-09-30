@@ -35,18 +35,36 @@ Endpoints live under `/api/v1/friends`, `/api/v1/me/friends` and
 `/api/v1/users/:user_id/block` - see [/api/docs](/api/docs).
 
 One thing the spec cannot tell you: **the routes take two different kinds of
-id.** Accept, reject and delete take a *friendship* id; block and unblock take a
-*user* id. You block a person, not a relationship, which is what lets you block
-someone you have never interacted with.
+id.** Everything under `/friends/:id` (accept, reject, delete, and
+`/friends/:id/block` / `/friends/:id/unblock`) takes a *friendship* id.
+`/users/:user_id/block` and `/users/:user_id/unblock` take a *user* id: you block
+a person, not a relationship, which is what lets you block someone you have
+never interacted with.
 
 ## Realtime events
 
-Friend changes do **not** each get their own channel event. Every one of them -
-request, accept, reject, remove, block, unblock - reaches the client as a single
-`friend_updated` on `user:{user_id}` carrying the refreshed friend list, plus a
-`notification_created` whose `metadata.type` names what happened. A listener
-bound to `friend_accepted` on the socket will never fire; see the Realtime
-guide.
+Each friendship change is pushed on `user:{user_id}` to the users it involves,
+as its own event. The payload is the friendship row: `id`, `requester_id`,
+`target_id` and `status`.
+
+| Event | Sent when |
+|---|---|
+| `incoming_request` | Someone sent you a request (to the target) |
+| `outgoing_request` | You sent a request (to the requester) |
+| `friend_accepted` | A request was accepted |
+| `friend_rejected` | A request was rejected |
+| `request_cancelled` | A pending request was withdrawn |
+| `friend_removed` | A friendship was deleted |
+| `friend_blocked` | A block was placed |
+| `friend_unblocked` | A block was lifted |
+
+A request, an accept and a reject also create a notification
+(`notification_created`, with `metadata.type` `friend_request`,
+`friend_accepted` or `friend_rejected`).
+
+`friend_updated` is a different thing: a friend's profile and presence (online
+state, name, avatar, lobby or party), as `{"friends": {user_id => profile}}`.
+The whole list arrives once on join, then one entry per change.
 
 In a block, the row stores `target_id` as the blocker and `requester_id` as the
 blocked user, regardless of who sent any earlier request.

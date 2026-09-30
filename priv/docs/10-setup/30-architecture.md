@@ -12,7 +12,8 @@ High-level overview of how the platform is structured, from clients down to the 
   ┌─────────────────────────────────────────────────────────────┐
   │                        CLIENTS                              │
   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-  │  │  Godot SDK   │  │   JS SDK     │  │ Web Browser  │       │
+  │  │  Godot, C++, │  │   JS SDK     │  │ Web Browser  │       │
+  │  │  Balaur SDKs │  │              │  │              │       │
   │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘       │
   └─────────┼─────────────────┼─────────────────┼───────────────┘
             │ REST + WS       │ REST + WS       │ HTTP
@@ -116,7 +117,8 @@ still signal each other.
              │                            ├── webrtc_* columns
              │                            │   (the WebRTC signaling room IS
              │                            │    the lobby; server-owned, not
-             │                            │    castable, star host = host_id)
+             │                            │    castable; star host =
+             │                            │    webrtc_host_id or host_id)
              │                            │
              ├──── party_id ──────────► parties
              │                              └── party_invites table
@@ -146,8 +148,8 @@ still signal each other.
              │       recipient's live device tokens (FCM / APNs).
              │
              ├──── chat_messages (sender_id ─► messages)
-             │         chat_type: lobby | group | friend
-             │         chat_ref_id ─► lobby/group/user
+             │         chat_type: lobby | group | party | friend
+             │         chat_ref_id ─► lobby/group/party/user
              │
              ├──── chat_read_cursors (unread tracking)
              │
@@ -164,8 +166,9 @@ still signal each other.
              ├──── kv_entries (scoped: global, per-user,
              │       per-lobby, per-user-per-lobby)
              │
-             ├──── purchases / entitlements ──► products
-             │       (payment_provider_events as audit trail)
+             ├──── purchases / entitlements ──► store_products
+             │       (provider_products maps each to a provider SKU; provider_events
+             │        is the webhook audit trail)
              │
              └──── users_tokens, oauth_sessions
 ```
@@ -175,17 +178,17 @@ still signal each other.
 These projects live in one repository, but the runtime split is intentional: core and web are reusable packages, while host is the runnable shell you own.
 
 ```text
-  gamend/                 # The runnable host app itself
-  ├── lib/gamend_host/    # Router, supervision tree, boot config, branding
-  ├── lib/gamend_web/     # Host-owned pages (docs, blog, presentation)
-  ├── priv/docs/               # These guides, as markdown
+  gamend/               # The runnable host app itself
+  ├── lib/gamend_host/  # Router, supervision tree, boot config, branding
+  ├── lib/gamend_web/   # Host-owned pages (docs, blog, presentation)
+  ├── priv/docs/        # These guides, as markdown
   ├── apps/
-  │   ├── gamend_core/    # Shared domain: contexts, schemas, migrations
-  │   └── gamend_web/     # Shared web package: controllers, LiveViews,
-  │                            #   channels, components, frontend source
-  ├── modules/plugins/         # Hook plugins, as OTP apps (server scripting)
-  ├── clients/                 # Godot SDK, JS SDK
-  └── sdk/                     # Elixir SDK stubs for hooks
+  │   ├── gamend_core/  # Shared domain: contexts, schemas, migrations
+  │   └── gamend_web/   # Shared web package: controllers, LiveViews,
+  │                     #   channels, components, frontend source
+  ├── modules/plugins/  # Hook plugins, as OTP apps (server scripting)
+  ├── clients/          # SDK generators: Godot, JS, Balaur, C++
+  └── sdk/              # Elixir SDK stubs for hooks
 ```
 
 ## The contexts
@@ -208,7 +211,8 @@ values are documented in the
 | Tournaments | [`Gamend.Tournaments`](https://docs.gamend.org/Gamend.Tournaments.html) |
 | Matchmaking | [`Gamend.Matchmaking`](https://docs.gamend.org/Gamend.Matchmaking.html) |
 | Notifications | [`Gamend.Notifications`](https://docs.gamend.org/Gamend.Notifications.html) |
-| Wallets and inventory | [`Gamend.Economy`](https://docs.gamend.org/Gamend.Economy.html) |
+| Wallets | [`Gamend.Economy`](https://docs.gamend.org/Gamend.Economy.html) |
+| Inventory | [`Gamend.Inventory`](https://docs.gamend.org/Gamend.Inventory.html) |
 | Payments | [`Gamend.Payments`](https://docs.gamend.org/Gamend.Payments.html) |
 | Key-value store | [`Gamend.KV`](https://docs.gamend.org/Gamend.KV.html) |
 | Object storage | [`Gamend.Storage`](https://docs.gamend.org/Gamend.Storage.html) |

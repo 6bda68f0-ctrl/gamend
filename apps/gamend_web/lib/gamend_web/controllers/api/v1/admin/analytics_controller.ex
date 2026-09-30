@@ -3,59 +3,19 @@ defmodule GamendWeb.Api.V1.Admin.AnalyticsController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.Analytics
+  alias GamendWeb.Schemas
+
+  alias GamendWeb.Schemas.{
+    AnalyticsCountsResponse,
+    AnalyticsDailyResponse,
+    AnalyticsEconomyResponse,
+    AnalyticsSummaryResponse,
+    ServerStatsResponse
+  }
+
   alias OpenApiSpex.Schema
 
   tags(["Admin – Analytics"])
-
-  @rate %Schema{
-    type: :number,
-    format: :float,
-    nullable: true,
-    description: "0.0–1.0, or null when there is no cohort / denominator yet"
-  }
-
-  @summary_schema %Schema{
-    type: :object,
-    description: "Activity and retention as of a UTC day",
-    properties: %{
-      day: %Schema{type: :string, format: :date},
-      dau: %Schema{type: :integer},
-      wau: %Schema{type: :integer},
-      mau: %Schema{type: :integer},
-      stickiness: @rate,
-      new_users_7d: %Schema{type: :integer},
-      new_users_30d: %Schema{type: :integer},
-      d1: @rate,
-      d7: @rate,
-      d30: @rate,
-      payers_30d: %Schema{type: :integer},
-      conversion_30d: @rate
-    }
-  }
-
-  @daily_schema %Schema{
-    type: :object,
-    properties: %{
-      days: %Schema{type: :integer},
-      series: %Schema{
-        type: :array,
-        description: "Oldest first",
-        items: %Schema{
-          type: :object,
-          properties: %{
-            day: %Schema{type: :string, format: :date},
-            active: %Schema{type: :integer},
-            new_users: %Schema{type: :integer},
-            d1: @rate,
-            d7: @rate,
-            d30: @rate
-          }
-        }
-      }
-    }
-  }
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
 
   operation(:show,
     operation_id: "admin_get_analytics_summary",
@@ -65,13 +25,13 @@ defmodule GamendWeb.Api.V1.Admin.AnalyticsController do
         "over the sign-up cohorts of the last 60 days that have reached each horizon.",
     security: [%{"authorization" => []}],
     responses: [
-      ok: {"Summary", "application/json", @summary_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Summary", "application/json", AnalyticsSummaryResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
-  def show(conn, _params), do: json(conn, Analytics.summary())
+  def show(conn, _params), do: reply_data(conn, Analytics.summary())
 
   operation(:daily,
     operation_id: "admin_get_analytics_daily",
@@ -85,15 +45,15 @@ defmodule GamendWeb.Api.V1.Admin.AnalyticsController do
       ]
     ],
     responses: [
-      ok: {"Series", "application/json", @daily_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Series", "application/json", AnalyticsDailyResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
   def daily(conn, params) do
     days = parse_days(params["days"], 30)
-    json(conn, %{days: days, series: Analytics.daily_series(days)})
+    reply_data(conn, %{days: days, series: Analytics.daily_series(days)})
   end
 
   operation(:snapshot,
@@ -104,50 +64,13 @@ defmodule GamendWeb.Api.V1.Admin.AnalyticsController do
         "always available to admins.",
     security: [%{"authorization" => []}],
     responses: [
-      ok: {"Snapshot", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Snapshot", "application/json", ServerStatsResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
-  def snapshot(conn, _params), do: json(conn, Analytics.snapshot())
-
-  @economy_schema %Schema{
-    type: :object,
-    properties: %{
-      days: %Schema{type: :integer},
-      totals: %Schema{
-        type: :array,
-        description: "Per currency + ledger reason over the window, largest |net| first",
-        items: %Schema{
-          type: :object,
-          properties: %{
-            currency: %Schema{type: :string},
-            reason: %Schema{type: :string},
-            granted: %Schema{type: :integer},
-            spent: %Schema{type: :integer},
-            net: %Schema{type: :integer},
-            entries: %Schema{type: :integer}
-          }
-        }
-      },
-      flow: %Schema{
-        type: :array,
-        description: "Same, per UTC day, newest first",
-        items: %Schema{
-          type: :object,
-          properties: %{
-            day: %Schema{type: :string, format: :date},
-            currency: %Schema{type: :string},
-            reason: %Schema{type: :string},
-            granted: %Schema{type: :integer},
-            spent: %Schema{type: :integer},
-            entries: %Schema{type: :integer}
-          }
-        }
-      }
-    }
-  }
+  def snapshot(conn, _params), do: reply_data(conn, Analytics.snapshot())
 
   operation(:economy,
     operation_id: "admin_get_analytics_economy",
@@ -165,9 +88,9 @@ defmodule GamendWeb.Api.V1.Admin.AnalyticsController do
       ]
     ],
     responses: [
-      ok: {"Economy flow", "application/json", @economy_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Economy flow", "application/json", AnalyticsEconomyResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -175,35 +98,12 @@ defmodule GamendWeb.Api.V1.Admin.AnalyticsController do
     days = parse_days(params["days"], 7)
     opts = if c = blank_to_nil(params["currency"]), do: [currency: c], else: []
 
-    json(conn, %{
+    reply_data(conn, %{
       days: days,
       totals: Analytics.economy_totals(days, opts),
       flow: Analytics.economy_flow(days, opts)
     })
   end
-
-  @counts_schema %Schema{
-    type: :object,
-    properties: %{
-      key: %Schema{type: :string},
-      days: %Schema{type: :integer},
-      totals: %Schema{
-        type: :array,
-        items: %Schema{
-          type: :object,
-          properties: %{key: %Schema{type: :string}, total: %Schema{type: :integer}}
-        }
-      },
-      series: %Schema{
-        type: :object,
-        description: "key → { \"YYYY-MM-DD\" → count }",
-        additionalProperties: %Schema{
-          type: :object,
-          additionalProperties: %Schema{type: :integer}
-        }
-      }
-    }
-  }
 
   operation(:counts,
     operation_id: "admin_get_analytics_counts",
@@ -220,9 +120,9 @@ defmodule GamendWeb.Api.V1.Admin.AnalyticsController do
       ]
     ],
     responses: [
-      ok: {"Counters", "application/json", @counts_schema},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Counters", "application/json", AnalyticsCountsResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -231,7 +131,7 @@ defmodule GamendWeb.Api.V1.Admin.AnalyticsController do
     key = blank_to_nil(params["key"]) || "*"
     series = Analytics.counts(key, days)
 
-    json(conn, %{
+    reply_data(conn, %{
       key: key,
       days: days,
       totals: Enum.map(Analytics.count_totals(key, days), fn {k, n} -> %{key: k, total: n} end),

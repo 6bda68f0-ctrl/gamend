@@ -42,9 +42,9 @@ export default function (ctx) {
   tRead.add(res.timings.duration);
 
   ok(res, 'kv read');
-  // `stress_setup` writes `{"seeded": true}`, and the controller answers
-  // `{data: <value>, metadata: …}` — so the unwrapped body is the value itself.
-  bodyMatches(res, (v) => v.seeded === true, 'kv read returns the seeded value');
+  // `stress_setup` writes `{"seeded": true}`, and the controller answers the
+  // entry under `data` — so the stored value is the unwrapped body's `data`.
+  bodyMatches(res, (e) => e.data && e.data.seeded === true, 'kv read returns the seeded value');
 
   sleep(THINK);
 }

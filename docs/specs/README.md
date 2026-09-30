@@ -55,6 +55,16 @@ Not a plan; a living reference.
   transpiled to readable Elixir source and compiled into an ordinary OTP
   plugin — the same `ebin/*.beam` `plugin.bundle` produces, at native speed,
   removing Elixir as the price of entry.
+- [named-api-schemas.md](named-api-schemas.md) — **Named API schemas.** Every
+  response shape a named, serializer-checked component, so generators emit
+  `Lobby` instead of `ListLobbies200ResponseDataInner`. No wire changes.
+- [client-sdks.md](client-sdks.md) — **Client SDKs.** The order (C++, C#/Unity,
+  TypeScript, Rust, Lua, GML), which generator serves which target, and one
+  conformance scenario every SDK must pass.
+- [cpp-sdk.md](cpp-sdk.md) — **C++ SDK.** Engine-free C++17 core with pluggable
+  transports and a per-frame `poll()`, the base the Unreal plugin wraps. Built
+  and released as `gamend-cpp-sdk.tar.gz`; open until CI has built it on
+  Windows.
 
 ## Resolved — shipped
 
@@ -103,5 +113,3 @@ removed, and the reason is the point.
 - **ClickHouse / PostHog analytics** ("Later") — gated behind volume; the
   event-tracking schema is kept portable so it's a sink swap. No spec until the
   capture layer proves it's needed.
-- **Unity / Unreal SDKs** ("Defer") — the realtime layer is hand-written per SDK
-  (the real cost); revisit on demonstrated demand.

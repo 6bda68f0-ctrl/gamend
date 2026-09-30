@@ -18,13 +18,11 @@ defmodule Gamend.Groups.Invites do
   alias Gamend.Groups.Shared
   alias Gamend.Repo
 
-  @invite_cache_ttl_ms 60_000
-
   @doc "Count pending invitations for a user."
   @spec count_invitations(Ecto.UUID.t()) :: non_neg_integer()
   @decorate cacheable(
               key: {:group_invites, :count, Shared.invite_cache_version(user_id), user_id},
-              opts: [ttl: @invite_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def count_invitations(user_id) when is_binary(user_id) do
     import Ecto.Query
@@ -41,7 +39,7 @@ defmodule Gamend.Groups.Invites do
   @spec count_sent_invitations(Ecto.UUID.t()) :: non_neg_integer()
   @decorate cacheable(
               key: {:group_invites, :count_sent, Shared.invite_cache_version(user_id), user_id},
-              opts: [ttl: @invite_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def count_sent_invitations(user_id) when is_binary(user_id) do
     import Ecto.Query
@@ -169,9 +167,9 @@ defmodule Gamend.Groups.Invites do
             "metadata" => %{
               "type" => "group_invite",
               "group_id" => group_id,
-              "group_name" => group.title,
-              "sender_name" => (sender && (sender.display_name || sender.username)) || "",
-              "recipient_name" => (target && (target.display_name || target.username)) || ""
+              "group_title" => group.title,
+              "sender_name" => Gamend.Accounts.display_name(sender),
+              "recipient_name" => Gamend.Accounts.display_name(target)
             }
           })
 
@@ -240,7 +238,7 @@ defmodule Gamend.Groups.Invites do
 
   defp handle_invite_capacity_failure(user_id, invite, group) do
     user = Gamend.Accounts.get_user(user_id)
-    user_name = (user && user.display_name) || ""
+    user_name = Gamend.Accounts.display_name(user)
     group_id = group.id
 
     # Mark the invite as declined so the sender sees it didn't go through
@@ -271,7 +269,7 @@ defmodule Gamend.Groups.Invites do
         "metadata" => %{
           "type" => "group_invite_declined",
           "group_id" => group_id,
-          "group_name" => group.title,
+          "group_title" => group.title,
           "user_id" => user_id,
           "user_name" => user_name,
           "reason" => "full"
@@ -280,8 +278,7 @@ defmodule Gamend.Groups.Invites do
     )
 
     # Real-time PubSub so the sender's UI updates immediately
-    Phoenix.PubSub.broadcast(
-      Gamend.PubSub,
+    Gamend.Broadcast.publish(
       "user:#{invite.sender_id}",
       {:group_invite_declined, %{group_id: group_id, user_id: user_id, reason: "full"}}
     )
@@ -301,7 +298,7 @@ defmodule Gamend.Groups.Invites do
 
     # Notify the sender that the invite was accepted
     user = Gamend.Accounts.get_user(user_id)
-    user_name = (user && user.display_name) || ""
+    user_name = Gamend.Accounts.display_name(user)
 
     Gamend.Notifications.admin_create_notification(
       user_id,
@@ -312,7 +309,7 @@ defmodule Gamend.Groups.Invites do
         "metadata" => %{
           "type" => "group_invite_accepted",
           "group_id" => group_id,
-          "group_name" => group.title,
+          "group_title" => group.title,
           "user_id" => user_id,
           "user_name" => user_name
         }
@@ -320,8 +317,7 @@ defmodule Gamend.Groups.Invites do
     )
 
     # Broadcast so the sender's LiveView refreshes
-    Phoenix.PubSub.broadcast(
-      Gamend.PubSub,
+    Gamend.Broadcast.publish(
       "user:#{invite.sender_id}",
       {:group_invite_accepted, %{group_id: group_id}}
     )
@@ -350,7 +346,7 @@ defmodule Gamend.Groups.Invites do
               key:
                 {:group_invites, :list, Shared.invite_cache_version(user_id), user_id, page,
                  page_size},
-              opts: [ttl: @invite_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   defp do_list_invitations(user_id, page, page_size) do
     import Ecto.Query
@@ -384,7 +380,7 @@ defmodule Gamend.Groups.Invites do
               key:
                 {:group_invites, :list_sent, Shared.invite_cache_version(user_id), user_id, page,
                  page_size},
-              opts: [ttl: @invite_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   defp do_list_sent_invitations(user_id, page, page_size) do
     import Ecto.Query
@@ -471,7 +467,7 @@ defmodule Gamend.Groups.Invites do
 
         # Notify the sender that the invite was declined
         user = Gamend.Accounts.get_user(user_id)
-        user_name = (user && user.display_name) || ""
+        user_name = Gamend.Accounts.display_name(user)
 
         Gamend.Notifications.admin_create_notification(
           user_id,
@@ -482,7 +478,7 @@ defmodule Gamend.Groups.Invites do
             "metadata" => %{
               "type" => "group_invite_declined",
               "group_id" => invite.group_id,
-              "group_name" => group_title,
+              "group_title" => group_title,
               "user_id" => user_id,
               "user_name" => user_name
             }
@@ -490,8 +486,7 @@ defmodule Gamend.Groups.Invites do
         )
 
         # Notify the sender via PubSub
-        Phoenix.PubSub.broadcast(
-          Gamend.PubSub,
+        Gamend.Broadcast.publish(
           "user:#{invite.sender_id}",
           {:group_invite_declined, %{group_id: invite.group_id, user_id: user_id}}
         )
@@ -507,11 +502,11 @@ defmodule Gamend.Groups.Invites do
     %{
       id: invite.id,
       group_id: invite.group_id,
-      group_name: invite.group.title,
+      group_title: invite.group.title,
       sender_id: invite.sender_id,
-      sender_name: invite.sender.display_name || invite.sender.username || "",
+      sender_name: Gamend.Accounts.display_name(invite.sender),
       recipient_id: invite.recipient_id,
-      recipient_name: invite.recipient.display_name || invite.recipient.username || "",
+      recipient_name: Gamend.Accounts.display_name(invite.recipient),
       status: invite.status,
       inserted_at: invite.inserted_at
     }

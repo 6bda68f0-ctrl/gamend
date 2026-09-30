@@ -1,0 +1,13 @@
+<Layouts.app flash={@flash} current_scope={@current_scope} wide={@wide}>
+  <%!-- A page from the `:pages` collection: the title from its frontmatter or
+        heading, then the body. `markdown-content` is the host's stylesheet
+        for rendered markdown, the same one the guides use. --%>
+  <article class="space-y-6">
+    <.header>
+      <h1 class="text-3xl font-bold lg:text-4xl">{@page.title}</h1>
+      <:subtitle :if={@page[:description]}>{@page.description}</:subtitle>
+    </.header>
+
+    <div class="markdown-content">{Phoenix.HTML.raw(@html)}</div>
+  </article>
+</Layouts.app>

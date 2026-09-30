@@ -199,6 +199,11 @@ defmodule GamendWeb.Api.V1.ChatModerationControllerTest do
       assert Chat.muted?(member.id, "lobby", lobby.id)
       refute Chat.muted?(member.id, "lobby", Ecto.UUID.generate())
       refute Chat.muted?(host.id, "lobby", lobby.id)
+
+      listed =
+        build_conn() |> auth_conn(host) |> get("/api/v1/lobbies/mutes") |> json_response(200)
+
+      assert Enum.map(listed["data"], & &1["user_id"]) == [member.id]
     end
 
     test "a plain member cannot mute", %{conn: conn} do
@@ -257,7 +262,7 @@ defmodule GamendWeb.Api.V1.ChatModerationControllerTest do
         |> auth_conn(host)
         |> post("/api/v1/lobbies/unmute", %{target_user_id: member.id})
 
-      assert %{"ok" => true, "removed" => 1} = json_response(conn, 200)
+      assert %{"data" => %{"deleted" => 1}} = json_response(conn, 200)
       refute Chat.muted?(member.id, "lobby", lobby.id)
     end
 
@@ -293,6 +298,14 @@ defmodule GamendWeb.Api.V1.ChatModerationControllerTest do
 
       assert Chat.muted?(member.id, "group", group.id)
       refute Chat.muted?(member.id, "group", Ecto.UUID.generate())
+
+      listed =
+        build_conn()
+        |> auth_conn(admin)
+        |> get("/api/v1/groups/#{group.id}/mutes")
+        |> json_response(200)
+
+      assert Enum.map(listed["data"], & &1["user_id"]) == [member.id]
     end
 
     test "a plain member cannot mute", %{conn: conn} do
@@ -320,7 +333,7 @@ defmodule GamendWeb.Api.V1.ChatModerationControllerTest do
         |> auth_conn(admin)
         |> post("/api/v1/groups/#{group.id}/unmute", %{target_user_id: member.id})
 
-      assert %{"ok" => true, "removed" => 1} = json_response(conn, 200)
+      assert %{"data" => %{"deleted" => 1}} = json_response(conn, 200)
       refute Chat.muted?(member.id, "group", group.id)
     end
 
@@ -356,6 +369,11 @@ defmodule GamendWeb.Api.V1.ChatModerationControllerTest do
 
       assert Chat.muted?(member.id, "party", party.id)
       refute Chat.muted?(member.id, "party", Ecto.UUID.generate())
+
+      listed =
+        build_conn() |> auth_conn(leader) |> get("/api/v1/parties/mutes") |> json_response(200)
+
+      assert Enum.map(listed["data"], & &1["user_id"]) == [member.id]
     end
 
     test "a plain member cannot mute", %{conn: conn} do
@@ -383,7 +401,7 @@ defmodule GamendWeb.Api.V1.ChatModerationControllerTest do
         |> auth_conn(leader)
         |> post("/api/v1/parties/unmute", %{target_user_id: member.id})
 
-      assert %{"ok" => true, "removed" => 1} = json_response(conn, 200)
+      assert %{"data" => %{"deleted" => 1}} = json_response(conn, 200)
       refute Chat.muted?(member.id, "party", party.id)
     end
 

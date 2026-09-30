@@ -41,7 +41,7 @@ defmodule GamendWeb.Api.V1.ProviderControllerTest do
       resp = delete(conn, ~p"/api/v1/me/providers/invalid-provider")
 
       assert resp.status == 400
-      assert json_response(resp, 400)["error"] =~ "Unknown provider"
+      assert json_response(resp, 400)["error"] == "unknown_provider"
     end
   end
 
@@ -72,15 +72,14 @@ defmodule GamendWeb.Api.V1.ProviderControllerTest do
 
       resp = post(conn, ~p"/api/v1/me/device", %{device_id: device_id})
 
-      assert resp.status == 400
-      assert json_response(resp, 400)["error"] =~ "Failed to link device_id"
+      assert json_response(resp, 422)["error"] == "validation_failed"
     end
 
     test "returns error when device_id missing", %{conn: conn} do
       resp = post(conn, ~p"/api/v1/me/device", %{})
 
       assert resp.status == 400
-      assert json_response(resp, 400)["error"] =~ "device_id is required"
+      assert json_response(resp, 400)["error"] == "missing_param"
     end
   end
 
@@ -113,7 +112,7 @@ defmodule GamendWeb.Api.V1.ProviderControllerTest do
       resp = delete(conn, ~p"/api/v1/me/device")
 
       assert resp.status == 400
-      assert json_response(resp, 400)["error"] =~ "last authentication method"
+      assert json_response(resp, 400)["error"] == "last_auth_method"
     end
 
     test "returns success when device_id already nil", %{conn: conn} do

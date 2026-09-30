@@ -7,8 +7,11 @@ defmodule GamendWeb.AdminLive.ChatMutes do
 
   alias Gamend.Accounts.Scope
   alias Gamend.Chat
+  alias Gamend.Chat.Moderation.Cache
   alias Gamend.Chat.Moderation.Notices
   alias Gamend.Chat.Mute
+  alias GamendWeb.AdminLive.Shared
+  alias GamendWeb.LiveHelpers
 
   @empty_form %{
     "user_id" => "",
@@ -83,11 +86,11 @@ defmodule GamendWeb.AdminLive.ChatMutes do
 
     user_id = String.trim(form["user_id"] || "")
     scope = form["scope"] || "global"
-    scope_ref_id = presence(String.trim(form["scope_ref_id"] || ""))
+    scope_ref_id = Gamend.Parse.blank_to_nil(String.trim(form["scope_ref_id"] || ""))
 
     attrs = %{
       "expires_at" => expires_at(form["duration"]),
-      "reason" => presence(String.trim(form["reason"] || "")),
+      "reason" => Gamend.Parse.blank_to_nil(String.trim(form["reason"] || "")),
       "muted_by" => Scope.user_id(socket.assigns.current_scope)
     }
 
@@ -181,7 +184,7 @@ defmodule GamendWeb.AdminLive.ChatMutes do
 
     attrs = %{
       "expires_at" => edit_expires_at(form["duration"], mute),
-      "reason" => presence(String.trim(form["reason"] || "")),
+      "reason" => Gamend.Parse.blank_to_nil(String.trim(form["reason"] || "")),
       "muted_by" => Scope.user_id(socket.assigns.current_scope)
     }
 
@@ -205,22 +208,14 @@ defmodule GamendWeb.AdminLive.ChatMutes do
     {:noreply, reload(socket)}
   end
 
-  def handle_event("prev_page", _params, socket) do
-    {:noreply, socket |> assign(:page, max(socket.assigns.page - 1, 1)) |> reload()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload()}
 
-  def handle_event("next_page", _params, socket) do
-    page = min(socket.assigns.page + 1, max(socket.assigns.total_pages, 1))
-    {:noreply, socket |> assign(:page, page) |> reload()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload()}
 
-  def handle_event("page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:page_size, String.to_integer(size))
-     |> assign(:page, 1)
-     |> reload()}
-  end
+  def handle_event("page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload()}
 
   def handle_event("refresh", _params, socket) do
     {:noreply, reload(socket)}
@@ -230,7 +225,7 @@ defmodule GamendWeb.AdminLive.ChatMutes do
 
   defp reload(socket) do
     filters = %{
-      "scope" => presence(socket.assigns.scope_filter),
+      "scope" => Gamend.Parse.blank_to_nil(socket.assigns.scope_filter),
       "active" => socket.assigns.active_only
     }
 
@@ -242,14 +237,9 @@ defmodule GamendWeb.AdminLive.ChatMutes do
     socket
     |> assign(:mutes, mutes)
     |> assign(:count, total)
-    |> assign(:total_pages, ceil_div(total, socket.assigns.page_size))
+    |> assign(:cached_mutes, Cache.mute_count())
+    |> assign(:total_pages, LiveHelpers.total_pages(total, socket.assigns.page_size))
   end
-
-  defp presence(""), do: nil
-  defp presence(value), do: value
-
-  defp ceil_div(_num, 0), do: 0
-  defp ceil_div(num, den), do: div(num + den - 1, den)
 
   defp expires_at("10m"), do: from_now(600)
   defp expires_at("1h"), do: from_now(3_600)
@@ -261,18 +251,8 @@ defmodule GamendWeb.AdminLive.ChatMutes do
     DateTime.add(DateTime.utc_now(:second), seconds, :second)
   end
 
-  defp duration_options do
-    [
-      {"10m", gettext("10 minutes")},
-      {"1h", gettext("1 hour")},
-      {"24h", gettext("24 hours")},
-      {"7d", gettext("7 days")},
-      {"permanent", gettext("Permanent")}
-    ]
-  end
-
   defp edit_duration_options do
-    [{"keep", gettext("Keep current expiry")} | duration_options()]
+    [{"keep", gettext("Keep current expiry")} | Shared.duration_options()]
   end
 
   defp edit_expires_at("keep", mute), do: mute.expires_at
@@ -290,7 +270,7 @@ defmodule GamendWeb.AdminLive.ChatMutes do
     Notices.default_mute_message(%Mute{
       scope: form["scope"] || "global",
       expires_at: expires_at(form["duration"]),
-      reason: presence(String.trim(form["reason"] || ""))
+      reason: Gamend.Parse.blank_to_nil(String.trim(form["reason"] || ""))
     })
   end
 
@@ -298,7 +278,7 @@ defmodule GamendWeb.AdminLive.ChatMutes do
     Notices.default_mute_message(%{
       mute
       | expires_at: edit_expires_at(form["duration"], mute),
-        reason: presence(String.trim(form["reason"] || ""))
+        reason: Gamend.Parse.blank_to_nil(String.trim(form["reason"] || ""))
     })
   end
 
@@ -350,7 +330,19 @@ defmodule GamendWeb.AdminLive.ChatMutes do
       <div class="card bg-base-200">
         <div class="card-body">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <h2 class="card-title">{gettext("Chat mutes")} ({@count})</h2>
+            <div class="flex flex-wrap items-baseline gap-2">
+              <h2 class="card-title">{gettext("Chat mutes")} ({@count})</h2>
+              <span
+                class="badge badge-sm badge-ghost"
+                title={
+                  gettext(
+                    "Unexpired mutes loaded into this node's memory. Enforcement reads this, not the database."
+                  )
+                }
+              >
+                {gettext("%{n} on this node", n: @cached_mutes)}
+              </span>
+            </div>
             <button phx-click="refresh" class="btn btn-ghost btn-sm">{gettext("Refresh")}</button>
           </div>
 
@@ -407,7 +399,7 @@ defmodule GamendWeb.AdminLive.ChatMutes do
               <label class="label text-xs">{gettext("Duration")}</label>
               <select name="duration" class="select select-bordered select-sm">
                 <option
-                  :for={{value, label} <- duration_options()}
+                  :for={{value, label} <- Shared.duration_options()}
                   value={value}
                   selected={@form["duration"] == value}
                 >

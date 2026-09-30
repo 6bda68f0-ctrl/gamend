@@ -35,8 +35,10 @@ defmodule GamendWeb.Api.V1.Admin.StorageControllerTest do
 
     body = json_response(get(conn, "/api/v1/admin/storage"), 200)
 
-    assert body["usage"]["count"] == 2
-    assert body["usage"]["bytes"] == 6
+    assert body["meta"]["total_count"] == 2
+
+    usage = json_response(get(conn, "/api/v1/admin/storage/usage"), 200)["data"]
+    assert usage == %{"count" => 2, "bytes" => 6}
     assert length(body["data"]) == 2
     assert body["meta"]["total_count"] == 2
     assert Enum.all?(body["data"], &Map.has_key?(&1, "key"))
@@ -47,7 +49,10 @@ defmodule GamendWeb.Api.V1.Admin.StorageControllerTest do
     Storage.put("uploads/admin/x.png", "x", content_type: "image/png")
 
     body = json_response(get(conn, "/api/v1/admin/storage?prefix=avatars/"), 200)
-    assert body["usage"]["count"] == 1
+    assert body["meta"]["total_count"] == 1
+
+    usage = json_response(get(conn, "/api/v1/admin/storage/usage?prefix=avatars/"), 200)["data"]
+    assert usage["count"] == 1
     assert hd(body["data"])["key"] == "avatars/a/1.png"
   end
 
@@ -55,7 +60,9 @@ defmodule GamendWeb.Api.V1.Admin.StorageControllerTest do
     Storage.put("avatars/a/1.png", "x", content_type: "image/png")
     assert Storage.exists?("avatars/a/1.png")
 
-    assert json_response(delete(conn, "/api/v1/admin/storage?key=avatars/a/1.png"), 200)["ok"]
+    assert json_response(delete(conn, "/api/v1/admin/storage?key=avatars/a/1.png"), 200) ==
+             %{"ok" => true}
+
     refute Storage.exists?("avatars/a/1.png")
   end
 
@@ -67,7 +74,7 @@ defmodule GamendWeb.Api.V1.Admin.StorageControllerTest do
       |> put_req_header("content-type", "text/plain")
       |> put("/api/v1/admin/storage/object?key=#{URI.encode_www_form(key)}", "ADMIN BYTES")
 
-    assert json_response(up, 200)["key"] == key
+    assert %{"key" => ^key, "size" => _} = json_response(up, 201)["data"]
     assert Storage.exists?(key)
 
     down = get(conn, "/api/v1/admin/storage/object?key=#{URI.encode_www_form(key)}")

@@ -188,6 +188,20 @@ defmodule Gamend.Parties do
   end
 
   @doc ~S"""
+    How many pending party invites the user has, for paging.
+  """
+  @spec count_party_invitations(Gamend.Accounts.User.t()) :: non_neg_integer()
+  def count_party_invitations(_user) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        0
+
+      _ ->
+        raise "Gamend.Parties.count_party_invitations/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
     Count members in a party.
   """
   @spec count_party_members(Ecto.UUID.t()) :: non_neg_integer()
@@ -198,6 +212,20 @@ defmodule Gamend.Parties do
 
       _ ->
         raise "Gamend.Parties.count_party_members/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    How many pending party invites the leader has sent, for paging.
+  """
+  @spec count_sent_party_invitations(Gamend.Accounts.User.t()) :: non_neg_integer()
+  def count_sent_party_invitations(_user) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        0
+
+      _ ->
+        raise "Gamend.Parties.count_sent_party_invitations/1 is a stub - only available at runtime on Gamend"
     end
   end
 
@@ -442,14 +470,17 @@ defmodule Gamend.Parties do
     List pending party invites for the given user.
     
   """
-  @spec list_party_invitations(Gamend.Accounts.User.t()) :: [map()]
-  def list_party_invitations(_user) do
+  @spec list_party_invitations(
+          Gamend.Accounts.User.t(),
+          keyword()
+        ) :: [map()]
+  def list_party_invitations(_user, _opts \\ []) do
     case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
       :placeholder ->
         %{}
 
       _ ->
-        raise "Gamend.Parties.list_party_invitations/1 is a stub - only available at runtime on Gamend"
+        raise "Gamend.Parties.list_party_invitations/2 is a stub - only available at runtime on Gamend"
     end
   end
 
@@ -459,14 +490,17 @@ defmodule Gamend.Parties do
     Returns invitations the leader has sent that have not yet been accepted or declined.
     
   """
-  @spec list_sent_party_invitations(Gamend.Accounts.User.t()) :: [map()]
-  def list_sent_party_invitations(_leader) do
+  @spec list_sent_party_invitations(
+          Gamend.Accounts.User.t(),
+          keyword()
+        ) :: [map()]
+  def list_sent_party_invitations(_leader, _opts \\ []) do
     case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
       :placeholder ->
         %{}
 
       _ ->
-        raise "Gamend.Parties.list_sent_party_invitations/1 is a stub - only available at runtime on Gamend"
+        raise "Gamend.Parties.list_sent_party_invitations/2 is a stub - only available at runtime on Gamend"
     end
   end
 

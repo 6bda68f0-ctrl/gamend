@@ -23,6 +23,7 @@ defmodule GamendWeb.Api.V1.PushTokenControllerTest do
         device_id: "pixel-9"
       })
       |> json_response(201)
+      |> Map.fetch!("data")
 
     assert body["token"] == "fcm-token-1"
     assert body["platform"] == "android"
@@ -36,11 +37,13 @@ defmodule GamendWeb.Api.V1.PushTokenControllerTest do
       conn
       |> post("/api/v1/me/push_tokens", %{token: "t1", platform: "ios", device_id: "iphone"})
       |> json_response(201)
+      |> Map.fetch!("data")
 
     second =
       conn
       |> post("/api/v1/me/push_tokens", %{token: "t2", platform: "ios", device_id: "iphone"})
       |> json_response(201)
+      |> Map.fetch!("data")
 
     assert first["id"] == second["id"]
     assert second["token"] == "t2"
@@ -100,7 +103,9 @@ defmodule GamendWeb.Api.V1.PushTokenControllerTest do
     assert %{"error" => "not_found"} =
              json_response(delete(conn, "/api/v1/me/push_tokens/#{other_token.id}"), 404)
 
-    assert %{"id" => _} = json_response(delete(conn, "/api/v1/me/push_tokens/#{mine.id}"), 200)
+    assert %{"id" => _} =
+             json_response(delete(conn, "/api/v1/me/push_tokens/#{mine.id}"), 200)["data"]
+
     assert Push.count_tokens(user.id) == 0
 
     assert %{"error" => "not_found"} =

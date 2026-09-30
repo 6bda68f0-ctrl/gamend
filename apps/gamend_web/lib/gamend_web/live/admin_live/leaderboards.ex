@@ -4,6 +4,7 @@ defmodule GamendWeb.AdminLive.Leaderboards do
   alias Gamend.Leaderboards
   alias Gamend.Leaderboards.Leaderboard
   alias Gamend.Leaderboards.Record
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -39,7 +40,13 @@ defmodule GamendWeb.AdminLive.Leaderboards do
                 <button
                   type="button"
                   phx-click="bulk_delete"
-                  data-confirm={"Delete #{MapSet.size(@selected_ids)} selected leaderboards and all their records?"}
+                  data-confirm={
+                    ngettext(
+                      "Delete %{count} selected leaderboard and all its records?",
+                      "Delete %{count} selected leaderboards and all their records?",
+                      MapSet.size(@selected_ids)
+                    )
+                  }
                   class="btn btn-sm btn-outline btn-error"
                   disabled={MapSet.size(@selected_ids) == 0}
                 >
@@ -96,7 +103,6 @@ defmodule GamendWeb.AdminLive.Leaderboards do
                     <th>Operator</th>
                     <th>Status</th>
                     <th>Records</th>
-                    <th>i18n</th>
                     <th>Created</th>
                     <th>Actions</th>
                   </tr>
@@ -170,7 +176,7 @@ defmodule GamendWeb.AdminLive.Leaderboards do
                           phx-click="new_season_from"
                           phx-value-id={lb.id}
                           class="btn btn-xs btn-outline btn-success"
-                          title="Create new season with same settings"
+                          title="Create a new season with the same settings"
                         >
                           + Season
                         </button>
@@ -209,7 +215,7 @@ defmodule GamendWeb.AdminLive.Leaderboards do
                 <.input
                   field={@form[:slug]}
                   type="text"
-                  label="Slug (unique identifier, e.g. weekly_kills)"
+                  label="Slug (shared by every season, e.g. weekly_kills)"
                 />
               <% else %>
                 <div class="form-control">
@@ -470,7 +476,11 @@ defmodule GamendWeb.AdminLive.Leaderboards do
     socket =
       cond do
         failed == 0 ->
-          put_flash(socket, :info, "Deleted #{deleted} leaderboards")
+          put_flash(
+            socket,
+            :info,
+            ngettext("Deleted %{count} leaderboard", "Deleted %{count} leaderboards", deleted)
+          )
 
         deleted == 0 ->
           put_flash(socket, :error, "Failed to delete selected leaderboards")
@@ -479,34 +489,26 @@ defmodule GamendWeb.AdminLive.Leaderboards do
           put_flash(
             socket,
             :error,
-            "Deleted #{deleted} leaderboards; failed #{failed}"
+            ngettext(
+              "Deleted %{count} leaderboard; %{failed} failed",
+              "Deleted %{count} leaderboards; %{failed} failed",
+              deleted,
+              failed: failed
+            )
           )
       end
 
     {:noreply, socket |> reload_leaderboards()}
   end
 
-  def handle_event("prev_page", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:page, max(1, socket.assigns.page - 1))
-     |> reload_leaderboards()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload_leaderboards()}
 
-  def handle_event("next_page", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:page, socket.assigns.page + 1)
-     |> reload_leaderboards()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload_leaderboards()}
 
-  def handle_event("leaderboards_page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:page_size, String.to_integer(size))
-     |> assign(:page, 1)
-     |> reload_leaderboards()}
-  end
+  def handle_event("leaderboards_page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload_leaderboards()}
 
   def handle_event("new_leaderboard", _, socket) do
     changeset = Leaderboards.change_leaderboard(%Leaderboard{})
@@ -560,35 +562,9 @@ defmodule GamendWeb.AdminLive.Leaderboards do
   end
 
   def handle_event("save_leaderboard", %{"leaderboard" => params}, socket) do
-    # Parse metadata JSON
-    params =
-      Map.update(params, "metadata", %{}, fn metadata_str ->
-        case Jason.decode(metadata_str) do
-          {:ok, map} when is_map(map) -> map
-          _ -> %{}
-        end
-      end)
-
-    result =
-      case socket.assigns.selected_leaderboard do
-        nil ->
-          Leaderboards.create_leaderboard(params)
-
-        lb ->
-          Leaderboards.update_leaderboard(lb, params)
-      end
-
-    case result do
-      {:ok, _lb} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Leaderboard saved")
-         |> assign(:selected_leaderboard, nil)
-         |> assign(:form, nil)
-         |> reload_leaderboards()}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :form, to_form(changeset, as: "leaderboard"))}
+    case decode_metadata(params) do
+      {:ok, params} -> save_leaderboard(socket, params)
+      :error -> {:noreply, put_flash(socket, :error, "Metadata must be a JSON object")}
     end
   end
 
@@ -640,19 +616,11 @@ defmodule GamendWeb.AdminLive.Leaderboards do
      |> assign(:records, [])}
   end
 
-  def handle_event("records_prev_page", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:records_page, max(1, socket.assigns.records_page - 1))
-     |> reload_records()}
-  end
+  def handle_event("records_prev_page", _, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page(:records_page) |> reload_records()}
 
-  def handle_event("records_next_page", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:records_page, socket.assigns.records_page + 1)
-     |> reload_records()}
-  end
+  def handle_event("records_next_page", _, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page(:records_page) |> reload_records()}
 
   def handle_event("add_record", _, socket) do
     changeset = Leaderboards.change_record(%Record{})
@@ -683,41 +651,9 @@ defmodule GamendWeb.AdminLive.Leaderboards do
   end
 
   def handle_event("save_record", %{"record" => params}, socket) do
-    lb = socket.assigns.selected_leaderboard
-
-    # Parse metadata JSON
-    params =
-      Map.update(params, "metadata", %{}, fn metadata_str ->
-        case Jason.decode(metadata_str) do
-          {:ok, map} when is_map(map) -> map
-          _ -> %{}
-        end
-      end)
-
-    result =
-      case socket.assigns.editing_record do
-        nil ->
-          # Create new record via submit_score
-          user_id = params["user_id"]
-          score = String.to_integer(params["score"])
-          Leaderboards.submit_score(lb.id, user_id, score, params["metadata"] || %{})
-
-        record ->
-          # Update existing record
-          Leaderboards.update_record(record, params)
-      end
-
-    case result do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Record saved")
-         |> assign(:editing_record, nil)
-         |> assign(:record_form, nil)
-         |> reload_records()}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :record_form, to_form(changeset, as: "record"))}
+    case decode_metadata(params) do
+      {:ok, params} -> save_record(socket, params)
+      :error -> {:noreply, put_flash(socket, :error, "Metadata must be a JSON object")}
     end
   end
 
@@ -740,6 +676,91 @@ defmodule GamendWeb.AdminLive.Leaderboards do
   # Helpers
   # ---------------------------------------------------------------------------
 
+  # Text that is not a JSON object is refused rather than saved as %{}, which
+  # would wipe the metadata behind a success flash. Empty means no metadata.
+  defp decode_metadata(params) do
+    case String.trim(Map.get(params, "metadata") || "") do
+      "" ->
+        {:ok, Map.put(params, "metadata", %{})}
+
+      json ->
+        case Jason.decode(json) do
+          {:ok, map} when is_map(map) -> {:ok, Map.put(params, "metadata", map)}
+          _ -> :error
+        end
+    end
+  end
+
+  defp save_leaderboard(socket, params) do
+    result =
+      case socket.assigns.selected_leaderboard do
+        nil ->
+          Leaderboards.create_leaderboard(params)
+
+        lb ->
+          Leaderboards.update_leaderboard(lb, params)
+      end
+
+    case result do
+      {:ok, _lb} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Leaderboard saved")
+         |> assign(:selected_leaderboard, nil)
+         |> assign(:form, nil)
+         |> reload_leaderboards()}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :form, to_form(changeset, as: "leaderboard"))}
+    end
+  end
+
+  defp save_record(socket, params) do
+    lb = socket.assigns.selected_leaderboard
+
+    result =
+      case socket.assigns.editing_record do
+        nil ->
+          # Create new record via submit_score. Parsed strictly: this used
+          # `String.to_integer/1`, which crashed the page on a non-numeric score.
+          case Gamend.Parse.integer(params["score"]) do
+            nil ->
+              {:error, :invalid_score}
+
+            score ->
+              Leaderboards.submit_score(
+                lb.id,
+                params["user_id"] || "",
+                score,
+                params["metadata"] || %{}
+              )
+          end
+
+        record ->
+          # Update existing record
+          Leaderboards.update_record(record, params)
+      end
+
+    case result do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Record saved")
+         |> assign(:editing_record, nil)
+         |> assign(:record_form, nil)
+         |> reload_records()}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, :record_form, to_form(changeset, as: "record"))}
+
+      # `submit_score/4` also answers with atoms (`:leaderboard_ended`,
+      # `:user_not_found`), which this passed to `to_form/2` as if they were
+      # changesets — a crash, not a message.
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not save record: #{reason}")}
+    end
+  end
+
   defp reload_leaderboards(socket) do
     page = socket.assigns[:page] || 1
     page_size = socket.assigns[:page_size] || 25
@@ -750,7 +771,7 @@ defmodule GamendWeb.AdminLive.Leaderboards do
 
     leaderboards = Leaderboards.list_leaderboards(opts)
     count = Leaderboards.count_leaderboards(Keyword.take(opts, [:active]))
-    total_pages = if page_size > 0, do: div(count + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(count, page_size)
 
     socket
     |> assign(:leaderboards, leaderboards)
@@ -779,7 +800,7 @@ defmodule GamendWeb.AdminLive.Leaderboards do
 
     records = Leaderboards.list_records(lb.id, page: page, page_size: page_size)
     count = Leaderboards.count_records(lb.id)
-    total_pages = if page_size > 0, do: div(count + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(count, page_size)
 
     socket
     |> assign(:records, records)

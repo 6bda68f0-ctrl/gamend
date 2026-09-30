@@ -71,7 +71,7 @@ defmodule GamendWeb.StoreLiveTest do
 
     assert html =~ "Checkout returned."
     assert html =~ purchase.order_id
-    assert html =~ "waiting for Stripe webhook confirmation"
+    assert html =~ "waiting for payment confirmation"
     refute html =~ "requires_action"
   end
 

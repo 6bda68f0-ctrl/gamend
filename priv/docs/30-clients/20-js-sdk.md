@@ -15,6 +15,9 @@ realtime.
 npm i @ughuuu/game_server
 ```
 
+That is the whole install. The HTTP client, the Phoenix channel wrapper and the
+protobuf codec all arrive with the package, so there is nothing else to add.
+
 ## Connect
 
 ```javascript
@@ -43,11 +46,15 @@ const { access_token, refresh_token, user_id } = (await authApi.login({
 apiClient.defaultHeaders = { Authorization: `Bearer ${access_token}` };
 ```
 
-Access tokens last 15 minutes, refresh tokens 30 days. Refresh before the
-access token expires, or retry once on a `401`:
+Access tokens last 15 minutes and refresh tokens 30 days, unless the server
+sets otherwise; `expires_in` on every login and refresh gives the access
+token's lifetime in seconds. Refresh before the access token expires, or retry
+once on a `401`:
 
 ```javascript
-const refreshed = await authApi.refresh({ refreshRequest: { refresh_token } });
+const refreshed = (await authApi.refreshToken({
+  refreshTokenRequest: { refresh_token }
+})).data;
 apiClient.defaultHeaders = { Authorization: `Bearer ${refreshed.access_token}` };
 ```
 
@@ -57,17 +64,17 @@ The browser flow hands off to the provider and polls for the result, so it
 works from a game client with no redirect handler of its own:
 
 ```javascript
-const { authorization_url, session_id } = await authApi.oauthRequest('discord');
+const { authorization_url, session_id } = (await authApi.oauthRequest('discord')).data;
 window.open(authorization_url, '_blank');
 
 let session;
 do {
   await new Promise(r => setTimeout(r, 1000));
-  session = await authApi.oauthSessionStatus(session_id);
+  session = (await authApi.oauthSessionStatus(session_id)).data;
 } while (session.status === 'pending');
 
 if (session.status === 'completed') {
-  const { access_token, refresh_token, user_id } = session.data;
+  const { access_token, refresh_token, user_id } = session.result;
 }
 ```
 
@@ -81,7 +88,7 @@ server's JSON body:
 
 ```javascript
 try {
-  await lobbiesApi.joinLobby({ joinLobbyRequest: { lobby_id: id } });
+  await lobbiesApi.joinLobby(id);
 } catch (e) {
   switch (e.status) {
     case 401: /* token expired - refresh and retry */ break;

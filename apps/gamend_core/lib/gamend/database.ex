@@ -17,6 +17,7 @@ defmodule Gamend.Database do
     label: "Database"
 
   setting(:adapter, :atom,
+    values: [:sqlite, :postgres],
     default: :sqlite,
     doc: "sqlite or postgres. Compile-time; set as a build arg, not at boot."
   )
@@ -54,6 +55,7 @@ defmodule Gamend.Database do
   # This also brings the two adapters level: SQLite already makes exactly this
   # trade on your behalf with `synchronous = NORMAL`.
   setting(:postgres_synchronous_commit, :atom,
+    values: [:on, :off, :local, :remote_write, :remote_apply],
     default: :off,
     doc:
       "on | off | local | remote_write | remote_apply. Defaults to `off`: up to ~600ms " <>
@@ -89,6 +91,7 @@ defmodule Gamend.Database do
   )
 
   setting(:sqlite_synchronous, :atom,
+    values: [:off, :normal, :full, :extra],
     default: :normal,
     doc: "off | normal | full | extra. Lower means fewer fsyncs and less durability."
   )

@@ -39,7 +39,7 @@ defmodule GamendWeb.UserLive.Registration do
           </.button>
         </.form>
 
-        <.oauth_buttons label={gettext("Register")} />
+        <.oauth_buttons action={:register} />
       </div>
     </Layouts.app>
     """
@@ -53,10 +53,10 @@ defmodule GamendWeb.UserLive.Registration do
     {:ok, Phoenix.LiveView.redirect(socket, external: ~p"/users/settings")}
   end
 
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     changeset = Accounts.change_user_email(%User{}, %{}, validate_unique: false)
 
-    client_ip = GamendWeb.LiveHelpers.client_ip(socket)
+    client_ip = GamendWeb.LiveHelpers.client_ip(socket, session)
 
     {:ok,
      socket
@@ -106,9 +106,7 @@ defmodule GamendWeb.UserLive.Registration do
         is_first_user = user.is_admin
 
         if is_first_user do
-          # First user: auto-confirm and auto-login
-          {:ok, user} = Accounts.confirm_user(user)
-
+          # First user: registered confirmed, and logged in straight away.
           # Generate a magic link token for auto-login
           {token, user_token} = UserToken.build_email_token(user, "login")
           Repo.insert!(user_token)
@@ -122,13 +120,13 @@ defmodule GamendWeb.UserLive.Registration do
            )
            |> push_navigate(to: ~p"/users/log_in/#{token}")}
         else
-          # Not the first user: a confirmation email was sent inside the
-          # registration transaction. Inform the user to check their inbox.
+          # Not the first user: the confirmation email is queued and goes out
+          # in the background. Inform the user to check their inbox.
           {:noreply,
            socket
            |> put_flash(
              :info,
-             gettext("Success.")
+             gettext("Account created. Check your email for a link to confirm it.")
            )
            |> push_navigate(to: ~p"/users/log_in")}
         end
@@ -137,8 +135,8 @@ defmodule GamendWeb.UserLive.Registration do
         {:noreply, socket |> assign(check_errors: true) |> assign_form(changeset)}
 
       {:error, reason} ->
-        # If email delivery failed the user creation was rolled back. Keep the
-        # form open and present a friendly error message.
+        # A `before_user_register` plugin refused the sign-up (the email is
+        # queued, so it cannot fail here). Keep the form open.
         require Logger
         Logger.error("register_user_and_deliver failed: #{inspect(reason)}")
 

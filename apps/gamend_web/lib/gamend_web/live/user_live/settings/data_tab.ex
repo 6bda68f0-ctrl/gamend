@@ -8,6 +8,7 @@ defmodule GamendWeb.UserLive.Settings.DataTab do
   import Phoenix.LiveView, only: [stream: 4]
 
   alias Gamend.KV
+  alias GamendWeb.LiveHelpers
 
   @page_size 50
 
@@ -148,7 +149,7 @@ defmodule GamendWeb.UserLive.Settings.DataTab do
 
     entries = KV.list_entries(page: page, page_size: page_size, key: key, user_id: user.id)
     count = KV.count_entries(key: key, user_id: user.id)
-    total_pages = if page_size > 0, do: div(count + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(count, page_size)
 
     socket
     |> stream(:kv_entries, entries, reset: true, dom_id: &"user-kv-#{&1.id}")

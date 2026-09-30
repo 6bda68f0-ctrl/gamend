@@ -36,7 +36,7 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
         |> post("/api/v1/parties", %{max_size: 4})
 
       assert conn.status == 201
-      body = json_response(conn, 201)
+      body = json_response(conn, 201)["data"]
       assert body["leader_id"] == user.id
       assert Map.has_key?(body, "leader_name")
       assert body["max_size"] == 4
@@ -72,7 +72,7 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
         |> auth_conn(user)
         |> get("/api/v1/parties/me")
 
-      body = json_response(conn, 200)
+      body = json_response(conn, 200)["data"]
       assert body["id"] == party.id
       assert body["leader_id"] == user.id
       assert Map.has_key?(body, "leader_name")
@@ -103,7 +103,7 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
         |> auth_conn(member)
         |> post("/api/v1/parties/leave")
 
-      assert json_response(conn, 200) == %{}
+      assert json_response(conn, 200) == %{"ok" => true}
 
       # Party should still exist (leader didn't leave)
       assert Parties.get_party(party.id) != nil
@@ -118,7 +118,7 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
         |> auth_conn(leader)
         |> post("/api/v1/parties/leave")
 
-      assert json_response(conn, 200) == %{}
+      assert json_response(conn, 200) == %{"ok" => true}
       assert is_nil(Parties.get_party(party.id))
     end
 
@@ -133,7 +133,7 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
         |> auth_conn(leader)
         |> post("/api/v1/parties/leave")
 
-      assert json_response(conn, 200) == %{}
+      assert json_response(conn, 200) == %{"ok" => true}
       assert Parties.get_party(party.id).leader_id == member.id
     end
   end
@@ -150,7 +150,7 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
         |> auth_conn(leader)
         |> post("/api/v1/parties/disband")
 
-      assert json_response(conn, 200) == %{}
+      assert json_response(conn, 200) == %{"ok" => true}
       assert is_nil(Parties.get_party(party.id))
       assert is_nil(Gamend.Accounts.get_user(member.id).party_id)
     end
@@ -184,6 +184,77 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
     end
   end
 
+  describe "party invites" do
+    # The leader may invite friends, so each invitee is made one first.
+    defp befriend(a, b) do
+      {:ok, request} = Gamend.Friends.create_request(a, b.id)
+      {:ok, _} = Gamend.Friends.accept_friend_request(request.id, b)
+    end
+
+    test "invite, list both ways, accept, cancel and decline", %{conn: conn} do
+      leader = AccountsFixtures.user_fixture()
+      [joiner, cancelled, decliner] = for _ <- 1..3, do: AccountsFixtures.user_fixture()
+      Enum.each([joiner, cancelled, decliner], &befriend(leader, &1))
+
+      party =
+        conn
+        |> auth_conn(leader)
+        |> post("/api/v1/parties", %{max_size: 4})
+        |> json_response(201)
+        |> Map.fetch!("data")
+
+      for user <- [joiner, cancelled, decliner] do
+        assert conn
+               |> auth_conn(leader)
+               |> post("/api/v1/parties/invite", %{target_user_id: user.id})
+               |> json_response(200) == %{"ok" => true}
+      end
+
+      %{"data" => sent, "meta" => %{"total_count" => 3}} =
+        conn |> auth_conn(leader) |> get("/api/v1/parties/invitations/sent") |> json_response(200)
+
+      assert Enum.sort(Enum.map(sent, & &1["recipient_id"])) ==
+               Enum.sort([joiner.id, cancelled.id, decliner.id])
+
+      %{"data" => [received]} =
+        conn |> auth_conn(joiner) |> get("/api/v1/parties/invitations") |> json_response(200)
+
+      assert received["party_id"] == party["id"]
+      assert received["sender_id"] == leader.id
+
+      joined =
+        conn
+        |> auth_conn(joiner)
+        |> post("/api/v1/parties/invite/accept", %{party_id: party["id"]})
+        |> json_response(200)
+        |> Map.fetch!("data")
+
+      assert Enum.any?(joined["members"], &(&1["id"] == joiner.id))
+
+      assert conn
+             |> auth_conn(leader)
+             |> post("/api/v1/parties/invite/cancel", %{target_user_id: cancelled.id})
+             |> json_response(200) == %{"ok" => true}
+
+      assert conn
+             |> auth_conn(decliner)
+             |> post("/api/v1/parties/invite/decline", %{party_id: party["id"]})
+             |> json_response(200) == %{"ok" => true}
+
+      assert conn
+             |> auth_conn(cancelled)
+             |> get("/api/v1/parties/invitations")
+             |> json_response(200)
+             |> Map.fetch!("data") == []
+
+      assert conn
+             |> auth_conn(decliner)
+             |> get("/api/v1/parties/invitations")
+             |> json_response(200)
+             |> Map.fetch!("data") == []
+    end
+  end
+
   describe "POST /api/v1/parties/kick" do
     test "leader can kick a member", %{conn: conn} do
       leader = AccountsFixtures.user_fixture()
@@ -196,7 +267,7 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
         |> auth_conn(leader)
         |> post("/api/v1/parties/kick", %{target_user_id: member.id})
 
-      assert json_response(conn, 200) == %{}
+      assert json_response(conn, 200) == %{"ok" => true}
     end
 
     test "non-leader cannot kick", %{conn: conn} do
@@ -224,7 +295,7 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
         |> auth_conn(leader)
         |> patch("/api/v1/parties", %{max_size: 8})
 
-      body = json_response(conn, 200)
+      body = json_response(conn, 200)["data"]
       assert body["max_size"] == 8
     end
   end
@@ -243,7 +314,7 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
         |> post("/api/v1/parties/create_lobby", %{title: "party-lobby", max_users: 8})
 
       assert conn.status == 201
-      body = json_response(conn, 201)
+      body = json_response(conn, 201)["data"]
       assert body["title"] == "party-lobby"
 
       # Party should still exist
@@ -282,7 +353,7 @@ defmodule GamendWeb.Api.V1.PartyControllerTest do
         |> auth_conn(leader)
         |> post("/api/v1/parties/join_lobby/#{lobby.id}")
 
-      body = json_response(conn, 200)
+      body = json_response(conn, 200)["data"]
       assert body["id"] == lobby.id
 
       # Party should still exist

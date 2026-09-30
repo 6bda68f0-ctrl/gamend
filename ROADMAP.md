@@ -1,7 +1,5 @@
 ## 2026
 
-- **Rename to Gamend** — repo, code and docs.
-- **Chat moderation** — word filter, reports, mute.
 - **Cloud saves** — versioned save slots on object storage.
 - **Skill matchmaking** — ratings, widening bands, leaver refill.
 - **Webhooks & remote config** — signed and retried, on the job queue.
@@ -10,4 +8,4 @@
 - **Economy extensions** — regenerating currencies (lives / energy), store presets.
 - **Realtime** — generalize the WebRTC layer; KV prefix queries and streaming.
 - **Integrations** — Discord notifications; an analytics pipeline once event volume demands one.
-- **SDKs** — Unity and Unreal, driven by demand.
+- **SDKs** — C#/Unity, and an Unreal plugin on the C++ SDK; see `docs/specs/client-sdks.md`.

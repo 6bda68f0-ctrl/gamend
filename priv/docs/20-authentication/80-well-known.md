@@ -6,14 +6,14 @@ icon: hero-link
 
 ## Where to put the files
 
-Place them under the web app's static folder so they are served at the web root:
+Place them under the host app's static folder (repo root `priv/static`) so they are served at the web root:
 
 ```text
-apps/gamend_web/priv/static/.well-known/assetlinks.json
-apps/gamend_web/priv/static/.well-known/apple-app-site-association
+priv/static/.well-known/assetlinks.json
+priv/static/.well-known/apple-app-site-association
 ```
 
-Example files are included in the repo with a .example suffix.
+Example files are included in that folder with a .example suffix.
 
 ## Serving rules & notes
 

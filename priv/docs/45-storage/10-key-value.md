@@ -21,7 +21,7 @@ Per-member lobby state does not survive a leave: when a user stops being a lobby
 
 ## Who can read what
 
-Clients never write KV. Writes come from server scripting or the admin API. The client surface is one endpoint, `GET /api/v1/kv/{key}` with optional `user_id` / `lobby_id` query parameters (see [/api/docs](/api/docs)), and whether it answers is decided by the `before_kv_get/2` hook. Return one access level per key:
+Clients never write KV. Writes come from server scripting or the admin API. The client surface is one endpoint, `GET /api/v1/kv/{key}` with optional `user_id` / `lobby_id` query parameters (see [/api/docs](/api/docs)), and whether it answers is decided by the `before_kv_get/2` hook. It answers the entry as the realtime `kv_updated` event carries it: `{"data": {"key", "user_id", "lobby_id", "data", "metadata"}}`, the stored value under the inner `data` and an unset owner as `""`. A missing entry is `not_found` (404), a refused read `forbidden` (403). Return one access level per key:
 
 - `:public`: any authenticated client (the default when no hook is registered)
 - `:owner_only`: only the caller matching the requested `user_id`
@@ -52,6 +52,26 @@ var row: Dictionary = await client.fetch_row("progress")
 ```
 
 `register_kv` options: `user_scoped` (default `true`, subscribing under the current user's id), `persist` (mirror to disk across sessions), `subscribe` (`false` registers cache-only). Underneath sit `GamendApi.kv_get_kv(key, user_id, lobby_id)`, `kv_subscribe_ws` / `kv_unsubscribe_ws`, and the `kv_updated` / `kv_deleted` signals.
+
+## C++ client
+
+`client.kv()` keeps the same registry and row cache:
+
+```cpp
+// Subscribes now or when the user channel joins, and again on reconnect.
+client.kv().subscribe({"progress", user_id});
+client.kv().on_change([](const gamend::KvKey& key, const gamend::KvRow& row) {
+  if (key.key == "progress" && row.exists) show(row.data);
+});
+
+// Cache-first read; a 404 caches "no row yet" (row.exists == false).
+client.kv().fetch({"progress", user_id}, false, [](const gamend::KvResult& r) {
+  if (r.ok) show(r.row.data);
+});
+```
+
+`kv().row(key)` is the latest cached value from any source. See the
+[C++ SDK](/docs/cpp-sdk) guide.
 
 ## Server scripting
 

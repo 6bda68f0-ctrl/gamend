@@ -6,6 +6,7 @@ defmodule GamendHost.Application do
   alias Gamend.Hooks.PluginManager
   alias Gamend.OAuth.Providers
   alias Gamend.Repo.AdvisoryLock
+  alias GamendWeb.Auth.Tokens
 
   @impl true
   def start(_type, _args) do
@@ -67,28 +68,22 @@ defmodule GamendHost.Application do
     end
   end
 
+  # The release's own directory is replaced on every deploy. The Docker image
+  # starts the release from that directory, so a relative path lands inside it
+  # too; a path outside it (a mounted volume, or the project folder a
+  # downloaded release is started from) survives the next deploy.
   defp ephemeral_warning(dir) do
     release? = System.get_env("RELEASE_NAME") != nil
 
     inside_release? =
-      String.starts_with?(
-        Path.expand(dir),
-        Path.expand(to_string(:code.lib_dir(:gamend_core)))
-      )
+      String.starts_with?(Path.expand(dir), Path.expand(to_string(:code.root_dir())))
 
-    if release? and (inside_release? or not absolute_and_outside_app?(dir)) do
+    if release? and inside_release? do
       " [WARNING: this path is replaced on every deploy — stored objects will be" <>
         " lost. Set GAMEND_STORAGE_DIR to a mounted volume, or use the S3 adapter]"
     else
       ""
     end
-  end
-
-  # A relative path resolves against the release's working directory, which is
-  # inside the image; only an absolute path can be a mounted volume.
-  defp absolute_and_outside_app?(dir) do
-    Path.type(dir) == :absolute and
-      not String.starts_with?(dir, Path.expand(to_string(:code.root_dir())))
   end
 
   defp database_info do
@@ -162,13 +157,13 @@ defmodule GamendHost.Application do
     end
   end
 
+  # The lifetimes are settings (`auth.*_token_ttl_*`), read through the same
+  # function Guardian signs with, so the line says what tokens really get.
   defp jwt_info do
-    guardian_config =
-      Application.get_env(:gamend_web, GamendWeb.Auth.Guardian, [])
+    %{"access" => {access, access_unit}, "refresh" => {refresh, refresh_unit}} =
+      Tokens.ttls()
 
-    ttl = guardian_config[:ttl]
-    ttl_str = if ttl, do: "#{elem(ttl, 0)} #{elem(ttl, 1)}", else: "default"
-    "JWT: Guardian (TTL: #{ttl_str})"
+    "JWT: Guardian (access TTL: #{access} #{access_unit}, refresh TTL: #{refresh} #{refresh_unit})"
   end
 
   defp oauth_info do

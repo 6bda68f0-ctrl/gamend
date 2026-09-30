@@ -6,7 +6,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
   alias GamendWeb.Auth.Guardian
 
   defmodule NoopPaymentHooks do
-    use GamendWeb.TestSupport.NoopHooks
+    use Gamend.TestSupport.NoopHooks
   end
 
   defmodule StripeAdapter do
@@ -122,6 +122,45 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
     end
   end
 
+  describe "GET /api/v1/payments/catalog paging" do
+    test "is a page", %{conn: conn} do
+      create_provider_product("stripe", "price_page_a")
+      create_provider_product("stripe", "price_page_b")
+
+      body =
+        conn
+        |> get("/api/v1/payments/catalog", %{provider: "stripe", page_size: 1})
+        |> json_response(200)
+
+      assert [%{"product" => %{"sku" => _}}] = body["data"]
+      assert body["meta"]["total_count"] >= 2
+      assert body["meta"]["has_more"] == true
+    end
+  end
+
+  describe "GET /api/v1/payments/entitlements" do
+    test "lists the caller's active entitlements as a page", %{conn: conn} do
+      user = AccountsFixtures.user_fixture()
+      {product, provider_product} = create_entitlement_provider_product("stripe", "price_owned")
+
+      {:ok, purchase} =
+        Payments.create_purchase(user, provider_product, %{
+          "provider_transaction_id" => "cs_owned_list"
+        })
+
+      {:ok, _completed} = Payments.fulfill_purchase(purchase)
+
+      body =
+        conn |> auth_conn(user) |> get("/api/v1/payments/entitlements") |> json_response(200)
+
+      assert [entitlement] = body["data"]
+      assert entitlement["key"] == product.sku
+      assert entitlement["product_id"] == product.id
+      assert entitlement["source_purchase_id"] == purchase.id
+      assert body["meta"]["total_count"] == 1
+    end
+  end
+
   describe "POST /api/v1/payments/checkout/stripe" do
     test "creates a pending purchase and returns checkout session", %{conn: conn} do
       user = AccountsFixtures.user_fixture()
@@ -181,7 +220,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
           "success_url" => "https://example.test/success",
           "cancel_url" => "https://example.test/cancel"
         })
-        |> json_response(400)
+        |> json_response(409)
 
       assert response["error"] == "already_owned"
     end
@@ -212,7 +251,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
           "success_url" => "https://example.test/success",
           "cancel_url" => "https://example.test/cancel"
         })
-        |> json_response(400)
+        |> json_response(409)
 
       assert response["error"] == "purchase_already_in_progress"
     end
@@ -231,7 +270,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
         conn
         |> auth_conn(user)
         |> post("/api/v1/payments/checkout/stripe", params)
-        |> json_response(400)
+        |> json_response(503)
 
       assert first["error"] == "stripe_not_configured"
 
@@ -239,7 +278,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
         build_conn()
         |> auth_conn(user)
         |> post("/api/v1/payments/checkout/stripe", params)
-        |> json_response(400)
+        |> json_response(503)
 
       assert second["error"] == "stripe_not_configured"
 
@@ -275,7 +314,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
         |> post("/api/v1/payments/steam/finalize", %{"order_id" => order_id})
         |> json_response(200)
 
-      assert finalized["data"]["purchase"]["status"] == "completed"
+      assert finalized["data"]["status"] == "completed"
     end
   end
 
@@ -314,7 +353,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
         |> post("/api/v1/payments/webhooks/stripe", body)
         |> json_response(200)
 
-      assert response == %{"ok" => true, "status" => "processed"}
+      assert response == %{"data" => %{"status" => "processed"}}
 
       charge_body =
         Jason.encode!(%{
@@ -335,7 +374,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
         |> post("/api/v1/payments/webhooks/stripe", charge_body)
         |> json_response(200)
 
-      assert charge_response == %{"ok" => true, "status" => "processed"}
+      assert charge_response == %{"data" => %{"status" => "processed"}}
       assert Payments.get_purchase(purchase.id).provider_original_transaction_id == "ch_paid"
 
       refund_body =
@@ -357,7 +396,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
         |> post("/api/v1/payments/webhooks/stripe", refund_body)
         |> json_response(200)
 
-      assert refund_response == %{"ok" => true, "status" => "processed"}
+      assert refund_response == %{"data" => %{"status" => "processed"}}
       assert Payments.get_purchase(purchase.id).status == "refunded"
 
       duplicate_response =
@@ -366,7 +405,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
         |> post("/api/v1/payments/webhooks/stripe", body)
         |> json_response(200)
 
-      assert duplicate_response == %{"ok" => true, "status" => "duplicate"}
+      assert duplicate_response == %{"data" => %{"status" => "duplicate"}}
     end
 
     test "marks async checkout payment failure without fulfilling", %{conn: conn} do
@@ -401,7 +440,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
         |> post("/api/v1/payments/webhooks/stripe", body)
         |> json_response(200)
 
-      assert response == %{"ok" => true, "status" => "processed"}
+      assert response == %{"data" => %{"status" => "processed"}}
       assert Payments.get_purchase(purchase.id).status == "failed"
       assert Payments.list_user_entitlements(user.id) == []
     end
@@ -438,7 +477,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
           }
         })
 
-      assert %{"ok" => true, "status" => "processed"} =
+      assert %{"data" => %{"status" => "processed"}} =
                conn
                |> json_webhook_conn()
                |> post("/api/v1/payments/webhooks/stripe", checkout_body)
@@ -462,7 +501,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
           }
         })
 
-      assert %{"ok" => true, "status" => "processed"} =
+      assert %{"data" => %{"status" => "processed"}} =
                build_conn()
                |> json_webhook_conn()
                |> post("/api/v1/payments/webhooks/stripe", update_body)
@@ -487,7 +526,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
           }
         })
 
-      assert %{"ok" => true, "status" => "processed"} =
+      assert %{"data" => %{"status" => "processed"}} =
                build_conn()
                |> json_webhook_conn()
                |> post("/api/v1/payments/webhooks/stripe", deleted_body)
@@ -495,6 +534,32 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
 
       assert Payments.get_purchase(purchase.id).status == "cancelled"
       assert Payments.list_user_entitlements(user.id) == []
+    end
+  end
+
+  describe "POST /api/v1/payments/webhooks/stripe outcomes" do
+    test "an event type the server does not act on is ignored", %{conn: conn} do
+      body = Jason.encode!(%{"id" => "evt_other", "type" => "customer.created", "data" => %{}})
+
+      response =
+        conn
+        |> json_webhook_conn()
+        |> post("/api/v1/payments/webhooks/stripe", body)
+        |> json_response(200)
+
+      assert response == %{"data" => %{"status" => "ignored"}}
+    end
+
+    test "an event with no type is refused with a code", %{conn: conn} do
+      body = Jason.encode!(%{"id" => "evt_untyped", "data" => %{}})
+
+      response =
+        conn
+        |> json_webhook_conn()
+        |> post("/api/v1/payments/webhooks/stripe", body)
+        |> json_response(400)
+
+      assert response["error"] =~ ~r/^[a-z][a-z0-9_]*$/
     end
   end
 
@@ -528,7 +593,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
         |> post("/api/v1/payments/webhooks/google", body)
         |> json_response(200)
 
-      assert response == %{"ok" => true, "status" => "processed"}
+      assert response == %{"data" => %{"status" => "processed"}}
       assert Payments.get_purchase(purchase.id).status == "refunded"
     end
   end
@@ -564,7 +629,7 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
         |> post("/api/v1/payments/webhooks/apple", body)
         |> json_response(200)
 
-      assert response == %{"ok" => true, "status" => "processed"}
+      assert response == %{"data" => %{"status" => "processed"}}
       assert Payments.get_purchase(purchase.id).status == "revoked"
     end
   end
@@ -585,6 +650,16 @@ defmodule GamendWeb.Api.V1.PaymentControllerTest do
 
       assert response["data"]["seen_before"] == false
       assert response["data"]["purchase"]["status"] == "completed"
+    end
+
+    test "an unknown provider is refused", %{conn: conn} do
+      response =
+        conn
+        |> auth_conn(AccountsFixtures.user_fixture())
+        |> post("/api/v1/payments/validate/paypal", %{"transaction_id" => "x"})
+        |> json_response(400)
+
+      assert response["error"] == "unknown_provider"
     end
   end
 

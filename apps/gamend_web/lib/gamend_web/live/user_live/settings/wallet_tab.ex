@@ -9,6 +9,7 @@ defmodule GamendWeb.UserLive.Settings.WalletTab do
   import Phoenix.LiveView, only: [stream: 4]
 
   alias Gamend.Economy
+  alias GamendWeb.LiveHelpers
 
   @page_size 50
 
@@ -137,7 +138,7 @@ defmodule GamendWeb.UserLive.Settings.WalletTab do
     filters = [user_id: user.id, page: page, page_size: page_size]
     entries = Economy.list_ledger(filters)
     count = Economy.count_ledger(filters)
-    total_pages = if page_size > 0, do: div(count + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(count, page_size)
 
     socket
     |> stream(:ledger_entries, entries, reset: true, dom_id: &"wallet-ledger-#{&1.id}")

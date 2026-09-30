@@ -76,6 +76,34 @@ defmodule Gamend.Quests do
   end
 
   @doc ~S"""
+    The active quests with an objective listening to `event`.
+    
+    `report_event/4` is the hottest write a player makes, and it used to scan
+    every active quest to find the handful that care. That is linear in the size
+    of the whole catalogue, so a host that adds a large family of quests — one
+    per language, say — pays for all of them on every unrelated event.
+    
+    Cached **per event**, not as one grouped map. Nebulex copies a value out on
+    read, so a single map of every event's quests would copy the entire
+    catalogue on every lookup, which is the cost this exists to remove. One key
+    per event copies only the quests that event can advance.
+    
+    Both keys carry `quests_version/0`, so creating, updating or deleting a
+    definition drops these along with `active_quests/0`.
+    
+  """
+  @spec active_quests_for_event(String.t()) :: [Gamend.Quests.Quest.t()]
+  def active_quests_for_event(_event) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        []
+
+      _ ->
+        raise "Gamend.Quests.active_quests_for_event/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
     Claim on a user's behalf, skipping the `before_quest_claim` veto (admin).
   """
   @spec admin_claim(user_id(), String.t()) ::
@@ -541,6 +569,25 @@ defmodule Gamend.Quests do
   end
 
   @doc ~S"""
+    The groups this viewer's quests fall into, as `%{key, title}` in the order
+    the list would show them — what a group selector offers. `title` is the
+    stored `group_title` (the first member's when they disagree), untranslated,
+    like every other stored string here. `category` narrows it the way the list
+    filter does; `nil` is the signed-out catalog.
+    
+  """
+  @spec groups(user_id() | nil, String.t() | nil) :: [%{key: String.t(), title: String.t()}]
+  def groups(_user_id, _category \\ nil) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        ""
+
+      _ ->
+        raise "Gamend.Quests.groups/2 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
     Why this viewer cannot claim this quest yet, as a short label to draw — or
     `nil` when they can. Set `config :gamend_core, :quest_lock_filter,
     {Module, :function}`; it is called as `function(user_id | nil, Quest.t())`.
@@ -661,11 +708,15 @@ defmodule Gamend.Quests do
     
     Hidden quests are listed but carry no details until earned (callers obscure
     them). Chain quests only appear once their prerequisite is met. Grouped
-    quests collapse to one entry carrying `:group_size`.
+    quests collapse to one entry carrying `:group_size` and `collapsed: true`;
+    the members of a group listed in full carry the size alone.
     
     ## Options
     - `:category` — filter by category
-    - `:group` — expand this one group's members; every other group stays collapsed
+    - `:group` — expand this one group's members; every other group stays
+      collapsed
+    - `:drop_groups` — group keys to leave out entirely, collapsed or not: what
+      a page with a selector over some groups does with the ones not picked
     - `:status` — `"in_progress"` (not yet completed), `"claimable"`
       (completed, waiting to be claimed) or `"done"` (completed or claimed)
     - `:page` / `:page_size`

@@ -13,7 +13,7 @@
       <h2 class="text-xl font-semibold mb-4">Acceptance of Terms</h2>
       <p class="text-base-content/80">
         By accessing and using this service, you accept and agree to be bound by the terms and
-        provision of this agreement.
+        provisions of this agreement.
       </p>
     </section>
 
@@ -102,14 +102,20 @@
 
     <section>
       <h2 class="text-xl font-semibold mb-4">Contact Information</h2>
-      <p class="text-base-content/80">
+      <p :if={@contact_email} class="text-base-content/80">
+        If you have any questions about these Terms and Conditions, email us at <a
+          href={"mailto:" <> @contact_email}
+          class="link link-primary"
+        >{@contact_email}</a>.
+      </p>
+      <p :if={!@contact_email} class="text-base-content/80">
         If you have any questions about these Terms and Conditions, please contact us through the
         project's support channels.
       </p>
     </section>
 
     <div class="text-center pt-8 border-t border-base-300">
-      <small class="text-xs text-base-content/60">Last updated: July 2026</small>
+      <small class="text-xs text-base-content/60">Last updated: September 2026</small>
     </div>
   </div>
 </Layouts.app>

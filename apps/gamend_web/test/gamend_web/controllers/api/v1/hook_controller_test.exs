@@ -128,10 +128,15 @@ defmodule GamendWeb.Api.V1.HookControllerTest do
     old_request_threshold =
       Application.get_env(:gamend_web, :slow_request_threshold_ms, :unset)
 
-    old_hook_threshold = Application.get_env(:gamend_core, :slow_hook_threshold_ms, :unset)
+    old_hook_settings = Application.get_env(:gamend_core, Gamend.Hooks.PluginManager, [])
 
     Application.put_env(:gamend_web, :slow_request_threshold_ms, -1.0)
-    Application.put_env(:gamend_core, :slow_hook_threshold_ms, -1.0)
+
+    Application.put_env(
+      :gamend_core,
+      Gamend.Hooks.PluginManager,
+      Keyword.put(old_hook_settings, :slow_threshold_ms, -1)
+    )
 
     try do
       body2 = %{"plugin" => plugin_name, "fn" => "greet", "args" => []}
@@ -157,13 +162,13 @@ defmodule GamendWeb.Api.V1.HookControllerTest do
       refute log =~ "secret-value"
     after
       restore_env(:slow_request_threshold_ms, old_request_threshold)
-      restore_core_env(:slow_hook_threshold_ms, old_hook_threshold)
+      Application.put_env(:gamend_core, Gamend.Hooks.PluginManager, old_hook_settings)
     end
 
     body3 = %{"plugin" => plugin_name, "fn" => "boom", "args" => []}
     conn3 = post(conn, "/api/v1/hooks/call", body3)
 
-    assert %{"error" => "exception", "details" => details} = json_response(conn3, 400)
+    assert %{"error" => "exception", "message" => details} = json_response(conn3, 400)
     assert details =~ "boom"
   end
 
@@ -263,8 +268,21 @@ defmodule GamendWeb.Api.V1.HookControllerTest do
     assert %{"data" => %{"greeting" => "Hello, http"}} = json_response(conn, 200)
   end
 
+  describe "GET /api/v1/hooks" do
+    test "is a page of callable functions", %{conn: conn} do
+      body = conn |> get("/api/v1/hooks", %{page_size: 1}) |> json_response(200)
+
+      assert body["meta"]["page_size"] == 1
+      assert length(body["data"]) <= 1
+
+      for function <- body["data"] do
+        assert %{"plugin" => _, "fn" => _, "arities" => _, "signatures" => _} = function
+      end
+    end
+  end
+
   describe "rejected calls are logged" do
-    # A 400 the client only ever sees as "denied with a 400" has to name the
+    # A refusal the client only ever sees as a 4xx status has to name the
     # hook server-side, or a version skew between client and deployed plugin is
     # invisible on both ends.
     test "not_implemented names the hook and why", %{conn: conn} do
@@ -273,7 +291,7 @@ defmodule GamendWeb.Api.V1.HookControllerTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           conn = post(conn, "/api/v1/hooks/call", body)
-          assert json_response(conn, 400)
+          assert json_response(conn, 404)["error"] == "plugin_not_found"
         end)
 
       assert log =~ "hooks/call rejected:"
@@ -284,7 +302,7 @@ defmodule GamendWeb.Api.V1.HookControllerTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           conn = post(conn, "/api/v1/hooks/call", %{"fn" => "missing_plugin_key"})
-          assert %{"error" => "invalid_request"} = json_response(conn, 400)
+          assert %{"error" => "missing_param"} = json_response(conn, 400)
         end)
 
       assert log =~ "invalid_request"
@@ -297,7 +315,7 @@ defmodule GamendWeb.Api.V1.HookControllerTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           conn = post(conn, "/api/v1/hooks/call", body)
-          assert json_response(conn, 400)
+          assert json_response(conn, 404)["error"] == "plugin_not_found"
         end)
 
       assert log =~ "no_such_plugin.no_such_fn/1"
@@ -307,6 +325,4 @@ defmodule GamendWeb.Api.V1.HookControllerTest do
 
   defp restore_env(key, :unset), do: Application.delete_env(:gamend_web, key)
   defp restore_env(key, value), do: Application.put_env(:gamend_web, key, value)
-  defp restore_core_env(key, :unset), do: Application.delete_env(:gamend_core, key)
-  defp restore_core_env(key, value), do: Application.put_env(:gamend_core, key, value)
 end

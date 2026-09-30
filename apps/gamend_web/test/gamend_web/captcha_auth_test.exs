@@ -113,7 +113,7 @@ defmodule GamendWeb.CaptchaAuthTest do
         |> render_submit(%{"cf-turnstile-response" => "good"})
         |> follow_redirect(conn, ~p"/users/log_in")
 
-      assert html =~ "Success."
+      assert html =~ "Account created. Check your email"
       assert Repo.get_by(User, email: email)
     end
 
@@ -168,7 +168,7 @@ defmodule GamendWeb.CaptchaAuthTest do
         |> render_submit(%{"cf-turnstile-response" => "good"})
         |> follow_redirect(conn, ~p"/users/log_in")
 
-      assert html =~ "Success."
+      assert html =~ "If that email has an account, we sent it a login link."
     end
 
     test "a missing token sends nothing", %{conn: conn, user: user} do
@@ -198,6 +198,62 @@ defmodule GamendWeb.CaptchaAuthTest do
         |> render_submit(%{"cf-turnstile-response" => "good"})
 
       assert html =~ "Could not reach the captcha service"
+    end
+  end
+
+  describe "POST /api/v1/register" do
+    defp api_register(conn, extra \\ %{}) do
+      post(
+        conn,
+        ~p"/api/v1/register",
+        Map.merge(
+          %{"email" => unique_user_email(), "password" => valid_user_password()},
+          extra
+        )
+      )
+    end
+
+    defp require_api_captcha do
+      Application.put_env(
+        :gamend_core,
+        Captcha,
+        Keyword.put(Application.get_env(:gamend_core, Captcha), :api_register, true)
+      )
+    end
+
+    test "is left open while only the forms' captcha is on", %{conn: conn} do
+      _admin = user_fixture()
+      assert %{"data" => _} = conn |> api_register() |> json_response(201)
+    end
+
+    test "demands a token once api_register is on", %{conn: conn} do
+      _admin = user_fixture()
+      require_api_captcha()
+
+      assert %{"error" => "captcha_required"} = conn |> api_register() |> json_response(403)
+    end
+
+    test "rejects a token Cloudflare refuses, and creates no account", %{conn: conn} do
+      _admin = user_fixture()
+      require_api_captcha()
+      reject_tokens()
+      email = unique_user_email()
+
+      assert %{"error" => "captcha_invalid"} =
+               conn
+               |> api_register(%{"email" => email, "captcha_token" => "bad"})
+               |> json_response(403)
+
+      refute Repo.get_by(User, email: email)
+    end
+
+    test "registers with a good token", %{conn: conn} do
+      _admin = user_fixture()
+      require_api_captcha()
+      accept_tokens()
+
+      assert %{"data" => _} =
+               conn |> api_register(%{"captcha_token" => "good"}) |> json_response(201)
     end
   end
 

@@ -1,9 +1,11 @@
 defmodule GamendWeb.AdminLive.Lobbies do
   use GamendWeb, :live_view
 
+  alias Gamend.Accounts.PasswordHash
   alias Gamend.Lobbies
   alias Gamend.Lobbies.SpectatorTracker
   alias Gamend.ReadyChecks
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -58,7 +60,13 @@ defmodule GamendWeb.AdminLive.Lobbies do
                 <button
                   type="button"
                   phx-click="bulk_delete"
-                  data-confirm={"Delete #{MapSet.size(@selected_ids)} selected lobbies?"}
+                  data-confirm={
+                    ngettext(
+                      "Delete %{count} selected lobby?",
+                      "Delete %{count} selected lobbies?",
+                      MapSet.size(@selected_ids)
+                    )
+                  }
                   class="btn btn-sm btn-outline btn-error"
                   disabled={MapSet.size(@selected_ids) == 0}
                 >
@@ -140,16 +148,16 @@ defmodule GamendWeb.AdminLive.Lobbies do
                           type="number"
                           name="min_users"
                           value={@filters["min_users"]}
-                          class="input input-bordered input-xs w-16"
-                          placeholder="Min"
+                          class="input input-bordered input-xs w-20"
+                          placeholder="Min cap"
                           phx-debounce="300"
                         />
                         <input
                           type="number"
                           name="max_users"
                           value={@filters["max_users"]}
-                          class="input input-bordered input-xs w-16"
-                          placeholder="Max"
+                          class="input input-bordered input-xs w-20"
+                          placeholder="Max cap"
                           phx-debounce="300"
                         />
                       </th>
@@ -309,8 +317,28 @@ defmodule GamendWeb.AdminLive.Lobbies do
             <.input field={@form[:is_locked]} type="checkbox" label="Locked" />
 
             <div class="form-control">
-              <label class="label">Password (leave blank to clear)</label>
-              <input name="lobby[password]" type="text" class="input input-bordered" />
+              <label class="label" for="lobby-password-input">
+                New password (leave blank to keep the current one)
+              </label>
+              <input
+                id="lobby-password-input"
+                name="lobby[password]"
+                type="text"
+                autocomplete="off"
+                class="input input-bordered"
+              />
+              <label
+                :if={@selected_lobby.password_hash}
+                class="label cursor-pointer justify-start gap-2"
+              >
+                <input
+                  type="checkbox"
+                  name="lobby[clear_password]"
+                  value="true"
+                  class="checkbox checkbox-sm"
+                />
+                <span class="label-text">Remove the password</span>
+              </label>
             </div>
 
             <div class="form-control">
@@ -360,7 +388,7 @@ defmodule GamendWeb.AdminLive.Lobbies do
               <span class="font-mono">{@ready_check.kind}</span>
               — {ready_summary(@ready_check)}
               <span :if={@ready_check.deadline_at}>
-                · {gettext("deadline_at")} <.timestamp at={@ready_check.deadline_at} format="full" />
+                · {gettext("Deadline")} <.timestamp at={@ready_check.deadline_at} format="full" />
               </span>
             </span>
             <button
@@ -375,11 +403,11 @@ defmodule GamendWeb.AdminLive.Lobbies do
 
           <div class="flex gap-2 mt-4">
             <input
-              type="number"
+              type="text"
               placeholder="User ID to add"
               value={@add_member_id}
               phx-keyup="update_add_member_id"
-              class="input input-bordered input-sm w-40"
+              class="input input-bordered input-sm w-80 max-w-full font-mono"
               id="add-member-input"
             />
             <button
@@ -406,7 +434,7 @@ defmodule GamendWeb.AdminLive.Lobbies do
               <tbody>
                 <tr :for={m <- @members} id={"lobby-member-" <> to_string(m.id)}>
                   <td class="font-mono text-sm">{m.id}</td>
-                  <td class="text-sm">{m.display_name || m.email || "-"}</td>
+                  <td class="text-sm">{Gamend.Accounts.display_label(m)}</td>
                   <td class="text-sm">
                     <%= if m.id == @selected_lobby.host_id do %>
                       <span class="badge badge-primary badge-sm">Host</span>
@@ -517,7 +545,7 @@ defmodule GamendWeb.AdminLive.Lobbies do
   @impl true
   def handle_event("create_lobby", %{"lobby" => params}, socket) do
     attrs = %{
-      title: blank_to_nil(params["title"]),
+      title: Gamend.Parse.blank_to_nil(params["title"]),
       max_users: parse_admin_int(params["max_users"]) || 10
     }
 
@@ -699,7 +727,11 @@ defmodule GamendWeb.AdminLive.Lobbies do
     socket =
       cond do
         failed == 0 ->
-          put_flash(socket, :info, "Deleted #{deleted} lobbies")
+          put_flash(
+            socket,
+            :info,
+            ngettext("Deleted %{count} lobby", "Deleted %{count} lobbies", deleted)
+          )
 
         deleted == 0 ->
           put_flash(socket, :error, "Failed to delete selected lobbies")
@@ -708,7 +740,12 @@ defmodule GamendWeb.AdminLive.Lobbies do
           put_flash(
             socket,
             :error,
-            "Deleted #{deleted} lobbies; failed #{failed}"
+            ngettext(
+              "Deleted %{count} lobby; %{failed} failed",
+              "Deleted %{count} lobbies; %{failed} failed",
+              deleted,
+              failed: failed
+            )
           )
       end
 
@@ -743,13 +780,12 @@ defmodule GamendWeb.AdminLive.Lobbies do
     {:noreply, socket |> assign(:lobbies_page, page) |> reload_lobbies()}
   end
 
-  def handle_event("admin_lobbies_page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:lobbies_page_size, String.to_integer(size))
-     |> assign(:lobbies_page, 1)
-     |> reload_lobbies()}
-  end
+  def handle_event("admin_lobbies_page_size", %{"size" => size}, socket),
+    do:
+      {:noreply,
+       socket
+       |> LiveHelpers.put_page_size(size, size_key: :lobbies_page_size, page_key: :lobbies_page)
+       |> reload_lobbies()}
 
   def handle_event("save_lobby", %{"lobby" => params}, socket) do
     lobby = socket.assigns.selected_lobby
@@ -764,38 +800,11 @@ defmodule GamendWeb.AdminLive.Lobbies do
       |> Map.update("is_hidden", false, fn v -> v in ["true", "on", true] end)
       |> Map.update("is_locked", false, fn v -> v in ["true", "on", true] end)
 
-    # normalize metadata if provided as JSON string in the textarea
-    params =
-      case Map.get(params, "metadata") do
-        nil ->
-          params
-
-        "" ->
-          Map.put(params, "metadata", %{})
-
-        s when is_binary(s) ->
-          case Jason.decode(s) do
-            {:ok, map} when is_map(map) -> Map.put(params, "metadata", map)
-            _ -> Map.put(params, "metadata", %{})
-          end
-
-        other ->
-          Map.put(params, "metadata", other)
-      end
-
-    res = Lobbies.update_lobby(lobby, params)
-
-    case res do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Lobby updated")
-         |> assign(:selected_lobby, nil)
-         |> assign(:form, nil)
-         |> reload_lobbies()}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :form, to_form(changeset, as: "lobby"))}
+    # The textarea holds JSON. Text that is not a JSON object is refused, not
+    # saved as %{} — that would wipe the lobby's metadata behind a success flash.
+    case normalize_metadata(params) do
+      {:ok, params} -> do_save_lobby(socket, lobby, put_password_hash(params))
+      :error -> {:noreply, put_flash(socket, :error, "Metadata must be a JSON object")}
     end
   end
 
@@ -812,6 +821,66 @@ defmodule GamendWeb.AdminLive.Lobbies do
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to delete lobby")}
+    end
+  end
+
+  defp normalize_metadata(params) do
+    case Map.get(params, "metadata") do
+      nil ->
+        {:ok, params}
+
+      s when is_binary(s) ->
+        case String.trim(s) do
+          "" ->
+            {:ok, Map.put(params, "metadata", %{})}
+
+          trimmed ->
+            case Jason.decode(trimmed) do
+              {:ok, map} when is_map(map) -> {:ok, Map.put(params, "metadata", map)}
+              _ -> :error
+            end
+        end
+
+      other ->
+        {:ok, Map.put(params, "metadata", other)}
+    end
+  end
+
+  # `Lobby.changeset/2` casts only `password_hash`, and `update_lobby/2` does
+  # not hash, so the plain `password` field was silently dropped. Hash it the
+  # way `Lobbies.create_lobby/1` does (`Bcrypt`, checked by `join_lobby`). A
+  # blank field keeps the current password; the checkbox removes it.
+  defp put_password_hash(params) do
+    {password, params} = Map.pop(params, "password")
+    {clear, params} = Map.pop(params, "clear_password")
+
+    cond do
+      clear in ["true", "on"] ->
+        Map.put(params, "password_hash", nil)
+
+      is_binary(password) and password != "" ->
+        Map.put(params, "password_hash", PasswordHash.hash(password))
+
+      true ->
+        params
+    end
+  end
+
+  defp do_save_lobby(socket, lobby, params) do
+    case Lobbies.update_lobby(lobby, params) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Lobby updated")
+         |> assign(:selected_lobby, nil)
+         |> assign(:form, nil)
+         |> reload_lobbies()}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, :form, to_form(changeset, as: "lobby"))}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Update failed: #{inspect(reason)}")}
     end
   end
 
@@ -836,9 +905,7 @@ defmodule GamendWeb.AdminLive.Lobbies do
     total_count = Lobbies.count_list_all_lobbies(filters)
 
     total_pages =
-      if page_size > 0,
-        do: div(total_count + page_size - 1, page_size),
-        else: 0
+      LiveHelpers.total_pages(total_count, page_size)
 
     spectator_counts =
       lobbies
@@ -901,8 +968,4 @@ defmodule GamendWeb.AdminLive.Lobbies do
   end
 
   defp parse_admin_int(_), do: nil
-
-  defp blank_to_nil(nil), do: nil
-  defp blank_to_nil(""), do: nil
-  defp blank_to_nil(s) when is_binary(s), do: s
 end

@@ -7,6 +7,9 @@ defmodule Gamend.Payments.Providers.Apple do
   """
 
   require Logger
+  @behaviour Gamend.Payments.Provider
+
+  alias Gamend.Payments.Params
   alias Gamend.Payments.ProviderConfig
 
   @production_base_url "https://api.storekit.itunes.apple.com/inApps/v1"
@@ -27,7 +30,7 @@ defmodule Gamend.Payments.Providers.Apple do
   end
 
   def validate_purchase(_user, attrs) when is_map(attrs) do
-    attrs = normalize_params(attrs)
+    attrs = Params.normalize(attrs)
 
     with {:ok, transaction} <- transaction_payload(attrs),
          :ok <- validate_bundle_id(transaction) do
@@ -37,7 +40,7 @@ defmodule Gamend.Payments.Providers.Apple do
 
   def verify_notification(raw_body) when is_binary(raw_body) do
     with {:ok, body} <- Jason.decode(raw_body),
-         {:ok, signed_payload} <- required_binary(body, "signedPayload"),
+         {:ok, signed_payload} <- Params.required_binary(body, "signedPayload"),
          {:ok, notification} <- jws_verifier().verify_and_decode(signed_payload) do
       decode_notification_data(notification)
     end
@@ -65,7 +68,7 @@ defmodule Gamend.Payments.Providers.Apple do
   defp fetch_transaction(transaction_id) do
     with {:ok, jwt} <- authorization_jwt(),
          {:ok, response} <- get_transaction(transaction_id, jwt),
-         {:ok, signed_transaction} <- required_binary(response, "signedTransactionInfo") do
+         {:ok, signed_transaction} <- Params.required_binary(response, "signedTransactionInfo") do
       decode_transaction_jws(signed_transaction)
     end
   end
@@ -76,7 +79,7 @@ defmodule Gamend.Payments.Providers.Apple do
 
     case http_client().get(url, auth: {:bearer, jwt}) do
       {:ok, %{status: status, body: body}} when status in 200..299 and is_map(body) ->
-        {:ok, normalize_params(body)}
+        {:ok, Params.normalize(body)}
 
       {:ok, %{status: status, body: body}} ->
         {:error, {:apple_server_error, status, body}}
@@ -88,12 +91,12 @@ defmodule Gamend.Payments.Providers.Apple do
 
   defp decode_transaction_jws(signed_transaction) do
     with {:ok, transaction} <- jws_verifier().verify_and_decode(signed_transaction) do
-      {:ok, normalize_params(transaction)}
+      {:ok, Params.normalize(transaction)}
     end
   end
 
   defp decode_notification_data(notification) do
-    notification = normalize_params(notification)
+    notification = Params.normalize(notification)
     data = notification["data"] || %{}
 
     with {:ok, transaction_info} <- maybe_decode_jws(data["signedTransactionInfo"]),
@@ -125,9 +128,9 @@ defmodule Gamend.Payments.Providers.Apple do
       "original_transaction_id" =>
         transaction["originalTransactionId"] || transaction["transactionId"],
       "status" => apple_transaction_status(transaction),
-      "quantity" => parse_positive_int(transaction["quantity"], 1),
+      "quantity" => Params.parse_positive_int(transaction["quantity"], 1),
       "environment" => apple_transaction_environment(transaction["environment"]),
-      "expires_at" => millis_to_iso8601(transaction["expiresDate"]),
+      "expires_at" => Params.millis_to_iso8601(transaction["expiresDate"]),
       "raw_payload" => %{"apple_transaction" => transaction}
     }
   end
@@ -140,7 +143,7 @@ defmodule Gamend.Payments.Providers.Apple do
   defp apple_transaction_environment("Sandbox"), do: "sandbox"
   defp apple_transaction_environment("Production"), do: "production"
   defp apple_transaction_environment("Xcode"), do: "test"
-  defp apple_transaction_environment(_), do: default_environment()
+  defp apple_transaction_environment(_), do: ProviderConfig.environment()
 
   # Fails closed when no bundle id is configured.
   #
@@ -198,13 +201,14 @@ defmodule Gamend.Payments.Providers.Apple do
   defp private_key do
     cond do
       present?(config_value("APPLE_PRIVATE_KEY", :apple_private_key)) ->
-        {:ok, config_value("APPLE_PRIVATE_KEY", :apple_private_key) |> normalize_private_key()}
+        {:ok,
+         config_value("APPLE_PRIVATE_KEY", :apple_private_key) |> Params.normalize_private_key()}
 
       present?(config_value("APPLE_PRIVATE_KEY_PATH", :apple_private_key_path)) ->
         config_value("APPLE_PRIVATE_KEY_PATH", :apple_private_key_path)
         |> File.read()
         |> case do
-          {:ok, key} -> {:ok, normalize_private_key(key)}
+          {:ok, key} -> {:ok, Params.normalize_private_key(key)}
           {:error, _reason} -> {:error, :apple_private_key_not_readable}
         end
 
@@ -225,13 +229,6 @@ defmodule Gamend.Payments.Providers.Apple do
     end
   end
 
-  defp required_binary(map, key) do
-    case map[key] do
-      value when is_binary(value) and value != "" -> {:ok, value}
-      _ -> {:error, String.to_atom("missing_#{key}")}
-    end
-  end
-
   defp server_base_url do
     config_value("APPLE_APP_STORE_SERVER_BASE_URL", :apple_app_store_server_base_url) ||
       case apple_environment() do
@@ -249,7 +246,7 @@ defmodule Gamend.Payments.Providers.Apple do
   defp key_id, do: config_value("APPLE_KEY_ID", :apple_key_id)
 
   defp http_client do
-    Application.get_env(:gamend_core, :payments_http_client, Req)
+    Application.get_env(:gamend_core, :payments_http_client, Gamend.HTTP)
   end
 
   defp jws_verifier do
@@ -266,54 +263,7 @@ defmodule Gamend.Payments.Providers.Apple do
     Gamend.Settings.get(Gamend.Payments.Settings, app_key)
   end
 
-  defp default_environment do
-    ProviderConfig.environment()
-  end
-
-  defp normalize_private_key(value), do: String.replace(value, "\\n", "\n")
-
-  defp millis_to_iso8601(nil), do: nil
-
-  defp millis_to_iso8601(value) do
-    with int when is_integer(int) <- parse_int(value),
-         {:ok, dt} <- DateTime.from_unix(int, :millisecond) do
-      DateTime.to_iso8601(dt)
-    else
-      _ -> nil
-    end
-  end
-
-  defp parse_positive_int(value, default) do
-    case parse_int(value) do
-      int when is_integer(int) and int > 0 -> int
-      _ -> default
-    end
-  end
-
-  defp parse_int(value) when is_integer(value), do: value
-
-  defp parse_int(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {int, ""} -> int
-      _ -> nil
-    end
-  end
-
-  defp parse_int(_value), do: nil
-
   defp present?(value), do: is_binary(value) and value != ""
-
-  defp normalize_params(attrs) when is_map(attrs) do
-    Map.new(attrs, fn
-      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-      {k, v} when is_map(v) -> {k, normalize_params(v)}
-      {k, v} when is_list(v) -> {k, Enum.map(v, &normalize_nested/1)}
-      {k, v} -> {k, v}
-    end)
-  end
-
-  defp normalize_nested(value) when is_map(value), do: normalize_params(value)
-  defp normalize_nested(value), do: value
 end
 
 defmodule Gamend.Payments.Providers.Apple.JWS do
@@ -331,6 +281,8 @@ defmodule Gamend.Payments.Providers.Apple.JWS do
   https://www.apple.com/certificateauthority/AppleRootCA-G3.cer.
   """
 
+  alias Gamend.Payments.Params
+
   @root_ca_filename "apple_root_ca_g3.pem"
 
   def verify_and_decode(compact_jws) when is_binary(compact_jws) do
@@ -338,7 +290,7 @@ defmodule Gamend.Payments.Providers.Apple.JWS do
          {:ok, jwk} <- verified_leaf_jwk(header),
          {true, payload, _jws} <- JOSE.JWS.verify_strict(jwk, ["ES256"], compact_jws),
          {:ok, decoded} <- Jason.decode(payload) do
-      {:ok, normalize_params(decoded)}
+      {:ok, Params.normalize(decoded)}
     else
       {false, _payload, _jws} -> {:error, :invalid_apple_jws_signature}
       {:error, reason} -> {:error, reason}
@@ -350,7 +302,7 @@ defmodule Gamend.Payments.Providers.Apple.JWS do
     with [header_segment, _payload, _signature] <- String.split(compact_jws, ".", parts: 3),
          {:ok, json} <- Base.url_decode64(header_segment, padding: false),
          {:ok, header} <- Jason.decode(json) do
-      {:ok, normalize_params(header)}
+      {:ok, Params.normalize(header)}
     else
       _ -> {:error, :invalid_apple_jws_header}
     end
@@ -471,16 +423,4 @@ defmodule Gamend.Payments.Providers.Apple.JWS do
     ]
     |> IO.iodata_to_binary()
   end
-
-  defp normalize_params(attrs) when is_map(attrs) do
-    Map.new(attrs, fn
-      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-      {k, v} when is_map(v) -> {k, normalize_params(v)}
-      {k, v} when is_list(v) -> {k, Enum.map(v, &normalize_nested/1)}
-      {k, v} -> {k, v}
-    end)
-  end
-
-  defp normalize_nested(value) when is_map(value), do: normalize_params(value)
-  defp normalize_nested(value), do: value
 end

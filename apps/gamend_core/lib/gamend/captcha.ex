@@ -11,9 +11,11 @@ defmodule Gamend.Captcha do
   routine sign-in is friction for returning players, and the credentials are
   their own proof.
 
-  The game SDKs never see this. Registration is browser-only (there is no
-  `POST /api/v1/register`), and device login is untouched, so turning it on
-  cannot break a shipped Godot or JS client.
+  `POST /api/v1/register` mails an address too, but a game client often has no
+  browser to render the widget in, so turning the forms' captcha on leaves it
+  alone. `api_register` puts it in front of the endpoint as well: the client
+  then sends a Turnstile token as `captcha_token`, from a web export or a
+  webview. Device login is never guarded.
 
   ## Setup
 
@@ -43,6 +45,13 @@ defmodule Gamend.Captcha do
   setting(:enabled, :boolean,
     default: false,
     doc: "Require a captcha on the register and magic-link forms."
+  )
+
+  setting(:api_register, :boolean,
+    default: false,
+    doc:
+      "Also require a captcha token (`captcha_token`) on POST /api/v1/register. " <>
+        "Needs `enabled`; a client that cannot render the widget cannot register."
   )
 
   setting(:site_key, :string,
@@ -77,6 +86,20 @@ defmodule Gamend.Captcha do
   @spec enabled?() :: boolean()
   def enabled?, do: Gamend.Settings.get(__MODULE__, :enabled) == true
 
+  @doc "Whether `POST /api/v1/register` requires a captcha token too."
+  @spec api_register?() :: boolean()
+  def api_register?,
+    do: enabled?() and Gamend.Settings.get(__MODULE__, :api_register) == true
+
+  @doc """
+  `verify/2` for `POST /api/v1/register`: `:ok` without a call unless
+  `api_register?/0`.
+  """
+  @spec verify_api_register(term(), String.t() | nil) :: :ok | {:error, error()}
+  def verify_api_register(token, remote_ip) do
+    if api_register?(), do: verify(token, remote_ip), else: :ok
+  end
+
   @doc "The sitekey to render, falling back to the always-passes dummy."
   @spec site_key() :: String.t()
   def site_key, do: presence(Gamend.Settings.get(__MODULE__, :site_key)) || @test_site_key
@@ -93,7 +116,7 @@ defmodule Gamend.Captcha do
   gate unconditionally rather than branching on `enabled?/0` themselves.
 
   `remote_ip` is passed through to Cloudflare when known; `"unknown"` (what
-  `GamendWeb.LiveHelpers.client_ip/1` returns without peer data) is
+  `GamendWeb.LiveHelpers.client_ip/2` returns with no known address) is
   omitted rather than sent as a literal.
 
   A token is single-use and expires after five minutes, so a rejected

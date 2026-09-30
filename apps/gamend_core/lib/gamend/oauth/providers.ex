@@ -16,7 +16,7 @@ defmodule Gamend.OAuth.Providers do
     group: :oauth,
     label: "OAuth providers"
 
-  @providers [:discord, :google, :apple, :facebook, :steam]
+  @providers [:discord, :google, :apple, :facebook, :github, :steam]
 
   # One key marks a provider as configured; its partner keys are enforced by
   # the `with:` groups below.
@@ -25,6 +25,7 @@ defmodule Gamend.OAuth.Providers do
     google: :google_client_id,
     apple: :apple_client_id,
     facebook: :facebook_client_id,
+    github: :github_client_id,
     steam: :steam_api_key
   }
 
@@ -35,7 +36,7 @@ defmodule Gamend.OAuth.Providers do
     )
   end
 
-  for provider <- [:discord, :google, :facebook] do
+  for provider <- [:discord, :google, :facebook, :github] do
     id_key = :"#{provider}_client_id"
     secret_key = :"#{provider}_client_secret"
 

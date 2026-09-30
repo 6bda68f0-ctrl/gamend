@@ -146,11 +146,13 @@ and pushed live when it changes.
 
 - **README** Features: Webhooks + Remote config. **CHANGELOG** `[added]`
   Signed retried webhooks; `[added]` Remote config.
-- **.env.example** — the `LIMIT_*` caps (queue size already in Oban config).
-- **host_public_docs/** — new **Webhooks** page (event catalog, signature
-  verification recipe, retry semantics) + **Remote config** page (fetch,
-  ETag/version, live update); Data Schema gains the three tables; Server-scripting
-  page gains `Webhooks.emit/2` + the hooks.
+- **.env.example** — regenerate (`mix gamend.settings.env_example`) for the
+  `GAMEND_LIMITS_*` caps (queue size already in Oban config).
+- **Guides** — new **Webhooks** page (event catalog, signature verification
+  recipe, retry semantics) + **Remote config** page (fetch, ETag/version, live
+  update), each a markdown file in `priv/docs/<NN-category>/`;
+  `priv/docs/10-setup/40-data-schema.md` gains the three tables;
+  `priv/docs/40-gameplay/90-server-scripting.md` gains `Webhooks.emit/2` + the hooks.
 - **api_spec.ex** — feature list + `GET /config` (+ the `config_updated` realtime
   event; webhook payloads documented as an outbound catalog).
 - **SDK** — `RemoteConfig` read stub + struct; `Webhooks` admin stubs; hooks

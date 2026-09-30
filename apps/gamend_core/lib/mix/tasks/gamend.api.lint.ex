@@ -26,7 +26,12 @@ defmodule Mix.Tasks.Gamend.Api.Lint do
     {"R8-page-params", "A controller reads page params without Pagination.params/1"},
     {"R9-doc-route", "A guide/spec documents an API route that does not exist"},
     {"R10-authority-predicate", "A permission predicate names a role instead of a capability"},
-    {"R11-inline-ownership", "A controller/channel re-derives who owns a resource"}
+    {"R11-inline-ownership", "A controller/channel re-derives who owns a resource"},
+    {"R12-changeset-errors", "A controller serializes changeset errors by hand"},
+    {"R13-context-paging", "A context builds limit/offset instead of using Gamend.Query"},
+    {"R14-display-name", "A user's name is built from an inline `display_name ||` fallback"},
+    {"R15-response-shape",
+     "An API controller answers outside GamendWeb.Reply, or documents an inline response schema"}
   ]
 
   @impl true
@@ -35,6 +40,11 @@ defmodule Mix.Tasks.Gamend.Api.Lint do
       Mix.shell().info("API convention rules:\n")
       for {id, desc} <- @rules, do: Mix.shell().info("  #{id}  #{desc}")
     else
+      # Compiled and configured first, like the other tasks that read the
+      # running app: R9 reads the router named in `config :gamend_web,
+      # :router`, and without `app.config` that key is unset and the routes
+      # come from core's router — every host route then reads as missing.
+      Mix.Task.run("app.config")
       report(ApiConventions.violations())
     end
   end

@@ -17,6 +17,11 @@ defmodule GamendWeb.Layouts do
     default: false,
     doc: "when true, render content edge-to-edge with no main wrapper, padding, or footer"
 
+  attr :wide, :boolean,
+    default: false,
+    doc:
+      "when true, the content column widens past the reading width — for a page with its own side columns, such as a docs sidebar and table of contents"
+
   attr :background_icons, :any,
     default: nil,
     doc:

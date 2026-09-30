@@ -115,6 +115,45 @@ defmodule Gamend.RuntimeConfigTest do
 
       assert [{Gamend.Cache.L1, _}, {Gamend.Cache.L2.Partitioned, _}] = levels
     end
+
+    @tag env: %{
+           "GAMEND_AUTH_SECRET_KEY_BASE" => String.duplicate("a", 64),
+           "GAMEND_CACHE_MODE" => "multi",
+           "GAMEND_CACHE_MAX_ENTRIES" => "5000",
+           "GAMEND_CACHE_MAX_MEMORY_MB" => "64"
+         }
+    test "each node's local cache is sized by the settings", %{config: config} do
+      levels = config[:gamend_core][Gamend.Cache][:levels]
+
+      assert [{Gamend.Cache.L1, l1}, {Gamend.Cache.L2.Partitioned, l2}] = levels
+
+      for opts <- [l1, l2[:primary]] do
+        assert opts[:max_size] == 5_000
+        assert opts[:allocated_memory] == 64_000_000
+      end
+    end
+  end
+
+  # Outside prod the compiled config owns the cache; the toggle may only turn
+  # it off. Copying the default "on" across overrode every test config's
+  # `bypass_mode: true`.
+  describe "cache outside prod" do
+    @tag env: %{"GAMEND_AUTH_SECRET_KEY_BASE" => String.duplicate("a", 64)}
+    test "leaves the compiled bypass alone while the cache is on" do
+      config = Config.Reader.read!(@runtime_config, env: :test)
+
+      refute Keyword.has_key?(config[:gamend_core][Gamend.Cache] || [], :bypass_mode)
+    end
+
+    @tag env: %{
+           "GAMEND_AUTH_SECRET_KEY_BASE" => String.duplicate("a", 64),
+           "GAMEND_CACHE_ENABLED" => "false"
+         }
+    test "bypasses the cache when it is turned off" do
+      config = Config.Reader.read!(@runtime_config, env: :test)
+
+      assert config[:gamend_core][Gamend.Cache][:bypass_mode] == true
+    end
   end
 
   describe "endpoint" do
@@ -174,6 +213,40 @@ defmodule Gamend.RuntimeConfigTest do
       refute Keyword.has_key?(repo, :pragmas)
       # DBConnection's query timeout must outlast the busy wait.
       assert repo[:timeout] >= repo[:busy_timeout] + 5_000
+    end
+  end
+
+  describe "from a release" do
+    # A release unpacked in one place and started from a project folder keeps
+    # that folder's data and customisations: its .env is read, and the
+    # database and theme defaults resolve there rather than beside the release.
+    @tag :tmp_dir
+    @tag env: %{
+           "GAMEND_DB_URL" => "",
+           "GAMEND_DB_POSTGRES_HOST" => "",
+           "GAMEND_DB_POSTGRES_USER" => "",
+           "GAMEND_DB_SQLITE_PATH" => "",
+           "GAMEND_AUTH_SECRET_KEY_BASE" => String.duplicate("a", 64)
+         }
+    test "resolves .env, the database and the theme against the working directory",
+         %{tmp_dir: dir} do
+      File.write!(Path.join(dir, ".env"), "GAMEND_HTTP_PORT=4555\n")
+      System.put_env("RELEASE_ROOT", "/opt/gamend")
+
+      on_exit(fn ->
+        System.delete_env("RELEASE_ROOT")
+        System.delete_env("GAMEND_HTTP_PORT")
+      end)
+
+      config = File.cd!(dir, fn -> Config.Reader.read!(@runtime_config, env: :prod) end)
+
+      assert config[:gamend_core][Gamend.Repo][:database] ==
+               Path.join(dir, "db/game_server_prod.db")
+
+      assert config[:gamend_core][Gamend.Theme.JSONConfig][:default_config_path] ==
+               "theme/config.json"
+
+      assert config[:gamend_web][GamendWeb.Endpoint][:http][:port] == 4555
     end
   end
 

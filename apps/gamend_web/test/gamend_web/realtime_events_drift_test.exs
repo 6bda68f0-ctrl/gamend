@@ -27,8 +27,14 @@ defmodule GamendWeb.RealtimeEventsDriftTest do
     |> Enum.flat_map(fn file ->
       source = File.read!(file)
 
-      Regex.scan(~r/push(?:_event)?\(\s*socket,\s*"([a-z_0-9:]+)"/, source)
-      |> Enum.map(fn [_, event] -> event end)
+      # `ChannelEvents.push_member_updated/3` takes the event last; the literal
+      # is still written at the channel's call site, so it counts as a push.
+      direct = Regex.scan(~r/push(?:_event)?\(\s*socket,\s*"([a-z_0-9:]+)"/, source)
+
+      member_updated =
+        Regex.scan(~r/push_member_updated\(\s*socket,\s*\w+,\s*"([a-z_0-9:]+)"/, source)
+
+      Enum.map(direct ++ member_updated, fn [_, event] -> event end)
     end)
     |> MapSet.new()
   end

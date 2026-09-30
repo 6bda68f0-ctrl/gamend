@@ -53,6 +53,16 @@ defmodule GamendWeb.Features do
     doc: "Public GET /api/v1/quests* and the /quests page."
   )
 
+  setting(:list_tournaments, :boolean,
+    default: true,
+    doc: "Public GET /api/v1/tournaments* and the /tournaments pages."
+  )
+
+  setting(:play, :boolean,
+    default: true,
+    doc: "The /play page, which hands a signed-in player a token for the game client."
+  )
+
   setting(:list_matchmaking, :boolean,
     default: true,
     doc: "GET /api/v1/matchmaking/stats. Own-ticket endpoints stay."
@@ -61,7 +71,7 @@ defmodule GamendWeb.Features do
   setting(:public_stats, :boolean,
     default: true,
     doc:
-      "The unauthenticated stats endpoints: GET /api/v1/users/stats, /api/v1/lobbies/stats, /api/v1/parties/stats, /api/v1/quests/stats, /api/v1/signaling/stats and /api/v1/matchmaking/stats. Aggregate counts only, never per-row data — but they do reveal how busy the server is."
+      "The unauthenticated stats endpoints: GET /api/v1/stats, /api/v1/users/stats, /api/v1/lobbies/stats, /api/v1/parties/stats, /api/v1/quests/stats, /api/v1/signaling/stats and /api/v1/matchmaking/stats, plus the /stats page. Aggregate counts only, never per-row data — but they do reveal how busy the server is."
   )
 
   setting(:mailbox_preview, :boolean,

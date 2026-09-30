@@ -4,42 +4,20 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
 
   alias Gamend.Tournaments
   alias Gamend.Tournaments.Tournament
+  alias GamendWeb.Schemas
+
+  alias GamendWeb.Schemas.{
+    AdminTournamentResponse,
+    OkResponse,
+    TournamentMatchResponse,
+    UploadTicketResponse
+  }
+
+  alias GamendWeb.Serializers
   alias GamendWeb.Uploads
   alias OpenApiSpex.Schema
 
   tags(["Admin – Tournaments"])
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
-
-  @tournament_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      slug: %Schema{type: :string},
-      title: %Schema{type: :string},
-      description: %Schema{type: :string},
-      icon_url: %Schema{type: :string, description: "Empty when unset"},
-      state: %Schema{
-        type: :string,
-        enum: ["scheduled", "registration", "running", "finished", "cancelled"]
-      },
-      registration_opens_at: %Schema{type: :string, format: "date-time", nullable: true},
-      starts_at: %Schema{type: :string, format: "date-time", nullable: true},
-      ends_at: %Schema{type: :string, format: "date-time", nullable: true},
-      recur: %Schema{type: :string},
-      max_entries: %Schema{type: :integer, nullable: true},
-      team_size: %Schema{type: :integer},
-      bracket_size: %Schema{type: :integer},
-      round_window_sec: %Schema{type: :integer},
-      deadline_policy: %Schema{
-        type: :string,
-        enum: ["forfeit_both", "advance_first_slot", "random"]
-      },
-      metadata: %Schema{type: :object},
-      inserted_at: %Schema{type: :string, format: "date-time"},
-      updated_at: %Schema{type: :string, format: "date-time"}
-    }
-  }
 
   @tournament_body %Schema{
     type: :object,
@@ -71,18 +49,16 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
     security: [%{"authorization" => []}],
     request_body: {"Tournament", "application/json", @tournament_body},
     responses: [
-      ok:
-        {"Tournament", "application/json",
-         %Schema{type: :object, properties: %{data: @tournament_schema}}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", %Schema{type: :object}}
+      created: {"Tournament", "application/json", AdminTournamentResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
   def create(conn, params) do
     case Tournaments.create_tournament(params) do
-      {:ok, tournament} -> json(conn, %{data: serialize(tournament)})
+      {:ok, tournament} -> reply_data(conn, :created, serialize(tournament))
       {:error, changeset} -> changeset_error(conn, changeset)
     end
   end
@@ -94,18 +70,16 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
     parameters: [id: [in: :path, schema: %Schema{type: :string}, required: true]],
     request_body: {"Fields to change", "application/json", @tournament_body},
     responses: [
-      ok:
-        {"Tournament", "application/json",
-         %Schema{type: :object, properties: %{data: @tournament_schema}}},
-      not_found: {"Not found", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", %Schema{type: :object}}
+      ok: {"Tournament", "application/json", AdminTournamentResponse},
+      not_found: Schemas.error("Not found"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
   def update(conn, %{"id" => id} = params) do
     with_tournament(conn, id, fn tournament ->
       case Tournaments.update_tournament(tournament, Map.delete(params, "id")) do
-        {:ok, tournament} -> json(conn, %{data: serialize(tournament)})
+        {:ok, tournament} -> reply_data(conn, serialize(tournament))
         {:error, changeset} -> changeset_error(conn, changeset)
       end
     end)
@@ -129,9 +103,9 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
          required: [:content_type]
        }},
     responses: [
-      ok: {"Upload ticket", "application/json", %Schema{type: :object}},
-      bad_request: {"Unsupported content type", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Upload ticket", "application/json", UploadTicketResponse},
+      bad_request: Schemas.error("Unsupported content type"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -157,10 +131,10 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
       {"Uploaded object key", "application/json",
        %Schema{type: :object, properties: %{key: %Schema{type: :string}}, required: [:key]}},
     responses: [
-      ok: {"Updated tournament", "application/json", %Schema{type: :object}},
-      bad_request: {"Object not found", "application/json", @error_schema},
-      forbidden: {"Key not owned by this tournament", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Tournament", "application/json", AdminTournamentResponse},
+      bad_request: Schemas.error("Object not found"),
+      forbidden: Schemas.error("Key not owned by this tournament"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -168,7 +142,7 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
     with_tournament(conn, id, fn tournament ->
       Uploads.confirm(conn, "icons/tournaments", tournament.id, params["key"], fn url ->
         case Tournaments.update_tournament(tournament, %{"icon_url" => url}) do
-          {:ok, updated} -> json(conn, %{data: serialize(updated)})
+          {:ok, updated} -> reply_data(conn, serialize(updated))
           {:error, changeset} -> changeset_error(conn, changeset)
         end
       end)
@@ -181,15 +155,15 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
     security: [%{"authorization" => []}],
     parameters: [id: [in: :path, schema: %Schema{type: :string}, required: true]],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      not_found: Schemas.error("Not found")
     ]
   )
 
   def delete(conn, %{"id" => id}) do
     with_tournament(conn, id, fn tournament ->
       {:ok, _} = Tournaments.delete_tournament(tournament)
-      json(conn, %{ok: true})
+      reply_ok(conn)
     end)
   end
 
@@ -199,17 +173,15 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
     security: [%{"authorization" => []}],
     parameters: [id: [in: :path, schema: %Schema{type: :string}, required: true]],
     responses: [
-      ok:
-        {"Tournament", "application/json",
-         %Schema{type: :object, properties: %{data: @tournament_schema}}},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Tournament", "application/json", AdminTournamentResponse},
+      not_found: Schemas.error("Not found")
     ]
   )
 
   def cancel(conn, %{"id" => id}) do
     with_tournament(conn, id, fn tournament ->
       {:ok, tournament} = Tournaments.cancel_tournament(tournament)
-      json(conn, %{data: serialize(tournament)})
+      reply_data(conn, serialize(tournament))
     end)
   end
 
@@ -219,11 +191,9 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
     security: [%{"authorization" => []}],
     parameters: [id: [in: :path, schema: %Schema{type: :string}, required: true]],
     responses: [
-      ok:
-        {"Tournament", "application/json",
-         %Schema{type: :object, properties: %{data: @tournament_schema}}},
-      bad_request: {"Not cancelled", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Tournament", "application/json", AdminTournamentResponse},
+      forbidden: Schemas.error("Not cancelled (not_cancelled)"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -231,10 +201,10 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
     with_tournament(conn, id, fn tournament ->
       case Tournaments.reopen_tournament(tournament) do
         {:ok, reopened} ->
-          json(conn, %{data: serialize(reopened)})
+          reply_data(conn, serialize(reopened))
 
         {:error, reason} ->
-          conn |> put_status(:bad_request) |> json(%{error: to_string_reason(reason)})
+          refusal(conn, reason)
       end
     end)
   end
@@ -245,23 +215,21 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
     security: [%{"authorization" => []}],
     parameters: [id: [in: :path, schema: %Schema{type: :string}, required: true]],
     responses: [
-      ok:
-        {"Tournament", "application/json",
-         %Schema{type: :object, properties: %{data: @tournament_schema}}},
-      bad_request: {"Not in a drawable state", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Tournament", "application/json", AdminTournamentResponse},
+      forbidden: Schemas.error("Not in a drawable state (not_drawable)"),
+      not_found: Schemas.error("Not found"),
+      unprocessable_entity: Schemas.error("The window it sets is invalid")
     ]
   )
 
   def draw(conn, %{"id" => id}) do
     with_tournament(conn, id, fn tournament ->
       if tournament.state in ["scheduled", "registration"] do
-        {:ok, tournament} =
-          Tournaments.update_tournament(tournament, %{starts_at: DateTime.utc_now(:second)})
-
-        json(conn, %{data: serialize(Tournaments.advance_lifecycle(tournament))})
+        tournament
+        |> Tournaments.update_tournament(%{starts_at: DateTime.utc_now(:second)})
+        |> advanced(conn)
       else
-        conn |> put_status(:bad_request) |> json(%{error: "not_drawable"})
+        reply_error(conn, :forbidden, "not_drawable")
       end
     end)
   end
@@ -272,23 +240,21 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
     security: [%{"authorization" => []}],
     parameters: [id: [in: :path, schema: %Schema{type: :string}, required: true]],
     responses: [
-      ok:
-        {"Tournament", "application/json",
-         %Schema{type: :object, properties: %{data: @tournament_schema}}},
-      bad_request: {"Not running", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Tournament", "application/json", AdminTournamentResponse},
+      forbidden: Schemas.error("Not running (not_running)"),
+      not_found: Schemas.error("Not found"),
+      unprocessable_entity: Schemas.error("The window it sets is invalid")
     ]
   )
 
   def finish(conn, %{"id" => id}) do
     with_tournament(conn, id, fn tournament ->
       if tournament.state == "running" do
-        {:ok, tournament} =
-          Tournaments.update_tournament(tournament, %{ends_at: DateTime.utc_now(:second)})
-
-        json(conn, %{data: serialize(Tournaments.advance_lifecycle(tournament))})
+        tournament
+        |> Tournaments.update_tournament(finish_window(tournament))
+        |> advanced(conn)
       else
-        conn |> put_status(:bad_request) |> json(%{error: "not_running"})
+        reply_error(conn, :forbidden, "not_running")
       end
     end)
   end
@@ -317,10 +283,10 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
       }
     },
     responses: [
-      ok: {"Resolved", "application/json", %Schema{type: :object}},
-      bad_request:
-        {"Rejected (already resolved / invalid winner)", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"The resolved match", "application/json", TournamentMatchResponse},
+      bad_request: Schemas.error("Not an entry of this match (invalid_winner)"),
+      conflict: Schemas.error("Already resolved (already_resolved)"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -335,14 +301,14 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
       match = Tournaments.get_match(match_id)
 
       if match == nil or match.tournament_id != tournament.id do
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
       else
         case Tournaments.resolve_match(match_id, verdict) do
           {:ok, match} ->
-            json(conn, %{ok: true, winner_entry_id: match.winner_entry_id})
+            reply_data(conn, serialize_match(tournament, match))
 
           {:error, reason} ->
-            conn |> put_status(:bad_request) |> json(%{error: to_string_reason(reason)})
+            refusal(conn, reason)
         end
       end
     end)
@@ -352,7 +318,7 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
 
   defp with_tournament(conn, id, fun) do
     case Tournaments.get_tournament(id) do
-      nil -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
+      nil -> reply_error(conn, :not_found, "not_found")
       tournament -> fun.(tournament)
     end
   end
@@ -362,7 +328,7 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
       id: t.id,
       slug: t.slug,
       title: t.title,
-      description: t.description,
+      description: t.description || "",
       icon_url: t.icon_url || "",
       state: t.state,
       registration_opens_at: t.registration_opens_at,
@@ -381,16 +347,47 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
   end
 
   defp changeset_error(conn, changeset) do
-    conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{
-      error: "invalid_data",
-      errors: Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
-    })
+    unprocessable(conn, changeset)
   end
 
-  defp to_string_reason(reason) when is_atom(reason) or is_binary(reason),
-    do: to_string(reason)
+  # The resolved match as players see it, leader ids included.
+  defp serialize_match(tournament, match) do
+    entry_ids = Enum.reject([match.a_entry_id, match.b_entry_id], &is_nil/1)
 
-  defp to_string_reason(_reason), do: "invalid_data"
+    leaders =
+      tournament.id
+      |> Tournaments.entries_by_id(entry_ids)
+      |> Map.new(fn {id, entry} -> {id, entry.leader_id} end)
+
+    Serializers.serialize_tournament_match(match, leaders)
+  end
+
+  # Draw and finish move the tournament's own clock, then let the lifecycle
+  # catch up. A window the changeset rejects is a 422, not a crash: it was a
+  # hard match, and finishing in the same second as an early draw failed
+  # `ends_at` "must be after starts_at" and answered 500.
+  defp advanced({:ok, tournament}, conn),
+    do: reply_data(conn, serialize(Tournaments.advance_lifecycle(tournament)))
+
+  defp advanced({:error, changeset}, conn), do: changeset_error(conn, changeset)
+
+  # Ends now. A draw in this very second left `starts_at` equal to now, and
+  # `ends_at` must come after it, so the start moves back that one second.
+  defp finish_window(%Tournament{starts_at: %DateTime{} = starts_at}) do
+    now = DateTime.utc_now(:second)
+
+    if DateTime.compare(starts_at, now) == :lt,
+      do: %{ends_at: now},
+      else: %{starts_at: DateTime.add(now, -1), ends_at: now}
+  end
+
+  defp finish_window(_tournament), do: %{ends_at: DateTime.utc_now(:second)}
+
+  # `Gamend.Tournaments` refuses with an atom; its status follows the rule in
+  # docs/specs/api-conventions.md.
+  defp refusal(conn, :already_resolved), do: reply_error(conn, :conflict, "already_resolved")
+  defp refusal(conn, :invalid_winner), do: reply_error(conn, :bad_request, "invalid_winner")
+  defp refusal(conn, :not_found), do: reply_error(conn, :not_found, "not_found")
+  defp refusal(conn, %Ecto.Changeset{} = changeset), do: unprocessable(conn, changeset)
+  defp refusal(conn, reason) when is_atom(reason), do: reply_error(conn, :forbidden, reason)
 end

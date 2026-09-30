@@ -8,7 +8,17 @@ defmodule Gamend.Content do
 
   All content is cached in `:persistent_term` after the first read.
   Call `reload/0` to invalidate everything (e.g. after a config change).
+
+  The work is split three ways and this module is the door to all of it:
+  `Gamend.Content.Frontmatter` reads the `---` block, `Gamend.Content.Markdown`
+  turns a file into HTML, and `Gamend.Content.Tree` reads a nested guide
+  collection. What stays here is the registry, the cache, the blog, and the
+  changelog and roadmap pills.
   """
+
+  alias Gamend.Content.Frontmatter
+  alias Gamend.Content.Markdown
+  alias Gamend.Content.Tree
 
   # Heroicon names; the docs page falls back to these when a file names none.
   @default_doc_icon "hero-document-text"
@@ -42,7 +52,21 @@ defmodule Gamend.Content do
     * `:path` - single candidate path
     * `:candidates` - ordered candidate paths
     * `:asset_root` - `:self` or `:dirname` when serving assets
-    * `:post_render` - `{module, function}` applied to rendered guide HTML
+    * `:post_render` - `{module, function}` applied to a guide's or a blog
+      post's rendered HTML
+    * `:nesting` - `:flat` (the default: one folder level, slugs are file
+      names) or `:tree` (any depth, slugs are paths; see `Gamend.Content.Tree`)
+    * `:base_path` - the route prefix guides are served under, such as
+      `"/docs"`. With it set, a link written to a neighbouring `.md` file is
+      rewritten to that guide's route
+    * `:assets` - `:content` (the default) serves images through the
+      `/content/<name>/` asset route; `:static` leaves root-absolute image
+      paths alone, for a site whose images live in `priv/static`
+    * `:image_url` - `{module, function}` called as `function(url, use)` for
+      each image the collection serves itself, answering the URL to serve
+      instead: a smaller copy the host has built, say. `use` is `:page` for
+      a picture on the page itself (in the body, or a post's cover) and
+      `:card` for a post's picture on the blog index. See `image_url/3`
   """
   @spec register_path(atom() | String.t(), keyword()) :: :ok
   def register_path(name, opts) when is_atom(name) or is_binary(name) do
@@ -52,6 +76,18 @@ defmodule Gamend.Content do
     :persistent_term.put(
       @registered_paths_key,
       Map.put(registered_path_overrides(), normalized_name, entry)
+    )
+
+    reload()
+  end
+
+  @doc false
+  # For tests: forget a registration made with `register_path/2`.
+  @spec unregister_path(atom() | String.t()) :: :ok
+  def unregister_path(name) do
+    :persistent_term.put(
+      @registered_paths_key,
+      Map.delete(registered_path_overrides(), normalize_registered_name(name))
     )
 
     reload()
@@ -90,6 +126,35 @@ defmodule Gamend.Content do
 
       {_entry, _resolved_path} ->
         nil
+    end
+  end
+
+  @doc """
+  The URL to serve an image of a collection at, through the collection's
+  registered `:image_url` (see `register_path/2`): `use` is `:page` or
+  `:card`. Without one, or for an `http`/`data:` URL, `url` itself.
+
+  The rendered HTML and `list_blog_posts/0` already went through it; this is
+  for a picture a page places itself, such as a post's cover.
+  """
+  @spec image_url(atom() | String.t(), String.t() | nil, :page | :card) :: String.t() | nil
+  def image_url(_collection, nil, _use), do: nil
+
+  def image_url(collection, url, use) when is_binary(url) and use in [:page, :card] do
+    case Map.get(registered_paths(), normalize_registered_name(collection)) do
+      %{image_url: {module, function}} ->
+        if Markdown.external?(url), do: url, else: apply(module, function, [url, use]) || url
+
+      _entry ->
+        url
+    end
+  end
+
+  # What `Markdown` takes for `:image_url`: the pictures in a rendered page.
+  defp page_images(collection) do
+    case Map.get(registered_paths(), normalize_registered_name(collection)) do
+      %{image_url: {_module, _function}} -> &image_url(collection, &1, :page)
+      _entry -> nil
     end
   end
 
@@ -169,10 +234,6 @@ defmodule Gamend.Content do
   end
 
   # ---------------------------------------------------------------------------
-  # Blog
-  # ---------------------------------------------------------------------------
-
-  # ---------------------------------------------------------------------------
   # Docs
   # ---------------------------------------------------------------------------
 
@@ -197,33 +258,120 @@ defmodule Gamend.Content do
   player guide). The collection is part of every cache key, so the sets never
   see each other's entries. Everything defaults to `:docs`, which is what the
   single-collection callers already had.
+
+  A collection registered with `nesting: :tree` answers the same shape for
+  its top-level categories, each holding every guide beneath it in reading
+  order; guides at the root come first under a category titled `nil`. The
+  full tree is `doc_tree/1`.
   """
-  @spec list_doc_categories(atom()) :: [%{category: String.t(), guides: [map()]}]
+  @spec list_doc_categories(atom()) :: [%{category: String.t() | nil, guides: [map()]}]
   def list_doc_categories(collection \\ :docs) when is_atom(collection) do
     cached({:doc_categories, collection}, fn ->
-      case path(collection) do
-        nil ->
+      case {path(collection), nesting(collection)} do
+        {nil, _nesting} -> []
+        {dir, :flat} -> flat_categories(dir)
+        {_dir, :tree} -> tree_categories(doc_tree(collection))
+      end
+    end)
+  end
+
+  defp flat_categories(dir) do
+    dir
+    |> Path.join("*/*.md")
+    |> Path.wildcard()
+    |> Enum.reject(&(Path.basename(&1) == "_category.md"))
+    |> Enum.sort()
+    |> Enum.map(&parse_doc(&1, dir))
+    |> Enum.chunk_by(& &1.category)
+    |> Enum.map(fn [%{category: folder} | _] = guides ->
+      dir |> category_meta(folder) |> Map.put(:guides, guides)
+    end)
+  end
+
+  defp tree_categories(tree) do
+    {root_docs, categories} = Enum.split_with(tree, &(&1.type == :doc))
+
+    root =
+      if root_docs == [],
+        do: [],
+        else: [
+          %{
+            category: nil,
+            icon: @default_category_icon,
+            color: @default_category_color,
+            guides: root_docs
+          }
+        ]
+
+    root ++
+      Enum.map(categories, fn category ->
+        %{
+          category: category.title,
+          icon: category.icon,
+          color: category.color,
+          guides: Tree.flatten([category])
+        }
+      end)
+  end
+
+  @doc """
+  The whole tree of a `nesting: :tree` collection — categories with their
+  children, guides with their metadata — in reading order. A flat collection
+  answers its categories as top-level nodes, so a sidebar built from this
+  works on either.
+  """
+  @spec doc_tree(atom()) :: [Tree.entry()]
+  def doc_tree(collection \\ :docs) when is_atom(collection) do
+    cached({:doc_tree, collection}, fn ->
+      case {path(collection), nesting(collection)} do
+        {nil, _nesting} ->
           []
 
-        dir ->
+        {dir, :tree} ->
+          Tree.scan(dir,
+            doc_icon: @default_doc_icon,
+            category_icon: @default_category_icon,
+            category_color: @default_category_color
+          )
+
+        {dir, :flat} ->
           dir
-          |> Path.join("*/*.md")
-          |> Path.wildcard()
-          |> Enum.reject(&(Path.basename(&1) == "_category.md"))
-          |> Enum.sort()
-          |> Enum.map(&parse_doc(&1, dir))
-          |> Enum.chunk_by(& &1.category)
-          |> Enum.map(fn [%{category: folder} | _] = guides ->
-            dir |> category_meta(folder) |> Map.put(:guides, guides)
+          |> flat_categories()
+          |> Enum.map(fn category ->
+            %{
+              type: :category,
+              slug: category.category,
+              dir: "",
+              title: category.category,
+              label: category.category,
+              icon: category.icon,
+              color: category.color,
+              description: nil,
+              position: nil,
+              collapsed: false,
+              category: nil,
+              index: nil,
+              children: Enum.map(category.guides, &Map.put(&1, :type, :doc))
+            }
           end)
       end
     end)
   end
 
-  @doc "Every guide as a flat list, in the same order as `list_doc_categories/1`."
+  @doc """
+  Every guide as a flat list, in reading order.
+
+  For a flat collection that is the order of `list_doc_categories/1`. For a
+  tree it is the tree's own order — a category's page, then its children,
+  then the next sibling — which is what previous/next should follow and what
+  the grouped view, with the root guides pulled to the front, does not.
+  """
   @spec list_docs(atom()) :: [map()]
   def list_docs(collection \\ :docs) when is_atom(collection) do
-    Enum.flat_map(list_doc_categories(collection), & &1.guides)
+    case nesting(collection) do
+      :tree -> Tree.flatten(doc_tree(collection))
+      :flat -> Enum.flat_map(list_doc_categories(collection), & &1.guides)
+    end
   end
 
   @doc "Returns a single guide map by slug, or `nil`."
@@ -237,6 +385,19 @@ defmodule Gamend.Content do
   def get_doc(_collection, _slug), do: nil
 
   @doc """
+  A category of a tree collection by its slug, or `nil`. A category without
+  an `index.md` has no guide of its own, and this is how its page is found.
+  """
+  @spec get_doc_category(atom(), String.t()) :: Tree.category() | nil
+  def get_doc_category(collection \\ :docs, slug)
+
+  def get_doc_category(collection, slug) when is_atom(collection) and is_binary(slug) do
+    Tree.find_category(doc_tree(collection), slug)
+  end
+
+  def get_doc_category(_collection, _slug), do: nil
+
+  @doc """
   The category a guide belongs to — its display title, icon and colour — or
   `nil`.
 
@@ -244,17 +405,56 @@ defmodule Gamend.Content do
   *folder* ("10-setup") while the category carries the display title ("Setup").
   Both pages that render a guide need this, so deriving it twice by hand was
   how the two drifted apart.
+
+  In a tree collection this is the guide's nearest category, with its
+  `guides` being that category's direct pages.
   """
   @spec doc_category(atom(), String.t()) :: map() | nil
   def doc_category(collection \\ :docs, slug)
 
   def doc_category(collection, slug) when is_atom(collection) and is_binary(slug) do
-    Enum.find(list_doc_categories(collection), fn category ->
-      Enum.any?(category.guides, &(&1.slug == slug))
-    end)
+    case nesting(collection) do
+      :flat ->
+        Enum.find(list_doc_categories(collection), fn category ->
+          Enum.any?(category.guides, &(&1.slug == slug))
+        end)
+
+      :tree ->
+        tree = doc_tree(collection)
+
+        with %{category: parent} when is_binary(parent) <- Tree.find_doc(tree, slug),
+             %{} = category <- Tree.find_category(tree, parent) do
+          %{
+            category: category.title,
+            slug: category.slug,
+            icon: category.icon,
+            color: category.color,
+            guides: Enum.filter(category.children, &(&1.type == :doc))
+          }
+        else
+          _ -> nil
+        end
+    end
   end
 
   def doc_category(_collection, _slug), do: nil
+
+  @doc """
+  The categories above a guide, outermost first, then the guide. For a
+  breadcrumb. Empty in a flat collection, whose one level the index already
+  shows.
+  """
+  @spec doc_breadcrumbs(atom(), String.t()) :: [Tree.entry()]
+  def doc_breadcrumbs(collection \\ :docs, slug)
+
+  def doc_breadcrumbs(collection, slug) when is_atom(collection) and is_binary(slug) do
+    case nesting(collection) do
+      :tree -> Tree.breadcrumbs(doc_tree(collection), slug)
+      :flat -> []
+    end
+  end
+
+  def doc_breadcrumbs(_collection, _slug), do: []
 
   @doc """
   `{previous, next}` guides around `slug` in reading order, either possibly
@@ -289,7 +489,8 @@ defmodule Gamend.Content do
   over the finished HTML — the hook Polyglot Pirates' guide uses to turn
   `[coins:250]` into a badge. It runs *after* markdown rendering because the
   sanitiser strips raw HTML out of the markdown, and inside the cache because
-  the result is as static as the markdown it came from.
+  the result is as static as the markdown it came from. One registered with
+  `:image_url` has its pictures swapped the same way, inside the cache.
   """
   @spec doc_html(atom(), String.t()) :: String.t() | nil
   def doc_html(collection \\ :docs, slug)
@@ -301,15 +502,56 @@ defmodule Gamend.Content do
           nil
 
         doc ->
-          case render_markdown_file(doc.path, Atom.to_string(collection)) do
+          entry = Map.get(registered_paths(), normalize_registered_name(collection), %{})
+
+          doc.path
+          |> Markdown.render_file(
+            collection: Atom.to_string(collection),
+            assets: Map.get(entry, :assets, :content),
+            base_path: Map.get(entry, :base_path),
+            slug: slug,
+            dir: Map.get(doc, :dir, ""),
+            id: "doc-" <> String.replace(slug, "/", "-"),
+            image_url: page_images(collection)
+          )
+          |> case do
             nil -> nil
-            html -> html |> strip_first_h1() |> post_render(collection)
+            html -> html |> Markdown.strip_first_h1() |> post_render(collection)
           end
       end
     end)
   end
 
   def doc_html(_collection, _slug), do: nil
+
+  @doc "The headings of a rendered guide, for a table of contents."
+  @spec doc_toc(atom(), String.t()) :: [%{id: String.t(), text: String.t(), level: 2 | 3}]
+  def doc_toc(collection \\ :docs, slug), do: collection |> doc_html(slug) |> Markdown.toc()
+
+  @doc """
+  A guide's `h2` and `h3` sections: the heading's id and text, as
+  `doc_toc/2` gives them, plus `:lede`, the first sentence of the section's
+  first paragraph (nil when it opens with a list, a table or code).
+
+  For search: a section is a place to go as much as a guide is. Cached until
+  `reload/0`, like the HTML it is read from.
+  """
+  @spec doc_sections(atom(), String.t()) :: [
+          %{id: String.t(), text: String.t(), level: 2 | 3, lede: String.t() | nil}
+        ]
+  def doc_sections(collection \\ :docs, slug) do
+    cached({:doc_sections, collection, slug}, fn ->
+      collection |> doc_html(slug) |> Markdown.sections()
+    end)
+  end
+
+  @doc """
+  Caches `fun`'s result under `key` until the next `reload/0`, for data a host
+  derives from content (its search entries, say) so it is built once rather
+  than on every request. An empty result is not cached.
+  """
+  @spec memoize(term(), (-> value)) :: value when value: term()
+  def memoize(key, fun) when is_function(fun, 0), do: cached({:memoize, key}, fun)
 
   defp post_render(html, collection) do
     case Map.get(registered_paths(), normalize_registered_name(collection)) do
@@ -318,18 +560,31 @@ defmodule Gamend.Content do
     end
   end
 
+  defp nesting(collection) do
+    case Map.get(registered_paths(), normalize_registered_name(collection)) do
+      %{nesting: nesting} -> nesting
+      _entry -> :flat
+    end
+  end
+
   defp parse_doc(path, root) do
     content = File.read!(path)
-    meta = frontmatter(content)
+    {meta, body} = Frontmatter.parse(content)
     slug = path |> Path.basename(".md") |> strip_order_prefix()
-    body = strip_frontmatter(content)
+    title = string(meta["title"]) || extract_title(body) || humanize_slug(slug)
+    description = string(meta["description"])
 
     %{
       slug: slug,
-      title: extract_title(body) || humanize_slug(slug),
-      summary: extract_excerpt(body),
-      icon: Map.get(meta, "icon", @default_doc_icon),
+      title: title,
+      label: string(meta["sidebar_label"]) || string(meta["label"]) || title,
+      summary: description || extract_excerpt(body),
+      description: description,
+      image: string(meta["image"]),
+      keywords: Frontmatter.list(meta["keywords"]),
+      icon: string(meta["icon"]) || @default_doc_icon,
       category: category_dir(path, root),
+      dir: category_dir(path, root),
       path: path
     }
   end
@@ -344,84 +599,58 @@ defmodule Gamend.Content do
   defp category_meta(root, dir) do
     path = Path.join([root, dir, "_category.md"])
 
-    meta = if File.exists?(path), do: frontmatter(File.read!(path)), else: %{}
+    meta = if File.exists?(path), do: Frontmatter.meta(File.read!(path)), else: %{}
 
     %{
-      category: Map.get(meta, "title") || dir |> strip_order_prefix() |> humanize_slug(),
-      icon: Map.get(meta, "icon", @default_category_icon),
-      color: Map.get(meta, "color", @default_category_color)
+      category: string(meta["title"]) || dir |> strip_order_prefix() |> humanize_slug(),
+      icon: string(meta["icon"]) || @default_category_icon,
+      color: string(meta["color"]) || @default_category_color
     }
   end
 
   @doc """
-  Reads a leading `---` fenced block of `key: value` lines.
+  Reads a leading `---` fenced block.
 
-  Deliberately not YAML: the values here are single-line strings, and a parser
-  dependency for that would be its own liability.
+  Deliberately not YAML — see `Gamend.Content.Frontmatter` for exactly how
+  much of it is read. Scalars come back as strings, numbers or booleans, and
+  lists as lists.
   """
-  @spec frontmatter(String.t()) :: %{String.t() => String.t()}
-  def frontmatter("---\n" <> rest) do
-    case String.split(rest, ~r/^---\s*$/m, parts: 2) do
-      [block, _body] ->
-        block
-        |> String.split("\n", trim: true)
-        |> Enum.reduce(%{}, fn line, acc ->
-          case String.split(line, ":", parts: 2) do
-            [key, value] -> Map.put(acc, String.trim(key), String.trim(value))
-            _ -> acc
-          end
-        end)
+  @spec frontmatter(String.t()) :: Frontmatter.meta()
+  defdelegate frontmatter(content), to: Frontmatter, as: :meta
 
-      _ ->
-        %{}
-    end
-  end
+  defp strip_order_prefix(name), do: Markdown.strip_order_prefix(name)
 
-  def frontmatter(_content), do: %{}
-
-  defp strip_frontmatter("---\n" <> rest = content) do
-    case String.split(rest, ~r/^---\s*$/m, parts: 2) do
-      [_block, body] -> String.trim_leading(body)
-      _ -> content
-    end
-  end
-
-  defp strip_frontmatter(content), do: content
-
-  # The highlighter ships no GDScript grammar, so a ```gdscript block renders
-  # as flat text. JavaScript's grammar colours its keywords, strings and calls
-  # closely enough; the markdown keeps saying gdscript, which is what a reader
-  # should see.
-  @language_aliases %{
-    "gdscript" => "javascript",
-    "gd" => "javascript",
-    "godot" => "javascript"
-  }
-
-  defp alias_code_languages(content) do
-    Regex.replace(~r/^```(\w+)[ \t]*$/m, content, fn full, lang ->
-      case Map.fetch(@language_aliases, String.downcase(lang)) do
-        {:ok, replacement} -> "```" <> replacement
-        :error -> full
-      end
-    end)
-  end
-
-  # "20-deployment" -> "deployment". Ordering lives in the filename so the
-  # tree reads in the same order it renders.
-  defp strip_order_prefix(name), do: Regex.replace(~r/^\d+[-_]/, name, "")
+  # ---------------------------------------------------------------------------
+  # Blog
+  # ---------------------------------------------------------------------------
 
   @doc """
   Lists all blog posts sorted newest-first.
 
   Each post is a map with keys:
-    * `:slug`  – URL-safe identifier derived from the filename
-    * `:title` – extracted from the first `# ` heading (or humanised slug)
-    * `:date`  – `Date.t()` parsed from filename prefix or file mtime
+    * `:slug`  – from frontmatter `slug`, else the filename after its date
+    * `:title` – frontmatter `title`, else the first `# ` heading, else the
+      humanised slug
+    * `:date`  – frontmatter `date`, else the `YYYY-MM-DD-` filename prefix,
+      else today
     * `:path`  – absolute path to the `.md` file
-    * `:excerpt` – first non-heading paragraph (≤ 200 chars), for cards and
-      meta descriptions
-    * `:lede` – that same paragraph in full, which is what a post opens with
+    * `:excerpt` – what a card and a meta description show: the frontmatter
+      `description`, else the text above a `<!-- truncate -->` marker, else
+      the first paragraph cut to 200 characters
+    * `:lede` – the first paragraph in full, which is what a post opens
+      with when it has no description of its own; `:lede_in_body?` says
+      whether that paragraph is also the body's first, so the page drops one
+    * `:image` – the post's picture, for its card, its feed entry and a link
+      to it: the frontmatter `image`, else the first picture in the body, at
+      the URL the body serves it from (`Gamend.Content.Markdown.image_src/2`,
+      so a relative path is a `/content/blog/…` one); nil when it has none
+    * `:card_image` – `:image` as the index card shows it: through the
+      blog's registered `:image_url` with `:card`, else the same
+    * `:description`, `:keywords`, `:tags` – frontmatter
+    * `:authors` – resolved from `_authors/<key>.md` beside the posts:
+      `%{key, name, title, url, image}`, with a key that has no file
+      answering its key as its name
+    * `:reading_minutes` – at two hundred words a minute, never under one
   """
   @spec list_blog_posts() :: [map()]
   def list_blog_posts do
@@ -431,12 +660,51 @@ defmodule Gamend.Content do
           []
 
         dir ->
+          authors = blog_authors(dir)
+          opts = blog_render_opts()
+
           dir
           |> Path.join("**/*.md")
           |> Path.wildcard()
-          |> Enum.map(&parse_blog_post/1)
+          |> Enum.reject(&hidden_path?(&1, dir))
+          |> Enum.map(&parse_blog_post(&1, authors, opts))
           |> Enum.sort_by(& &1.date, {:desc, Date})
       end
+    end)
+  end
+
+  # How a post's markdown is rendered, which is also how its picture is
+  # resolved: one set of options, so the card's URL is the body's.
+  defp blog_render_opts do
+    entry = Map.get(registered_paths(), "blog", %{})
+    [collection: "blog", assets: Map.get(entry, :assets, :content)]
+  end
+
+  # `_authors/dragos.md`, a `_drafts/` folder, a `_template.md`: an underscore
+  # anywhere in the path below the blog root means "not a post".
+  defp hidden_path?(path, dir) do
+    path
+    |> Path.relative_to(dir)
+    |> Path.split()
+    |> Enum.any?(&String.starts_with?(&1, "_"))
+  end
+
+  defp blog_authors(dir) do
+    dir
+    |> Path.join("_authors/*.md")
+    |> Path.wildcard()
+    |> Map.new(fn path ->
+      key = Path.basename(path, ".md")
+      meta = Frontmatter.meta(File.read!(path))
+
+      {key,
+       %{
+         key: key,
+         name: string(meta["name"]) || key,
+         title: string(meta["title"]),
+         url: string(meta["url"]),
+         image: string(meta["image"])
+       }}
     end)
   end
 
@@ -477,13 +745,23 @@ defmodule Gamend.Content do
           nil
 
         post ->
-          case render_markdown_file(post.path, "blog") do
+          post.path
+          |> Markdown.render_file(
+            blog_render_opts() ++ [id: "post-" <> slug, image_url: page_images(:blog)]
+          )
+          |> case do
             nil -> nil
-            html -> html |> strip_first_h1() |> strip_lede_paragraph(post.lede)
+            html -> html |> Markdown.strip_first_h1() |> strip_lede(post) |> post_render(:blog)
           end
       end
     end)
   end
+
+  # The show page renders the lede above the body when the post has no
+  # description; then the body's first paragraph is that lede and is dropped
+  # here, or every post opens by repeating itself.
+  defp strip_lede(html, %{lede_in_body?: true, lede: lede}), do: strip_lede_paragraph(html, lede)
+  defp strip_lede(html, _post), do: html
 
   @doc """
   Groups blog posts by `{year, month}` (newest first).
@@ -498,9 +776,102 @@ defmodule Gamend.Content do
     |> Enum.sort_by(fn {y, _} -> y end, :desc)
   end
 
-  # ---------------------------------------------------------------------------
-  # Content asset serving
-  # ---------------------------------------------------------------------------
+  @truncate_marker ~r/<!--\s*truncate\s*-->/
+
+  defp parse_blog_post(path, authors, opts) do
+    filename = Path.basename(path, ".md")
+    {file_date, file_slug} = extract_date_and_slug(filename)
+    {meta, body} = Frontmatter.parse(File.read!(path))
+
+    description = string(meta["description"])
+    lede = extract_lede(body)
+    truncated = truncated_excerpt(body)
+
+    excerpt =
+      cond do
+        description -> description
+        truncated -> truncated
+        true -> String.slice(lede, 0, 200)
+      end
+
+    image = frontmatter_image(meta["image"], opts) || Markdown.first_image(body, opts)
+
+    %{
+      slug: string(meta["slug"]) |> then(&(&1 && String.trim(&1, "/"))) || file_slug,
+      title: string(meta["title"]) || extract_title(body) || humanize_slug(file_slug),
+      date: meta_date(meta["date"]) || file_date,
+      path: path,
+      excerpt: excerpt,
+      lede: lede,
+      # A description means the page shows *that* above the body, so the
+      # first paragraph stays where it is. Without one the page opens with
+      # the first paragraph, and the body drops its copy. A truncate marker
+      # only decides the excerpt: the text above it is the first paragraph
+      # too, and the page used to print it twice.
+      lede_in_body?: is_nil(description),
+      description: description,
+      image: image,
+      card_image: image_url(:blog, image, :card),
+      keywords: Frontmatter.list(meta["keywords"]),
+      tags: Frontmatter.list(meta["tags"]),
+      authors:
+        meta["authors"]
+        |> Frontmatter.list()
+        |> Enum.map(&Map.get(authors, &1, %{key: &1, name: &1, title: nil, url: nil, image: nil})),
+      reading_minutes: reading_minutes(body)
+    }
+  end
+
+  # A URL as written, which is what the frontmatter has always meant; only a
+  # relative path, which has no URL of its own, is resolved the way the body
+  # resolves one.
+  defp frontmatter_image(value, opts) do
+    case string(value) do
+      nil -> nil
+      "/" <> _absolute = image -> image
+      image -> if Markdown.external?(image), do: image, else: Markdown.image_src(image, opts)
+    end
+  end
+
+  defp truncated_excerpt(body) do
+    case Regex.split(@truncate_marker, body, parts: 2) do
+      [above, _below] -> above |> extract_lede() |> String.slice(0, 300)
+      _ -> nil
+    end
+  end
+
+  defp reading_minutes(body) do
+    words = body |> String.split(~r/\s+/, trim: true) |> length()
+    max(1, div(words + 199, 200))
+  end
+
+  defp meta_date(nil), do: nil
+
+  defp meta_date(value) when is_binary(value) do
+    value = String.trim(value)
+
+    case Date.from_iso8601(String.slice(value, 0, 10)) do
+      {:ok, date} -> date
+      _ -> nil
+    end
+  end
+
+  defp meta_date(_other), do: nil
+
+  defp extract_date_and_slug(filename) do
+    case Regex.run(~r/^(\d{4}-\d{2}-\d{2})-(.+)$/, filename) do
+      [_, date_str, slug] ->
+        case Date.from_iso8601(date_str) do
+          {:ok, date} -> {date, slug}
+          _ -> {file_date_fallback(), filename}
+        end
+
+      _ ->
+        {file_date_fallback(), filename}
+    end
+  end
+
+  defp file_date_fallback, do: Date.utc_today()
 
   # ---------------------------------------------------------------------------
   # Private helpers
@@ -555,22 +926,41 @@ defmodule Gamend.Content do
       raise ArgumentError, "registered content path asset_root must be :self or :dirname"
     end
 
+    nesting = Keyword.get(opts, :nesting, :flat)
+
+    if nesting not in [:flat, :tree] do
+      raise ArgumentError, "registered content path nesting must be :flat or :tree"
+    end
+
+    assets = Keyword.get(opts, :assets, :content)
+
+    if assets not in [:content, :static] do
+      raise ArgumentError, "registered content path assets must be :content or :static"
+    end
+
     %{
       kind: kind,
       candidates: candidates,
       asset_root: asset_root,
-      post_render: normalize_post_render!(Keyword.get(opts, :post_render))
+      post_render: normalize_hook!(opts, :post_render),
+      image_url: normalize_hook!(opts, :image_url),
+      nesting: nesting,
+      base_path: Keyword.get(opts, :base_path),
+      assets: assets
     }
   end
 
-  defp normalize_post_render!(nil), do: nil
+  defp normalize_hook!(opts, key) do
+    case Keyword.get(opts, key) do
+      nil ->
+        nil
 
-  defp normalize_post_render!({module, function} = hook)
-       when is_atom(module) and is_atom(function),
-       do: hook
+      {module, function} = hook when is_atom(module) and is_atom(function) ->
+        hook
 
-  defp normalize_post_render!(_other) do
-    raise ArgumentError, "registered content path post_render must be {module, function}"
+      _other ->
+        raise ArgumentError, "registered content path #{key} must be {module, function}"
+    end
   end
 
   defp normalize_registered_name(name) when is_atom(name), do: Atom.to_string(name)
@@ -616,187 +1006,10 @@ defmodule Gamend.Content do
     end)
   end
 
+  # The changelog and roadmap: one file, no tree, images beside it.
   defp render_markdown_file(path, content_type) do
-    case File.read(path) do
-      {:ok, content} ->
-        content =
-          content
-          |> strip_frontmatter()
-          |> alias_code_languages()
-          |> fix_table_separators()
-
-        case MDEx.to_html(content, markdown_options()) do
-          {:ok, html} -> rewrite_relative_images(html, content_type)
-          {:error, _reason} -> nil
-        end
-
-      _ ->
-        nil
-    end
+    Markdown.render_file(path, collection: content_type, id: content_type)
   end
-
-  # Markdown tables require separator rows to match the header row exactly.
-  # This helper scans for pipe-table patterns and adjusts separator rows.
-  defp fix_table_separators(content) do
-    content
-    |> String.split("\n")
-    |> fix_table_lines([])
-    |> Enum.reverse()
-    |> Enum.join("\n")
-  end
-
-  defp fix_table_lines([], acc), do: acc
-
-  defp fix_table_lines([header, sep | rest], acc) do
-    if table_header?(header) and table_separator?(sep) do
-      col_count = count_table_columns(header)
-      fixed_sep = build_separator(col_count)
-      fix_table_lines(rest, [fixed_sep, header | acc])
-    else
-      fix_table_lines([sep | rest], [header | acc])
-    end
-  end
-
-  defp fix_table_lines([line], acc), do: [line | acc]
-
-  defp markdown_options do
-    [
-      extension: [
-        autolink: true,
-        strikethrough: true,
-        table: true,
-        tasklist: true
-      ],
-      parse: [smart: false],
-      # Linked rather than inline: the formatter emits token classes and the
-      # colours live in app.css, so the same markup reads correctly in both
-      # the light and dark themes. Inline styles would pin one palette.
-      syntax_highlight: [engine: :lumis, opts: [formatter: :html_linked]],
-      # The default sanitizer already preserves the highlighter's classes and
-      # the language hint; narrowing it strips exactly that markup.
-      sanitize: MDEx.Document.default_sanitize_options()
-    ]
-  end
-
-  defp table_header?(line) do
-    trimmed = String.trim(line)
-    String.starts_with?(trimmed, "|") and String.contains?(trimmed, "|")
-  end
-
-  defp table_separator?(line) do
-    trimmed = String.trim(line)
-    String.starts_with?(trimmed, "|") and Regex.match?(~r/^\|[\s\-:|]+\|$/, trimmed)
-  end
-
-  defp count_table_columns(line) do
-    line
-    |> String.trim()
-    |> String.trim("|")
-    |> String.split("|")
-    |> length()
-  end
-
-  defp build_separator(col_count) do
-    cells = List.duplicate("-", col_count) |> Enum.join("|")
-    "|#{cells}|"
-  end
-
-  # Rewrite image `src` attributes so they point to `/content/<type>/…`,
-  # which is served by the host content asset route.
-  #
-  # Handles three conventions authors may use:
-  #   1. Relative:     `gamend/auth.png`        → `/content/blog/gamend/auth.png`
-  #   2. Absolute:     `/gamend/auth.png`        → `/content/blog/gamend/auth.png`
-  #   3. Type-prefixed: `/blog/gamend/auth.png`  → `/content/blog/gamend/auth.png`
-  #
-  # Also handles `<image>` tags (non-standard HTML) by converting them to `<img>`.
-  # External URLs (`http…`) and already-rewritten `/content/…` paths are left alone.
-  defp rewrite_relative_images(html, content_type) do
-    # First, normalise <image … /> to <img … /> (browsers treat <image> as
-    # synonymous with <img>, but it's non-standard and inconsistent).
-    html = Regex.replace(~r/<image\b/, html, "<img")
-
-    Regex.replace(
-      ~r/<img([^>]*)\ssrc="([^"]+)"([^>]*)>/,
-      html,
-      fn full, before, src, after_attr ->
-        cond do
-          String.starts_with?(src, "http") ->
-            full
-
-          String.starts_with?(src, "/content/") ->
-            add_lazy_image_attrs(full)
-
-          true ->
-            clean =
-              src
-              |> String.trim_leading("/")
-              |> String.trim_leading("./")
-              # Strip redundant type prefix (e.g. "blog/" from "/blog/gamend/img.png")
-              |> strip_content_type_prefix(content_type)
-
-            ~s(<img#{before} src="/content/#{content_type}/#{clean}"#{after_attr}>)
-            |> add_lazy_image_attrs()
-        end
-      end
-    )
-  end
-
-  defp add_lazy_image_attrs(tag) do
-    tag
-    |> ensure_image_attr("loading", "lazy")
-    |> ensure_image_attr("decoding", "async")
-  end
-
-  defp ensure_image_attr(tag, attr, value) do
-    if Regex.match?(~r/\s#{Regex.escape(attr)}=/, tag) do
-      tag
-    else
-      String.replace(tag, ~r/<img\b/, ~s(<img #{attr}="#{value}"), global: false)
-    end
-  end
-
-  defp strip_content_type_prefix(path, content_type) do
-    prefix = content_type <> "/"
-
-    if String.starts_with?(path, prefix) do
-      String.trim_leading(path, prefix)
-    else
-      path
-    end
-  end
-
-  defp parse_blog_post(path) do
-    filename = Path.basename(path, ".md")
-    {date, slug} = extract_date_and_slug(filename)
-    content = File.read!(path)
-    title = extract_title(content) || humanize_slug(slug)
-    lede = extract_lede(content)
-
-    %{
-      slug: slug,
-      title: title,
-      date: date,
-      path: path,
-      excerpt: String.slice(lede, 0, 200),
-      lede: lede
-    }
-  end
-
-  defp extract_date_and_slug(filename) do
-    case Regex.run(~r/^(\d{4}-\d{2}-\d{2})-(.+)$/, filename) do
-      [_, date_str, slug] ->
-        case Date.from_iso8601(date_str) do
-          {:ok, date} -> {date, slug}
-          _ -> {file_date_fallback(), filename}
-        end
-
-      _ ->
-        {file_date_fallback(), filename}
-    end
-  end
-
-  defp file_date_fallback, do: Date.utc_today()
 
   defp extract_title(content) do
     content
@@ -809,11 +1022,6 @@ defmodule Gamend.Content do
     end)
   end
 
-  # The whole first paragraph. `excerpt` is this cut to 200 chars for cards and
-  # meta descriptions; the post itself opens with the full thing, and cutting
-  # it here is what made a long opening paragraph print twice — the truncated
-  # copy as the lede, the full one at the top of the body, because
-  # `strip_lede_paragraph/2` could no longer recognise them as the same text.
   # A short summary for a card or a meta description, where the full paragraph
   # would not fit.
   defp extract_excerpt(content), do: content |> extract_lede() |> String.slice(0, 200)
@@ -822,15 +1030,24 @@ defmodule Gamend.Content do
   # taking one line cut every excerpt off mid-sentence — "Measured numbers, not
   # estimates. Everything below comes from the k6 harness in" was what a card
   # and a `<meta name="description">` actually said.
+  #
+  # Given the *body*, after the frontmatter: a post with a `---` block used to
+  # open with `title: …` as its lede.
   defp extract_lede(content) do
     content
     |> String.split("\n")
     |> Enum.map(&String.trim/1)
-    |> Enum.drop_while(&(&1 == "" or String.starts_with?(&1, "#")))
+    |> Enum.drop_while(&(&1 == "" or not prose_line?(&1)))
     |> Enum.take_while(&(&1 != ""))
     |> Enum.join(" ")
     |> String.trim()
     |> strip_markdown_inline()
+  end
+
+  # An import line, a video tag, a fence: none of these is the opening
+  # sentence, and the paragraph after them is.
+  defp prose_line?(line) do
+    not String.starts_with?(line, ["#", "<", "```", ":::", "import ", "|", "![", "@@"])
   end
 
   # Strip common inline markdown syntax so excerpts read as plain text.
@@ -858,26 +1075,30 @@ defmodule Gamend.Content do
     |> Enum.map_join(" ", &String.capitalize/1)
   end
 
-  # Remove the first <h1>...</h1> from rendered HTML since the blog post
-  # header already displays the title separately.
-  defp strip_first_h1(html) do
-    Regex.replace(~r/<h1>.*?<\/h1>\s*/s, html, "", global: false)
-  end
-
   # The show page renders the lede above the body, and the lede *is* the body's
   # first paragraph — so that paragraph is dropped here or every post opens by
   # repeating itself. Only an exact match is removed; an edited opening
   # paragraph stays.
+  #
+  # The first paragraph with any text, as `extract_lede/1` takes the first
+  # prose line: a post that opens with an image renders it as a `<p>` of its
+  # own, and checking only the first `<p>` left such a post repeating its lede.
   defp strip_lede_paragraph(html, lede) when is_binary(lede) and lede != "" do
-    case Regex.run(~r/\A\s*<p>(.*?)<\/p>\s*/s, html) do
-      [full, text] ->
-        if normalize_text(text) == normalize_text(lede) do
-          String.replace(html, full, "", global: false)
+    ~r/<p>(.*?)<\/p>\s*/s
+    |> Regex.scan(html, return: :index)
+    |> Enum.find(fn [_full, {start, length}] ->
+      normalize_text(binary_part(html, start, length)) != ""
+    end)
+    |> case do
+      [{start, length} = _full, {text_start, text_length}] ->
+        if normalize_text(binary_part(html, text_start, text_length)) == normalize_text(lede) do
+          binary_part(html, 0, start) <>
+            binary_part(html, start + length, byte_size(html) - start - length)
         else
           html
         end
 
-      _ ->
+      nil ->
         html
     end
   end
@@ -890,6 +1111,9 @@ defmodule Gamend.Content do
     |> String.replace(~r/\s+/, " ")
     |> String.trim()
   end
+
+  defp string(value) when is_binary(value) and value != "", do: value
+  defp string(_other), do: nil
 
   # Pill tag definitions: [tag] → {css_class_suffix, display_label}
   @changelog_tags %{

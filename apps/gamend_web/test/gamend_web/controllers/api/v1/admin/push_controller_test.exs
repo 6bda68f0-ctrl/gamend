@@ -43,8 +43,8 @@ defmodule GamendWeb.Api.V1.Admin.PushControllerTest do
   test "deletes any user's token", %{conn: conn, target: target} do
     {:ok, token} = Push.register_token(target.id, %{"token" => "t", "platform" => "web"})
 
-    assert %{"id" => _} =
-             json_response(delete(conn, "/api/v1/admin/push/tokens/#{token.id}"), 200)
+    assert json_response(delete(conn, "/api/v1/admin/push/tokens/#{token.id}"), 200) ==
+             %{"ok" => true}
 
     assert Push.count_tokens(target.id) == 0
 
@@ -55,7 +55,7 @@ defmodule GamendWeb.Api.V1.Admin.PushControllerTest do
   test "sends a push to a user's live devices", %{conn: conn, target: target} do
     {:ok, _} = Push.register_token(target.id, %{"token" => "t", "platform" => "android"})
 
-    assert %{"status" => "queued"} =
+    assert %{"ok" => true} =
              json_response(
                post(conn, "/api/v1/admin/push/send", %{
                  user_id: target.id,
@@ -79,10 +79,13 @@ defmodule GamendWeb.Api.V1.Admin.PushControllerTest do
                404
              )
 
-    assert %{"error" => "invalid_message"} =
+    assert %{"error" => "validation_failed", "errors" => %{"title" => [_]}} =
              json_response(
                post(conn, "/api/v1/admin/push/send", %{user_id: target.id}),
-               400
+               422
              )
+
+    assert %{"error" => "missing_param"} =
+             json_response(post(conn, "/api/v1/admin/push/send", %{title: "Hello"}), 400)
   end
 end

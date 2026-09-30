@@ -3,39 +3,12 @@ defmodule GamendWeb.Api.V1.Admin.KvController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.KV
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{AdminKvEntryResponse, OkResponse}
+  alias GamendWeb.Serializers
   alias OpenApiSpex.Schema
 
   tags(["Admin – KV"])
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
-
-  @kv_entry_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      key: %Schema{type: :string},
-      user_id: %Schema{
-        type: :string,
-        format: :uuid,
-        nullable: false,
-        description: "Owner user id; -1 means global/unowned",
-        example: -1,
-        minimum: -1
-      },
-      lobby_id: %Schema{
-        type: :string,
-        format: :uuid,
-        nullable: true,
-        description: "Owner lobby id; -1 means global/unowned",
-        example: -1,
-        minimum: -1
-      },
-      data: %Schema{type: :object},
-      metadata: %Schema{type: :object},
-      inserted_at: %Schema{type: :string, format: "date-time"},
-      updated_at: %Schema{type: :string, format: "date-time"}
-    }
-  }
 
   operation(:upsert,
     operation_id: "admin_upsert_kv",
@@ -48,8 +21,8 @@ defmodule GamendWeb.Api.V1.Admin.KvController do
         type: :object,
         properties: %{
           key: %Schema{type: :string},
-          user_id: %Schema{type: :string, format: :uuid, nullable: true},
-          lobby_id: %Schema{type: :string, format: :uuid, nullable: true},
+          user_id: %Schema{type: :string, description: "Owning user; omit or empty for none"},
+          lobby_id: %Schema{type: :string, description: "Owning lobby; omit or empty for none"},
           data: %Schema{type: :object},
           metadata: %Schema{type: :object}
         },
@@ -57,12 +30,10 @@ defmodule GamendWeb.Api.V1.Admin.KvController do
       }
     },
     responses: [
-      ok:
-        {"KV entry", "application/json",
-         %Schema{type: :object, properties: %{data: @kv_entry_schema}}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", %Schema{type: :object}}
+      ok: {"KV entry", "application/json", AdminKvEntryResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
@@ -70,9 +41,7 @@ defmodule GamendWeb.Api.V1.Admin.KvController do
     data = Map.get(params, "data") || Map.get(params, "value")
 
     if is_nil(data) do
-      conn
-      |> put_status(:unprocessable_entity)
-      |> json(%{error: "validation_failed", errors: %{data: ["can't be blank"]}})
+      unprocessable(conn, %{data: "can't be blank"})
     else
       metadata = Map.get(params, "metadata") || %{}
 
@@ -114,12 +83,10 @@ defmodule GamendWeb.Api.V1.Admin.KvController do
 
       case KV.put(key, data, metadata, user_id: user_id, lobby_id: lobby_id) do
         {:ok, entry} ->
-          json(conn, %{data: serialize_entry(entry)})
+          reply_data(conn, Serializers.serialize_kv_entry(entry))
 
         {:error, %Ecto.Changeset{} = cs} ->
-          conn
-          |> put_status(:unprocessable_entity)
-          |> json(%{error: "validation_failed", errors: Ecto.Changeset.traverse_errors(cs, & &1)})
+          unprocessable(conn, cs)
       end
     end
   end
@@ -134,9 +101,9 @@ defmodule GamendWeb.Api.V1.Admin.KvController do
       lobby_id: [in: :query, schema: %Schema{type: :string, format: :uuid}, required: false]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -178,19 +145,6 @@ defmodule GamendWeb.Api.V1.Admin.KvController do
       end
 
     :ok = KV.delete(key, user_id: user_id, lobby_id: lobby_id)
-    json(conn, %{})
-  end
-
-  defp serialize_entry(entry) do
-    %{
-      id: entry.id,
-      key: entry.key,
-      user_id: entry.user_id || "",
-      lobby_id: entry.lobby_id || "",
-      data: entry.value,
-      metadata: entry.metadata || %{},
-      inserted_at: entry.inserted_at,
-      updated_at: entry.updated_at
-    }
+    reply_ok(conn)
   end
 end

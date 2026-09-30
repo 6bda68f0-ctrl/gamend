@@ -140,10 +140,12 @@ defmodule GamendWeb.AdminLive.Settings do
 
         <div :if={@warnings != []} class="alert alert-warning">
           <div>
-            <h2 class="font-semibold">Half-configured ({length(@warnings)})</h2>
+            <h2 class="font-semibold">Incomplete configuration ({length(@warnings)})</h2>
             <p class="text-sm">
-              Some of a group's values are set and others are not. Each feature below is
-              running degraded rather than as configured.
+              Each setting below is unset while something needs it: a feature it belongs
+              to is switched on or partly configured, so that feature runs degraded or not
+              at all. Outside production this list also names what production will refuse
+              to boot without.
             </p>
             <ul class="list-disc list-inside text-sm">
               <li :for={warning <- @warnings}>{warning}</li>

@@ -16,21 +16,31 @@ defmodule GamendWeb.SearchIndexController do
   alias GamendWeb.GettextSync
   alias GamendWeb.SearchIndex
 
-  @cache_control "private, max-age=600"
   @query_cache_control "private, max-age=60"
   @max_query 100
   @max_scopes 6
 
+  # The index is built from memory (the host's content rows are cached until
+  # the content reloads), and the browser keeps it for
+  # `search.index_max_age_seconds`. After that it asks again with the ETag it
+  # holds, and an index that has not changed is a 304 with no body: the reader
+  # downloads it once per content change, and a change still reaches them.
+  # Not immutable: `scopes` and the navigation depend on who is reading.
   def show(conn, params) do
     if SearchIndex.enabled?() do
       locale = resolve_locale(params)
       GettextSync.put_locale(locale)
 
       context = %{scope: conn.assigns[:current_scope], locale: locale}
+      body = %{entries: SearchIndex.entries(context), scopes: SearchIndex.scopes(context)}
+      etag = ~s("#{body |> :erlang.phash2() |> Integer.to_string(36)}")
 
-      conn
-      |> put_resp_header("cache-control", @cache_control)
-      |> json(%{entries: SearchIndex.entries(context), scopes: SearchIndex.scopes(context)})
+      conn =
+        conn
+        |> put_resp_header("cache-control", "private, max-age=#{index_max_age()}")
+        |> put_resp_header("etag", etag)
+
+      if etag in if_none_match(conn), do: send_resp(conn, 304, ""), else: json(conn, body)
     else
       conn
       |> put_status(:not_found)
@@ -69,6 +79,15 @@ defmodule GamendWeb.SearchIndexController do
       |> put_status(:not_found)
       |> json(%{error: "search_disabled"})
     end
+  end
+
+  defp index_max_age, do: max(Gamend.Settings.get(SearchIndex, :index_max_age_seconds), 0)
+
+  defp if_none_match(conn) do
+    conn
+    |> get_req_header("if-none-match")
+    |> Enum.flat_map(&String.split(&1, ","))
+    |> Enum.map(&String.trim/1)
   end
 
   # What the page said the reader is most likely to mean. It arrives from the

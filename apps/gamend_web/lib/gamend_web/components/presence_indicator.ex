@@ -12,6 +12,7 @@ defmodule GamendWeb.PresenceIndicator do
   and on the site. Change them together or not at all.
   """
   use Phoenix.Component
+  use Gettext, backend: GamendWeb.Gettext
 
   alias Gamend.Accounts.PresenceStatus
 
@@ -29,9 +30,9 @@ defmodule GamendWeb.PresenceIndicator do
 
   @doc "Screen-reader label; also the dot's tooltip."
   @spec label(PresenceStatus.t()) :: String.t()
-  def label(:online), do: "Online"
-  def label(:recent), do: "Recently online"
-  def label(_), do: "Offline"
+  def label(:online), do: gettext("Online")
+  def label(:recent), do: gettext("Recently online")
+  def label(_), do: gettext("Offline")
 
   attr :status, :atom,
     default: :offline,

@@ -106,6 +106,9 @@ msgstr ""
 msgid "Godot SDK"
 msgstr ""
 
+msgid "C++ SDK"
+msgstr ""
+
 msgid "The **backend for your multiplayer game**: accounts, lobbies, chat, leaderboards and everything players expect around the game itself. It also ships the web UI around it, a ready-made player website (store, leaderboards, tournaments, quests, groups, chat) and a full admin panel. Server-side scripting runs your own logic where players cannot reach it. You run it on your own server; there is no hosted service."
 msgstr ""
 

@@ -62,19 +62,21 @@ defmodule GamendWeb.ErrorHTML do
       ]
 
   `path` is relative and gets the reader's locale prefix, so from `/fr/nope`
-  the links stay French. Labels are looked up in the host's gettext catalogue
-  at render time; they resolve when the msgid already exists there (these are
-  navigation labels, so it generally does) and fall back to the literal
-  otherwise.
+  the links stay French. Labels are looked up in the HOST's gettext catalogue
+  (`:host_gettext_backend`) in the reader's locale at render time; they
+  resolve when the msgid already exists there (these are navigation labels,
+  so it generally does) and fall back to the literal otherwise.
 
   An `:error_page_links` assign wins over the application env, so a caller (or
   a test) can pin the list for one render without touching global config.
   """
   def links(assigns \\ %{}) do
+    locale = locale(assigns)
+
     assigns
     |> configured_links()
     |> Enum.filter(&valid_link?/1)
-    |> Enum.map(&%{label: translate(&1.label), path: String.trim_leading(&1.path, "/")})
+    |> Enum.map(&%{label: translate(&1.label, locale), path: String.trim_leading(&1.path, "/")})
   end
 
   defp configured_links(%{error_page_links: links}) when is_list(links), do: links
@@ -86,8 +88,18 @@ defmodule GamendWeb.ErrorHTML do
   defp valid_link?(_link), do: false
 
   # Runtime lookup: gettext cannot extract a non-literal, but these msgids are
-  # already in the catalogue from the navigation that uses them.
-  defp translate(label), do: Gettext.dgettext(GamendWeb.Gettext, "default", label)
+  # already in the host's catalogue from the navigation that uses them. The
+  # HOST's backend: the labels are its navigation, and core's own catalogue
+  # holds none of them, so looking there left them English in every locale.
+  # An error page must never fail, so any trouble here keeps the literal.
+  defp translate(label, locale) do
+    backend = GamendWeb.GettextSync.host_backend()
+    Gettext.with_locale(backend, locale, fn -> Gettext.dgettext(backend, "default", label) end)
+  rescue
+    _ -> label
+  catch
+    _, _ -> label
+  end
 
   defp status_code(template) do
     template
@@ -118,6 +130,16 @@ defmodule GamendWeb.ErrorHTML do
     gettext(
       "You have made a lot of requests in a short time. Please wait a moment and try again."
     )
+  end
+
+  defp message_for(413) do
+    gettext("That was too large to send. Try a smaller file.")
+  end
+
+  # A 4xx is the request, not the server: "something broke on our side" would
+  # be wrong, and telling the reader it was logged would be too.
+  defp message_for(status) when status in 400..499 do
+    gettext("The request could not be handled. Go back and try again.")
   end
 
   defp message_for(_status) do

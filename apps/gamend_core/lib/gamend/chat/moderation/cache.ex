@@ -18,8 +18,6 @@ defmodule Gamend.Chat.Moderation.Cache do
   going through `put_word/1` per row.
   """
 
-  require Logger
-
   alias Gamend.Chat.FilterWord
   alias Gamend.Chat.Moderation
   alias Gamend.Chat.Moderation.Normalizer
@@ -68,13 +66,6 @@ defmodule Gamend.Chat.Moderation.Cache do
   @doc "The compiled pattern of every `substring` word, or `nil` when there are none."
   @spec substring_pattern() :: :binary.cp() | nil
   def substring_pattern, do: :persistent_term.get(@pattern_key, nil)
-
-  @doc "Every blocklist entry as `[{word, severity, match_mode}]`."
-  @spec list_words() :: [{String.t(), String.t(), String.t()}]
-  def list_words do
-    init_table()
-    :ets.tab2list(@words_table)
-  end
 
   @doc "Number of words currently loaded on this node."
   @spec word_count() :: non_neg_integer()
@@ -269,19 +260,8 @@ defmodule Gamend.Chat.Moderation.Cache do
     end
   end
 
-  # Broadcast is best-effort: a mute must still apply locally even when PubSub
-  # is unavailable (early boot, bare ExUnit cases). `broadcast/3` exits rather
-  # than raising when the server is not registered, hence the catch.
-  defp broadcast(message) do
-    Phoenix.PubSub.broadcast(Gamend.PubSub, @topic, message)
-    :ok
-  rescue
-    e ->
-      Logger.warning("chat moderation broadcast failed: " <> Exception.message(e))
-      :ok
-  catch
-    :exit, _reason -> :ok
-  end
+  # Best-effort: a mute must still apply locally when PubSub is unavailable.
+  defp broadcast(message), do: Gamend.Broadcast.best_effort(@topic, message, "chat moderation")
 
   @doc """
   Normalized form of `text`, for callers that only have the cache aliased.

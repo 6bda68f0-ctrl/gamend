@@ -2,6 +2,7 @@ defmodule GamendWeb.AdminLive.Push do
   use GamendWeb, :live_view
 
   alias Gamend.Push
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -109,7 +110,7 @@ defmodule GamendWeb.AdminLive.Push do
                           name="user_id"
                           value={@filters["user_id"]}
                           class="input input-bordered input-xs w-full"
-                          placeholder="User ID"
+                          placeholder="User (id or name)"
                           phx-debounce="300"
                         />
                       </th>
@@ -223,11 +224,15 @@ defmodule GamendWeb.AdminLive.Push do
 
   @impl true
   def handle_event("send_push", %{"push" => params}, socket) do
-    user_id = Gamend.UUIDv7.cast_or_nil(params["user_id"])
+    raw_user_id = String.trim(params["user_id"] || "")
+    user_id = Gamend.UUIDv7.cast_or_nil(raw_user_id)
 
     cond do
-      is_nil(user_id) ->
+      raw_user_id == "" ->
         {:noreply, put_flash(socket, :error, "User ID is required")}
+
+      is_nil(user_id) ->
+        {:noreply, put_flash(socket, :error, "User ID must be a UUID")}
 
       not Push.user_has_live_tokens?(user_id) ->
         {:noreply, put_flash(socket, :error, "That user has no live devices")}
@@ -265,25 +270,16 @@ defmodule GamendWeb.AdminLive.Push do
   end
 
   @impl true
-  def handle_event("admin_push_prev", _params, socket) do
-    page = max(1, socket.assigns.page - 1)
-    {:noreply, socket |> assign(:page, page) |> reload_tokens()}
-  end
+  def handle_event("admin_push_prev", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload_tokens()}
 
   @impl true
-  def handle_event("admin_push_next", _params, socket) do
-    page = socket.assigns.page + 1
-    {:noreply, socket |> assign(:page, page) |> reload_tokens()}
-  end
+  def handle_event("admin_push_next", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload_tokens()}
 
   @impl true
-  def handle_event("admin_push_page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:page_size, String.to_integer(size))
-     |> assign(:page, 1)
-     |> reload_tokens()}
-  end
+  def handle_event("admin_push_page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload_tokens()}
 
   defp reload_tokens(socket) do
     page = socket.assigns.page
@@ -294,9 +290,7 @@ defmodule GamendWeb.AdminLive.Push do
     total_count = Push.count_all_tokens(filters)
 
     total_pages =
-      if page_size > 0,
-        do: div(total_count + page_size - 1, page_size),
-        else: 0
+      LiveHelpers.total_pages(total_count, page_size)
 
     socket
     |> assign(:tokens, tokens)

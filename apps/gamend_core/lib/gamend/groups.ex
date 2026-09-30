@@ -85,11 +85,11 @@ defmodule Gamend.Groups do
   end
 
   defp broadcast_groups(event) do
-    Phoenix.PubSub.broadcast(Gamend.PubSub, @groups_topic, event)
+    Gamend.Broadcast.publish(@groups_topic, event)
   end
 
   defp broadcast_group(group_id, event) do
-    Phoenix.PubSub.broadcast(Gamend.PubSub, "group:#{group_id}", event)
+    Gamend.Broadcast.publish("group:#{group_id}", event)
   end
 
   @doc "Broadcast a presence event (e.g. member_online, member_updated) to a group topic."
@@ -108,8 +108,6 @@ defmodule Gamend.Groups do
   # ---------------------------------------------------------------------------
   # Cache helpers
   # ---------------------------------------------------------------------------
-
-  @group_cache_ttl_ms 60_000
 
   defp group_cache_version(group_id), do: Shared.group_cache_version(group_id)
   defp invalidate_group_cache(group_id), do: Shared.invalidate_group_cache(group_id)
@@ -132,7 +130,7 @@ defmodule Gamend.Groups do
   @decorate cacheable(
               key: {:groups, :get, group_cache_version(id), id},
               match: &cache_match/1,
-              opts: [ttl: @group_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def get_group(id), do: Repo.get_uuid(Group, id)
 
@@ -140,7 +138,7 @@ defmodule Gamend.Groups do
   @spec get_group!(Ecto.UUID.t()) :: Group.t()
   @decorate cacheable(
               key: {:groups, :get, group_cache_version(id), id},
-              opts: [ttl: @group_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def get_group!(id), do: Repo.get_uuid!(Group, id)
 
@@ -480,7 +478,7 @@ defmodule Gamend.Groups do
         role: "admin"
       })
     end)
-    |> Repo.transaction()
+    |> Gamend.AfterCommit.transaction()
     |> case do
       {:ok, %{group: group}} ->
         _ = invalidate_group_cache(group.id)
@@ -685,7 +683,7 @@ defmodule Gamend.Groups do
       from(m in GroupMember, where: m.user_id == ^user_id)
       |> Repo.all()
 
-    Repo.transaction(fn ->
+    Gamend.AfterCommit.transaction(fn ->
       Enum.each(memberships, fn member ->
         group_id = member.group_id
 
@@ -744,62 +742,38 @@ defmodule Gamend.Groups do
 
   @doc "Leave a group."
   @spec leave_group(Ecto.UUID.t(), Ecto.UUID.t()) :: {:ok, GroupMember.t()} | {:error, atom()}
-  @leave_effects_key {__MODULE__, :leave_effects}
-
   def leave_group(user_id, group_id)
       when is_binary(user_id) and is_binary(group_id) do
-    # Effects are collected during the transaction and run after it commits.
-    #
-    # `do_leave/3` broadcast `member_left` and `maybe_delete_empty_group/1`
-    # broadcast `group_deleted` from *inside* the open transaction, and the
-    # cache-version bump went out through `Gamend.Async.run` — so a subscriber
-    # that re-read on the event could see the pre-commit state, or cache rows
-    # that were about to be rolled back under the new version.
-    result =
-      Lock.serialize(:group, group_id, fn ->
-        Process.put(@leave_effects_key, [])
+    # `do_leave/3`'s `member_left`, `maybe_delete_empty_group/1`'s
+    # `group_deleted` and the cache-version bump wait for the commit: a
+    # subscriber that re-read on the event could otherwise see the pre-commit
+    # state, or cache rows about to be rolled back under the new version.
+    Lock.serialize(:group, group_id, fn ->
+      case get_membership(group_id, user_id) do
+        nil ->
+          Repo.rollback(:not_member)
 
-        case get_membership(group_id, user_id) do
-          nil ->
-            Repo.rollback(:not_member)
-
-          member ->
-            # If leaving user is admin, check if they're the last admin
-            outcome =
-              if member.role == "admin" do
-                maybe_transfer_admin_before_leave(member, group_id, user_id)
-              else
-                do_leave(member, group_id, user_id)
-              end
-
-            case outcome do
-              {:ok, deleted} -> {deleted, Process.get(@leave_effects_key, [])}
-              {:error, reason} -> Repo.rollback(reason)
+        member ->
+          # If leaving user is admin, check if they're the last admin
+          outcome =
+            if member.role == "admin" do
+              maybe_transfer_admin_before_leave(member, group_id, user_id)
+            else
+              do_leave(member, group_id, user_id)
             end
-        end
-      end)
 
-    Process.delete(@leave_effects_key)
-
-    case result do
-      {:ok, {deleted, effects}} ->
-        effects |> Enum.reverse() |> Enum.each(& &1.())
-        {:ok, deleted}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+          case outcome do
+            {:ok, deleted} -> deleted
+            {:error, reason} -> Repo.rollback(reason)
+          end
+      end
+    end)
   end
 
-  # Queue an effect to run once `leave_group/2`'s transaction has committed.
-  # Outside that transaction there is nothing to wait for, so it runs now.
+  # Once the enclosing transaction commits (`Gamend.AfterCommit`): leaving a
+  # group, and account deletion's sweep of every group, both run in one.
   defp after_leave_commit(fun) when is_function(fun, 0) do
-    case Process.get(@leave_effects_key) do
-      nil -> fun.()
-      queued -> Process.put(@leave_effects_key, [fun | queued])
-    end
-
-    :ok
+    Gamend.AfterCommit.defer(fun)
   end
 
   # Whether removing `target_id`'s admin rights would leave the group with none.
@@ -994,7 +968,7 @@ defmodule Gamend.Groups do
             "metadata" => %{
               "type" => "group_kicked",
               "group_id" => group_id,
-              "group_name" => group_title
+              "group_title" => group_title
             }
           }
         )
@@ -1056,7 +1030,7 @@ defmodule Gamend.Groups do
                     "metadata" => %{
                       "type" => "group_promoted",
                       "group_id" => group_id,
-                      "group_name" => group_title
+                      "group_title" => group_title
                     }
                   }
                 )
@@ -1115,7 +1089,7 @@ defmodule Gamend.Groups do
                     "metadata" => %{
                       "type" => "group_demoted",
                       "group_id" => group_id,
-                      "group_name" => group_title
+                      "group_title" => group_title
                     }
                   }
                 )
@@ -1145,7 +1119,7 @@ defmodule Gamend.Groups do
   trusted, so it skips both the friends-only check and the per-recipient
   notification cap that `Notifications.send_notification/2` enforces.
 
-  The `group_id` / `group_name` are stored in metadata so the client can
+  The `group_id` / `group_title` are stored in metadata so the client can
   recognise and route it.
 
   ## Options
@@ -1192,7 +1166,7 @@ defmodule Gamend.Groups do
           "metadata" =>
             Map.merge(clean_metadata, %{
               "group_id" => group_id,
-              "group_name" => group.title
+              "group_title" => group.title
             })
         }
 
@@ -1235,8 +1209,7 @@ defmodule Gamend.Groups do
       {:ok, notification} ->
         Gamend.Notifications.invalidate_notifications_cache(recipient_id)
 
-        Phoenix.PubSub.broadcast(
-          Gamend.PubSub,
+        Gamend.Broadcast.publish(
           "notifications:user:#{recipient_id}",
           {:notification_created, notification}
         )
@@ -1349,22 +1322,10 @@ defmodule Gamend.Groups do
     end
   end
 
-  @max_page_size 1000
-
-  defp paginate(q, opts) do
-    page = Keyword.get(opts, :page)
-    page_size = Keyword.get(opts, :page_size)
-
-    if page && page_size do
-      size = page_size |> min(@max_page_size) |> max(1)
-      offset = (max(page, 1) - 1) * size
-      Repo.all(from g in q, limit: ^size, offset: ^offset)
-    else
-      # No pagination requested: cap to a hard max so an unpaginated caller
-      # never triggers an unbounded Repo.all over the whole table.
-      Repo.all(from g in q, limit: @max_page_size)
-    end
-  end
+  # Unlike the other contexts this one runs the query. The window itself comes
+  # from `Gamend.Query`, which clamps to the *configured* `max_page_size` — the
+  # hard-coded 1000 here ignored it.
+  defp paginate(q, opts), do: q |> Gamend.Query.maybe_page(opts) |> Repo.all()
 
   defp apply_sort(q, opts) do
     case Keyword.get(opts, :sort_by) do

@@ -169,7 +169,7 @@ branch instead, `fly deploy` the same app from source with
 | `GAMEND_CONTENT_PLUGINS_DIR` | `modules/plugins_examples` | Loads `stress_hook` (the image's default already points here). |
 | `GAMEND_RATELIMIT_ENABLED` | `false` | Buckets are per **IP**: 10 auth/min and 240 req/min. One generator = one IP. Do exactly one run with it *on* and limits set high, to see what the plug itself costs. |
 | `GAMEND_AUTH_DEVICE_AUTH_ENABLED` | `true` | Default auth path. |
-| `GAMEND_FEATURES_LIST_LOBBIES_ENABLED`, `..._LIST_GROUPS_ENABLED` | `true` | Public list routes **and** the `lobbies`/`groups` channels are behind `FeatureGate`, off by default. The journey and `lobbies_storm` need them. |
+| `GAMEND_FEATURES_LIST_LOBBIES`, `GAMEND_FEATURES_LIST_GROUPS` | `true` | Public list routes **and** the `lobbies`/`groups` channels are behind `FeatureGate`. On by default; set them explicitly so a host that turned them off still runs the journey and `lobbies_storm`, which need them. |
 | `GAMEND_OBSERVABILITY_METRICS_TOKEN` | unset | `/metrics` allows private-network callers when unset — Fly's scraper. |
 | fly.toml `[metrics] port=4000 path="/metrics"` | — | Fly-hosted Grafana. |
 | fly.toml `[http_service.concurrency]` | `type="connections"`, `hard_limit=50000` | Today's 5000 caps a WebSocket test at the proxy on the public-edge run. |

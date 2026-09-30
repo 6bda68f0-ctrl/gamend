@@ -17,6 +17,7 @@ defmodule Gamend.Payments.Settings do
     label: "Payments"
 
   setting(:environment, :atom,
+    values: [:production, :sandbox],
     default: :production,
     doc: "sandbox while validating, production for real transactions."
   )
@@ -39,6 +40,12 @@ defmodule Gamend.Payments.Settings do
   )
 
   setting(:stripe_production_webhook_secret, :string, secret: true)
+
+  setting(:stripe_managed_payments, :boolean,
+    default: false,
+    doc:
+      "Sell through Stripe Managed Payments (Stripe is merchant of record: it charges and remits the buyer's VAT). Accept the terms and set a tax code on every product in the Stripe Dashboard first."
+  )
 
   # ── Google Play ─────────────────────────────────────────
   @play [:google_play_package_name, :google_play_service_account_json]

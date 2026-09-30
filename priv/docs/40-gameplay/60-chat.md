@@ -4,12 +4,13 @@ icon: hero-chat-bubble-oval-left-ellipsis
 
 # Chat
 
-The chat system supports messaging within lobbies, groups, and between friends (direct messages). Messages can be sent, edited, deleted, and support read cursors for tracking unread counts. A word filter, a report queue and mutes ship built in, with the hook pipeline for rules of your own. Notifications are sent automatically for new messages.
+The chat system supports messaging within lobbies, groups, parties, and between friends (direct messages). Messages can be sent, edited, deleted, and support read cursors for tracking unread counts. A word filter, a report queue and mutes ship built in, with the hook pipeline for rules of your own. Notifications are sent automatically for new messages.
 
 ## Chat types
 
 - **lobby** — Messages sent within a lobby. Requires the sender to be a member of the lobby.
 - **group** — Messages sent within a group. Requires the sender to be a member of the group.
+- **party** — Messages sent within a party. Requires the sender to be in the party.
 - **friend** — Direct messages between two friends. Requires an accepted friendship and neither user has blocked the other.
 
 ## API
@@ -17,22 +18,27 @@ The chat system supports messaging within lobbies, groups, and between friends (
 Endpoints live under `/api/v1/chat`; the shapes are in
 [/api/docs](/api/docs). Two parameters identify a conversation everywhere:
 
-- **`chat_type`** - `lobby`, `group` or `friend`
-- **`chat_ref_id`** - the lobby id, the group id, or *the other user's* id for a
-  DM (not a conversation id; there is no such row)
+- **`chat_type`** - `lobby`, `group`, `party` or `friend`
+- **`chat_ref_id`** - the lobby id, the group id, the party id, or *the other
+  user's* id for a DM (not a conversation id; there is no such row)
 
 ## Read cursors and unread counts
 
 Track which messages a user has read with read cursors. The server stores the last-read message ID per user per chat.
 
 ```text
- # Mark as read: POST /api/v1/chat/read { "chat_type": "lobby", "chat_ref_id": "01977f5a-0042-7000-8000-3f6a2d8c0a42", "message_id": "01977f5a-0150-7000-8000-3f6a2d8c0150
+# Mark as read: POST /api/v1/chat/read
+{
+  "chat_type": "lobby",
+  "chat_ref_id": "01977f5a-0042-7000-8000-3f6a2d8c0a42",
+  "message_id": "01977f5a-0150-7000-8000-3f6a2d8c0150"
+}
 
 # Get unread count: GET /api/v1/chat/unread
 ?chat_type=lobby&chat_ref_id=01977f5a-0042-7000-8000-3f6a2d8c0a42
 
 # Response
-unread_count": 12 }
+{ "data": { "unread_count": 12 } }
 ```
 
 ## Architecture and message flow
@@ -40,7 +46,28 @@ unread_count": 12 }
 The following diagram shows the flow when a chat message is sent:
 
 ```text
- Client Server Recipients ────── ────── ────────── POST /chat/messages ──► 1. Validate access 2. Run before_chat_message hook 3. Insert into DB 4. Invalidate Nebulex cache 5. PubSub broadcast ─────────► WebSocket push 6. Async: after_chat_message "chat_message_created" hook + send notifications ──► "notification" event PATCH /chat/messages/:id ► 1. Verify ownership (sender_id) 2. Update content/metadata 3. Invalidate cache 4. PubSub broadcast ────────► "chat_message_updated" DELETE /chat/messages/:id ► 1. Verify ownership 2. Delete from DB 3. Invalidate cache 4. PubSub broadcast ───────► "chat_message_deleted" (payload: {id})
+  Client                     Server                          Recipients
+  ──────                     ──────                          ──────────
+
+  POST /chat/messages ──►    1. Validate access
+                             2. Slow mode, mute and word filter
+                             3. Run before_chat_message hook
+                             4. Insert into DB
+                             5. Invalidate Nebulex cache
+                             6. PubSub broadcast ──────────► WebSocket push
+                             7. Async: after_chat_message      "chat_message_created"
+                                hook + send notifications ──► "notification_created"
+
+  PATCH /chat/messages/:id ► 1. Verify ownership (sender_id)
+                             2. Update content/metadata
+                             3. Invalidate cache
+                             4. PubSub broadcast ──────────► "chat_message_updated"
+
+  DELETE /chat/messages/:id ► 1. Verify ownership
+                              2. Delete from DB
+                              3. Invalidate cache
+                              4. PubSub broadcast ─────────► "chat_message_deleted"
+                                                               (payload: {id})
 ```
 
 ## Real-time events
@@ -48,29 +75,47 @@ The following diagram shows the flow when a chat message is sent:
 Messages are broadcast in real time via PubSub. WebSocket channels automatically forward these events to connected clients.
 
 ```text
- Chat Type PubSub Topic Channel ───────── ──────────── ─────── lobby chat:lobby:{lobby_id} LobbyChannel group chat:group:{group_id} GroupChannel friend chat:friend:{lo}:{hi} UserChannel + user:{recipient_id} Events pushed to clients: ───────────────────────── "chat_message_created" → Full message object (on send) "chat_message_updated" → Full message object (on edit) "chat_message_deleted" → { id: message_id } (on delete)
+  Chat Type   PubSub Topic              Channel
+  ─────────   ────────────              ───────
+  lobby       chat:lobby:{lobby_id}     LobbyChannel
+  group       chat:group:{group_id}     GroupChannel
+  party       chat:party:{party_id}     PartyChannel
+  friend      chat:friend:{lo}:{hi}     UserChannel
+              + user:{recipient_id}
+
+  Events pushed to clients:
+  ─────────────────────────
+  "chat_message_created"  → Full message object (on send)
+  "chat_message_updated"  → Full message object (on edit)
+  "chat_message_deleted"  → { id: message_id } (on delete)
 ```
 
-Friend DMs are broadcast to both the sorted-pair topic and each user's personal topic, so the recipient receives the message even without subscribing to the friend chat topic directly.
+Friend DMs are broadcast to the sorted-pair topic and to the recipient's personal `user:{recipient_id}` topic, so the recipient receives the message on their user channel without subscribing to the friend chat topic.
 
-Clients that cache messages locally can update in-place: on "chat_message_updated\
+Clients that cache messages locally can update in-place: on "chat_message_updated", match by message ID and replace content/metadata. On "chat_message_deleted", remove the message by ID.
 
 ## Automatic notifications
 
-When a new chat message is sent, a notification is automatically created for each recipient:
+When a new chat message is sent, a notification is automatically created for each recipient except the sender. The content is empty (there is no message preview), and `metadata.type` says which chat it came from:
 
-- **Friend DM:** Title: "New message from {sender_name}", content: message preview (100 chars)
-- **Group message:** Title: "New message in {group_name}\
-- **Lobby message:** Title: "New message in {lobby_name}\
+- **Friend DM:** Title: "New messages from friends", `metadata.type` `chat_friend`.
+- **Group message:** Title: "New messages in group {group_title}", `metadata.type` `chat_group`, with `group_id`.
+- **Lobby message:** Title: "New messages in your lobby", `metadata.type` `chat_lobby`, with `lobby_id`.
+- **Party message:** Title: "New messages in your party", `metadata.type` `chat_party`, with `party_id`.
 
-Notifications use upsert semantics: multiple messages from the same sender update the existing notification with the latest content rather than creating duplicates.
+Notifications use upsert semantics keyed on the recipient and the title: every friend DM lands in one notification, every message in a group in one per group, and lobby and party messages in one each. A new message marks the notification unread again and increments `metadata.message_count` rather than creating a duplicate.
 
 ## Elixir context functions
 
 The Chat context module provides functions for server-side chat operations:
 
-```text
- # Send a message (validates access, runs hook pipeline, broadcasts, notifies) Gamend.Chat.send_message(%{user: user}, %{ "chat_type" => "lobby", "chat_ref_id" => lobby_id, "content" => "Hello!", "metadata" => %{"color" => "blue
+```elixir
+# Send a message (validates access, runs hook pipeline, broadcasts, notifies)
+Gamend.Chat.send_message(%{user: user}, %{
+  "chat_type" => "lobby",
+  "chat_ref_id" => lobby_id,
+  "content" => "Hello!",
+  "metadata" => %{"color" => "blue"}
 })
 
 # List messages (paginated, cached with 60s TTL)
@@ -135,12 +180,14 @@ is MIT-licensed and stays out of that decision.
 
 ### Bringing your own list
 
-Public multi-language lists you can start from:
+A public multi-language list you can start from:
 
 | List | Coverage | Licence |
 |---|---|---|
 | [LDNOOBW](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words) | ~30 languages, one word per line | CC-BY-4.0 |
-| [Shutterstock](https://github.com/shutterstock/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words) | ~25 languages | MIT |
+
+It is the list Shutterstock started, so the old `shutterstock/…` link is the same
+repository, under the same licence.
 
 Read one before you ship it, because lists built for filtering search queries are
 far more aggressive than you want between players. Check the licence of
@@ -156,11 +203,14 @@ compiled app's `priv/` via `Application.app_dir/2`, so a file added *after* the
 build is not visible to a running server; it ships with the release like any
 other asset. Anything you drop there appears in the picker automatically, and a
 whole imported list can be removed again in one click (or with
-`DELETE /api/v1/admin/chat/filter_words?lang=de`).
+`DELETE /api/v1/admin/chat/filter_words?lang=de`). Over the admin API,
+`GET /api/v1/admin/chat/filter_words/languages` lists what can be imported and
+`POST /api/v1/admin/chat/filter_words/import` with `{"lang": "de"}` imports it,
+answering `{"data": {"imported": n}}`.
 
-**Over the admin API (no rebuild).** POST each word to
+**Over the admin API (no rebuild).** Send each word to
 `POST /api/v1/admin/chat/filter_words` with `{"word": "...", "severity":
-"block", "lang": "de"}`. This is the path to script when the list lives outside
+"block", "lang": "de"}` (add `"match_mode": "exact"` for a whole-word match). This is the path to script when the list lives outside
 your repo or changes between deploys. Tag the rows with `lang` and you keep the
 same one-click bulk removal.
 
@@ -311,6 +361,7 @@ Message listings are cached using Nebulex with version-based invalidation. When 
 
 - **Lobby chat:** User must currently be in the lobby (user.lobby_id matches)
 - **Group chat:** User must be a member of the group
+- **Party chat:** User must currently be in the party (user.party_id matches)
 - **Friend chat:** Users must have an accepted friendship and neither can have blocked the other
 - Edit/Delete: Only the message sender can modify or delete their own messages (returns 403 otherwise)
 - Messages have a maximum content length of 4096 characters

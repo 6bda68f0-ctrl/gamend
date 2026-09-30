@@ -52,6 +52,18 @@ defmodule GamendWeb.LogFilters do
   Both are peer faults by construction. A genuine misconfiguration on this side
   fails during the *handshake*, as one of the alerts deliberately kept above.
 
+  ## The one alert placed by direction, not by name
+
+  `protocol_version` is both: this server choosing a version the client will not
+  accept is a real misconfiguration, while a client that completed the
+  handshake, exchanged HTTP/2 frames and *then* sends a fatal
+  `protocol_version` is tearing down a connection over a version it already
+  agreed to — Apple's `NetworkingExtension` does exactly this. The atom is the
+  same in both cases, so the description decides: only `In state connection
+  received CLIENT ALERT` is dropped, which is post-handshake *and* peer-sent.
+  Anything during the handshake, and anything this server generates, still
+  reaches the log.
+
   ## The non-alert noise
 
   `Bandit.TransportError` "Unable to obtain conn_data" is a socket that died
@@ -77,6 +89,18 @@ defmodule GamendWeb.LogFilters do
   # Alerts that mean the peer hung up, or that what arrived was corrupt or was
   # never TLS. Everything else — anything implicating our certificate or our
   # TLS configuration — stays visible.
+  # Alerts that are noise only in one direction and one state, so the alert atom
+  # alone cannot place them: the peer *sending* `protocol_version` after the
+  # handshake already completed is a client tearing a live connection down over
+  # a version it accepted a moment earlier — iOS `NetworkingExtension` does
+  # this. The same atom during the handshake is a genuine version mismatch, and
+  # one this server generates is a misconfiguration here, so both stay visible.
+  @peer_only_alerts [:protocol_version]
+
+  # Erlang's `ssl` names the direction and the state machine's state in the
+  # alert description, and `connection` is the post-handshake state.
+  @established_peer_alert "In state connection received CLIENT ALERT"
+
   @benign_alerts [
     :user_canceled,
     :close_notify,
@@ -204,9 +228,18 @@ defmodule GamendWeb.LogFilters do
 
   defp reason(_event), do: nil
 
-  defp benign_tls_alert?({:tls_alert, {alert, _description}}), do: alert in @benign_alerts
+  defp benign_tls_alert?({:tls_alert, {alert, description}}) do
+    alert in @benign_alerts or
+      (alert in @peer_only_alerts and established_peer_alert?(description))
+  end
 
   # A stop reason can wrap the alert, e.g. `{:shutdown, {:tls_alert, ...}}`.
   defp benign_tls_alert?({:shutdown, inner}), do: benign_tls_alert?(inner)
   defp benign_tls_alert?(_reason), do: false
+
+  # The description is a charlist from `ssl`, so it is flattened before matching.
+  defp established_peer_alert?(description) when is_list(description) or is_binary(description),
+    do: to_string(description) =~ @established_peer_alert
+
+  defp established_peer_alert?(_description), do: false
 end

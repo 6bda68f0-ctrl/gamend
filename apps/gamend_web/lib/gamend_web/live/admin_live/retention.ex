@@ -22,8 +22,10 @@ defmodule GamendWeb.AdminLive.Retention do
                 <h2 class="card-title text-lg">Data Retention</h2>
                 <p class="text-sm text-base-content/60">
                   Sweeps every 6 hours. Windows are set per class with
-                  <code class="text-xs">RETENTION_*</code>
-                  env vars; a window of 0 keeps that class forever.
+                  <code class="text-xs">GAMEND_RETENTION_*</code>
+                  env vars (client log sessions with <code class="text-xs">GAMEND_CLIENT_LOGS_RETENTION_*</code>).
+                  A window of 0 usually keeps that class forever; each setting's
+                  description below says what 0 does for it.
                 </p>
               </div>
               <div class="flex items-center gap-3">
@@ -44,7 +46,7 @@ defmodule GamendWeb.AdminLive.Retention do
                 <thead>
                   <tr>
                     <th>Class</th>
-                    <th class="text-right">Rows pruned</th>
+                    <th class="text-right">Rows affected</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -55,7 +57,8 @@ defmodule GamendWeb.AdminLive.Retention do
                 </tbody>
               </table>
               <div class="text-xs text-base-content/70 mt-1">
-                Took {@retention.duration_ms} ms. Classes that pruned nothing are hidden.
+                Took {@retention.duration_ms} ms. Classes that affected no rows are hidden.
+                Most classes delete rows; a few release seats or send warnings instead.
               </div>
             </div>
           </div>
@@ -66,8 +69,8 @@ defmodule GamendWeb.AdminLive.Retention do
           <div class="card-body">
             <h2 class="card-title text-lg">Configured Windows</h2>
             <p class="text-xs text-base-content/60 mb-2">
-              Every declared retention setting with its effective value. Values marked
-              default were never configured by the host.
+              Every declared retention setting, client log sessions included, with its
+              effective value. Values marked default were never configured by the host.
             </p>
             <div class="overflow-x-auto">
               <table class="table table-sm">
@@ -105,7 +108,7 @@ defmodule GamendWeb.AdminLive.Retention do
      socket
      |> assign(:page_title, "Admin · Retention")
      |> assign(:retention_running, false)
-     |> assign(:windows, Enum.map(Settings.group(:retention), &Settings.describe/1))
+     |> assign(:windows, Enum.map(retention_settings(), &Settings.describe/1))
      |> assign_retention()}
   end
 
@@ -121,13 +124,20 @@ defmodule GamendWeb.AdminLive.Retention do
 
   @impl true
   def handle_info({:pruned, {:ok, results}}, socket) do
-    pruned = results |> Map.values() |> Enum.sum()
+    affected = results |> Map.values() |> Enum.sum()
 
     {:noreply,
      socket
      |> assign(:retention_running, false)
      |> assign_retention()
-     |> put_flash(:info, "Retention pruned #{pruned} rows.")}
+     |> put_flash(
+       :info,
+       ngettext(
+         "Retention sweep affected %{count} row.",
+         "Retention sweep affected %{count} rows.",
+         affected
+       )
+     )}
   end
 
   def handle_info({:pruned, :unavailable}, socket) do
@@ -146,6 +156,16 @@ defmodule GamendWeb.AdminLive.Retention do
     {:ok, Gamend.Retention.run_now()}
   catch
     :exit, _reason -> :unavailable
+  end
+
+  # The sweep also prunes client log sessions, on `Gamend.ClientLogs`'s own
+  # settings rather than a retention one, so the group alone left them out.
+  defp retention_settings do
+    Settings.group(:retention) ++
+      Enum.filter(
+        Settings.group(:client_logs),
+        &(&1.key in [:retention_days, :retention_flagged_days])
+      )
   end
 
   defp assign_retention(socket) do

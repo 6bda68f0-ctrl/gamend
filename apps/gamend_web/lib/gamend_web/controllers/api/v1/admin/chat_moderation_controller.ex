@@ -16,77 +16,25 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
   alias Gamend.Chat.Moderation
   alias Gamend.Chat.Report
   alias Gamend.Chat.Reports
+  alias GamendWeb.Schemas
+
+  alias GamendWeb.Schemas.{
+    AdminChatMutePage,
+    AdminChatMuteResponse,
+    ChatFilterLanguagesResponse,
+    ChatFilterTestResponse,
+    ChatFilterWordPage,
+    ChatFilterWordResponse,
+    ChatReportPage,
+    ChatReportResponse,
+    DeletedCountResponse,
+    ImportedCountResponse,
+    OkResponse
+  }
+
   alias OpenApiSpex.Schema
 
   tags(["Admin – Chat"])
-
-  @error_schema %Schema{
-    type: :object,
-    properties: %{error: %Schema{type: :string}}
-  }
-
-  @meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      count: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer},
-      has_more: %Schema{type: :boolean}
-    }
-  }
-
-  @report_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      reporter_id: %Schema{type: :string, description: "Empty when the word filter filed it"},
-      reporter_name: %Schema{type: :string},
-      reported_user_id: %Schema{type: :string, format: :uuid},
-      reported_user_name: %Schema{type: :string},
-      message_id: %Schema{type: :string},
-      content_snapshot: %Schema{type: :string},
-      reason: %Schema{type: :string},
-      status: %Schema{type: :string, enum: ["open", "reviewing", "actioned", "dismissed"]},
-      resolved_by: %Schema{type: :string},
-      resolved_by_name: %Schema{type: :string},
-      resolution_note: %Schema{type: :string},
-      resolved_at: %Schema{type: :string, format: :"date-time", nullable: true},
-      inserted_at: %Schema{type: :string, format: :"date-time"},
-      updated_at: %Schema{type: :string, format: :"date-time"}
-    }
-  }
-
-  @mute_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      user_id: %Schema{type: :string, format: :uuid},
-      user_name: %Schema{type: :string},
-      scope: %Schema{type: :string, enum: ["global", "lobby", "group", "party"]},
-      scope_ref_id: %Schema{type: :string, description: "Empty for a global mute"},
-      expires_at: %Schema{type: :string, format: :"date-time", nullable: true},
-      reason: %Schema{type: :string},
-      muted_by: %Schema{type: :string},
-      muted_by_name: %Schema{type: :string},
-      inserted_at: %Schema{type: :string, format: :"date-time"},
-      updated_at: %Schema{type: :string, format: :"date-time"}
-    }
-  }
-
-  @filter_word_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      word: %Schema{type: :string},
-      severity: %Schema{type: :string, enum: ["block", "mask", "flag"]},
-      match_mode: %Schema{type: :string, enum: ["substring", "exact"]},
-      lang: %Schema{type: :string, description: "Bundled-list provenance, empty when hand-added"},
-      inserted_at: %Schema{type: :string, format: :"date-time"},
-      updated_at: %Schema{type: :string, format: :"date-time"}
-    }
-  }
 
   # ---------------------------------------------------------------------------
   # Reports
@@ -108,16 +56,8 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
       page_size: [in: :query, schema: %Schema{type: :integer, default: 25}]
     ],
     responses: [
-      ok:
-        {"Reports", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @report_schema},
-             meta: @meta_schema
-           }
-         }},
-      bad_request: {"Invalid id", "application/json", @error_schema}
+      ok: {"Reports", "application/json", ChatReportPage},
+      bad_request: Schemas.error("Invalid id")
     ]
   )
 
@@ -133,10 +73,7 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
         reports = Reports.list_reports(filters, page: page, page_size: page_size)
         total_count = Reports.count_reports(filters)
 
-        json(conn, %{
-          data: Enum.map(reports, &serialize_report/1),
-          meta: GamendWeb.Pagination.meta(page, page_size, length(reports), total_count)
-        })
+        reply_page(conn, Enum.map(reports, &serialize_report/1), page, page_size, total_count)
     end
   end
 
@@ -164,12 +101,10 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
          }
        }},
     responses: [
-      ok:
-        {"Resolved", "application/json",
-         %Schema{type: :object, properties: %{data: @report_schema}}},
-      bad_request: {"Invalid id", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema},
-      unprocessable_entity: {"Invalid status", "application/json", @error_schema}
+      ok: {"Resolved", "application/json", ChatReportResponse},
+      bad_request: Schemas.error("Invalid id or status"),
+      not_found: Schemas.error("Not found"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
@@ -181,13 +116,13 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
         invalid_id(conn)
 
       {_report_id, false} ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_status"})
+        reply_error(conn, :bad_request, "invalid_status")
 
       {report_id, true} ->
         attrs = %{"note" => params["note"], "resolved_by" => admin_id(conn)}
 
         case Reports.resolve_report(report_id, status, attrs) do
-          {:ok, report} -> json(conn, %{data: serialize_report(report)})
+          {:ok, report} -> reply_data(conn, serialize_report(report))
           {:error, :not_found} -> not_found(conn)
           {:error, error} -> write_error(conn, error)
         end
@@ -203,16 +138,16 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      bad_request: {"Invalid id", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      bad_request: Schemas.error("Invalid id"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
   def delete_report(conn, %{"id" => id}) do
     with_record(conn, id, &Reports.get_report/1, fn report ->
       case Reports.delete_report(report) do
-        {:ok, _report} -> json(conn, %{ok: true})
+        {:ok, _report} -> reply_ok(conn)
         {:error, error} -> write_error(conn, error)
       end
     end)
@@ -239,16 +174,8 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
       page_size: [in: :query, schema: %Schema{type: :integer, default: 25}]
     ],
     responses: [
-      ok:
-        {"Mutes", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @mute_schema},
-             meta: @meta_schema
-           }
-         }},
-      bad_request: {"Invalid id", "application/json", @error_schema}
+      ok: {"Mutes", "application/json", AdminChatMutePage},
+      bad_request: Schemas.error("Invalid id")
     ]
   )
 
@@ -268,10 +195,7 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
         mutes = Moderation.list_mutes(filters, page: page, page_size: page_size)
         total_count = Moderation.count_mutes(filters)
 
-        json(conn, %{
-          data: Enum.map(mutes, &serialize_mute/1),
-          meta: GamendWeb.Pagination.meta(page, page_size, length(mutes), total_count)
-        })
+        reply_page(conn, Enum.map(mutes, &serialize_mute/1), page, page_size, total_count)
     end
   end
 
@@ -310,10 +234,9 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
          }
        }},
     responses: [
-      ok:
-        {"Muted", "application/json", %Schema{type: :object, properties: %{data: @mute_schema}}},
-      bad_request: {"Invalid id", "application/json", @error_schema},
-      unprocessable_entity: {"Invalid mute", "application/json", @error_schema}
+      ok: {"Muted (replacing any earlier mute)", "application/json", AdminChatMuteResponse},
+      bad_request: Schemas.error("Invalid id"),
+      unprocessable_entity: Schemas.error("Invalid mute")
     ]
   )
 
@@ -333,7 +256,7 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
         }
 
         case Moderation.mute_user(user_id, params["scope"] || "global", scope_ref_id, attrs) do
-          {:ok, mute} -> json(conn, %{data: serialize_mute(mute)})
+          {:ok, mute} -> reply_data(conn, serialize_mute(mute))
           {:error, error} -> write_error(conn, error)
         end
     end
@@ -347,16 +270,16 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Unmuted", "application/json", %Schema{type: :object}},
-      bad_request: {"Invalid id", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Mutes lifted", "application/json", DeletedCountResponse},
+      bad_request: Schemas.error("Invalid id"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
   def delete_mute(conn, %{"id" => id}) do
     with_record(conn, id, &Moderation.get_mute/1, fn mute ->
       {:ok, count} = Moderation.unmute_user(mute.user_id, mute.scope, mute.scope_ref_id)
-      json(conn, %{ok: true, removed: count})
+      reply_data(conn, %{deleted: count})
     end)
   end
 
@@ -368,8 +291,8 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
     operation_id: "admin_list_chat_filter_words",
     summary: "List blocklist words (admin)",
     description:
-      "The chat word blocklist, plus the languages with a bundled list available " <>
-        "to import. Matching is language-agnostic; `lang` is provenance only.",
+      "The chat word blocklist. Matching is language-agnostic; `lang` is provenance " <>
+        "only. The bundled lists to import are at `GET /chat/filter_words/languages`.",
     security: [%{"authorization" => []}],
     parameters: [
       word: [in: :query, schema: %Schema{type: :string}, description: "Substring match"],
@@ -379,16 +302,7 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
       page_size: [in: :query, schema: %Schema{type: :integer, default: 25}]
     ],
     responses: [
-      ok:
-        {"Filter words", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @filter_word_schema},
-             languages: %Schema{type: :array, items: %Schema{type: :string}},
-             meta: @meta_schema
-           }
-         }}
+      ok: {"Filter words", "application/json", ChatFilterWordPage}
     ]
   )
 
@@ -404,11 +318,19 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
     words = Moderation.list_filter_words(filters, page: page, page_size: page_size)
     total_count = Moderation.count_filter_words(filters)
 
-    json(conn, %{
-      data: Enum.map(words, &serialize_filter_word/1),
-      languages: Moderation.bundled_languages(),
-      meta: GamendWeb.Pagination.meta(page, page_size, length(words), total_count)
-    })
+    reply_page(conn, Enum.map(words, &serialize_filter_word/1), page, page_size, total_count)
+  end
+
+  operation(:filter_languages,
+    operation_id: "admin_list_chat_filter_languages",
+    summary: "Languages with a bundled word list (admin)",
+    description: "What `POST /chat/filter_words/import` accepts as `lang`.",
+    security: [%{"authorization" => []}],
+    responses: [ok: {"Languages", "application/json", ChatFilterLanguagesResponse}]
+  )
+
+  def filter_languages(conn, _params) do
+    reply_data(conn, %{languages: Moderation.bundled_languages()})
   end
 
   operation(:create_filter_word,
@@ -440,10 +362,8 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
          }
        }},
     responses: [
-      ok:
-        {"Created", "application/json",
-         %Schema{type: :object, properties: %{data: @filter_word_schema}}},
-      unprocessable_entity: {"Invalid word or cap reached", "application/json", @error_schema}
+      created: {"Created", "application/json", ChatFilterWordResponse},
+      unprocessable_entity: Schemas.error("Invalid word or cap reached")
     ]
   )
 
@@ -456,7 +376,7 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
     }
 
     case Moderation.create_filter_word(attrs) do
-      {:ok, word} -> json(conn, %{data: serialize_filter_word(word)})
+      {:ok, word} -> reply_data(conn, :created, serialize_filter_word(word))
       {:error, error} -> write_error(conn, error)
     end
   end
@@ -480,12 +400,10 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
          }
        }},
     responses: [
-      ok:
-        {"Updated", "application/json",
-         %Schema{type: :object, properties: %{data: @filter_word_schema}}},
-      bad_request: {"Invalid id", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema},
-      unprocessable_entity: {"Invalid word", "application/json", @error_schema}
+      ok: {"Updated", "application/json", ChatFilterWordResponse},
+      bad_request: Schemas.error("Invalid id"),
+      not_found: Schemas.error("Not found"),
+      unprocessable_entity: Schemas.error("Invalid word")
     ]
   )
 
@@ -494,7 +412,7 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
       attrs = Map.take(params, ["word", "severity", "match_mode", "lang"])
 
       case Moderation.update_filter_word(word, attrs) do
-        {:ok, updated} -> json(conn, %{data: serialize_filter_word(updated)})
+        {:ok, updated} -> reply_data(conn, serialize_filter_word(updated))
         {:error, error} -> write_error(conn, error)
       end
     end)
@@ -508,16 +426,16 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      bad_request: {"Invalid id", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      bad_request: Schemas.error("Invalid id"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
   def delete_filter_word(conn, %{"id" => id}) do
     with_record(conn, id, &Moderation.get_filter_word/1, fn word ->
       case Moderation.delete_filter_word(word) do
-        {:ok, _word} -> json(conn, %{ok: true})
+        {:ok, _word} -> reply_ok(conn)
         {:error, error} -> write_error(conn, error)
       end
     end)
@@ -546,13 +464,10 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
          }
        }},
     responses: [
-      ok:
-        {"Imported", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{ok: %Schema{type: :boolean}, imported: %Schema{type: :integer}}
-         }},
-      unprocessable_entity: {"Unknown language or cap reached", "application/json", @error_schema}
+      ok: {"Imported", "application/json", ImportedCountResponse},
+      bad_request: Schemas.error("No lang (missing_param)"),
+      not_found: Schemas.error("No bundled list for that language (unknown_language)"),
+      unprocessable_entity: Schemas.error("The word cap was reached")
     ]
   )
 
@@ -562,12 +477,13 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
     case params["lang"] do
       lang when is_binary(lang) ->
         case Moderation.import_bundled_list(lang, severity) do
-          {:ok, count} -> json(conn, %{ok: true, imported: count})
+          {:ok, count} -> reply_data(conn, %{imported: count})
+          {:error, :unknown_language} -> reply_error(conn, :not_found, "unknown_language")
           {:error, error} -> write_error(conn, error)
         end
 
       _lang ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "unknown_language"})
+        reply_error(conn, :bad_request, "missing_param", "lang is required")
     end
   end
 
@@ -587,23 +503,18 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
       ]
     ],
     responses: [
-      ok:
-        {"Removed", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{ok: %Schema{type: :boolean}, removed: %Schema{type: :integer}}
-         }},
-      bad_request: {"Missing lang", "application/json", @error_schema}
+      ok: {"Removed", "application/json", DeletedCountResponse},
+      bad_request: Schemas.error("Missing lang")
     ]
   )
 
   def delete_filter_words_by_lang(conn, params) do
     case params["lang"] do
       lang when is_binary(lang) and lang != "" ->
-        json(conn, %{ok: true, removed: Moderation.delete_filter_words_by_lang(lang)})
+        reply_data(conn, %{deleted: Moderation.delete_filter_words_by_lang(lang)})
 
       _lang ->
-        conn |> put_status(:bad_request) |> json(%{error: "lang_required"})
+        reply_error(conn, :bad_request, "missing_param", "lang is required")
     end
   end
 
@@ -622,39 +533,7 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
          properties: %{phrase: %Schema{type: :string}}
        }},
     responses: [
-      ok:
-        {"Result", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{
-               type: :object,
-               properties: %{
-                 phrase: %Schema{type: :string},
-                 action: %Schema{
-                   type: :string,
-                   enum: ["block", "mask", "flag", "allow"]
-                 },
-                 content: %Schema{
-                   type: :string,
-                   description: "What would be stored; empty when blocked"
-                 },
-                 flagged_words: %Schema{type: :array, items: %Schema{type: :string}},
-                 hits: %Schema{
-                   type: :array,
-                   items: %Schema{
-                     type: :object,
-                     properties: %{
-                       word: %Schema{type: :string},
-                       severity: %Schema{type: :string},
-                       match_mode: %Schema{type: :string}
-                     }
-                   }
-                 }
-               }
-             }
-           }
-         }}
+      ok: {"Result", "application/json", ChatFilterTestResponse}
     ]
   )
 
@@ -668,7 +547,7 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
         %{word: word, severity: severity, match_mode: match_mode}
       end)
 
-    json(conn, %{data: Map.merge(%{phrase: phrase, hits: hits}, outcome(phrase))})
+    reply_data(conn, Map.merge(%{phrase: phrase, hits: hits}, outcome(phrase)))
   end
 
   # ---------------------------------------------------------------------------
@@ -790,25 +669,12 @@ defmodule GamendWeb.Api.V1.Admin.ChatModerationController do
     end
   end
 
-  defp invalid_id(conn), do: conn |> put_status(:bad_request) |> json(%{error: "invalid_id"})
+  defp invalid_id(conn), do: reply_error(conn, :bad_request, "invalid_id")
 
-  defp not_found(conn), do: conn |> put_status(:not_found) |> json(%{error: "not_found"})
+  defp not_found(conn), do: reply_error(conn, :not_found, "not_found")
 
-  defp write_error(conn, %Ecto.Changeset{} = changeset) do
-    conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: "invalid", details: changeset_errors(changeset)})
-  end
+  defp write_error(conn, %Ecto.Changeset{} = changeset), do: unprocessable(conn, changeset)
 
-  defp write_error(conn, reason) do
-    conn |> put_status(:unprocessable_entity) |> json(%{error: to_string(reason)})
-  end
-
-  defp changeset_errors(%Ecto.Changeset{} = changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
-  end
+  defp write_error(conn, reason) when is_atom(reason),
+    do: reply_error(conn, :unprocessable_entity, reason)
 end

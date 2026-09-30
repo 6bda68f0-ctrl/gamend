@@ -8,6 +8,7 @@ defmodule GamendWeb.UserLive.Settings.PaymentsTab do
   import Phoenix.LiveView
 
   alias Gamend.Payments
+  alias GamendWeb.LiveHelpers
   alias GamendWeb.UserLive.Settings.Shared
 
   def assign_payment_data(socket) do
@@ -17,10 +18,12 @@ defmodule GamendWeb.UserLive.Settings.PaymentsTab do
       socket
       |> assign(:payment_purchases, Payments.list_user_purchases(user.id, limit: 100))
       |> assign(:payment_entitlements, Payments.list_user_entitlements(user.id))
+      |> assign(:stripe_customer?, is_binary(Payments.stripe_customer_id(user)))
     else
       socket
       |> assign(:payment_purchases, [])
       |> assign(:payment_entitlements, [])
+      |> assign(:stripe_customer?, false)
     end
   end
 
@@ -32,9 +35,21 @@ defmodule GamendWeb.UserLive.Settings.PaymentsTab do
           <div>
             <div class="font-semibold text-lg">{gettext("Payments")}</div>
           </div>
-          <.link navigate={~p"/store"} class="btn btn-sm btn-primary">
-            {gettext("Open Store")}
-          </.link>
+          <div class="flex flex-wrap gap-2">
+            <%!-- Stripe's hosted portal: cancel, change card, invoices. --%>
+            <button
+              :if={@stripe_customer?}
+              id="open-stripe-portal"
+              type="button"
+              phx-click="open_stripe_portal"
+              class="btn btn-sm btn-outline"
+            >
+              {gettext("Manage billing")}
+            </button>
+            <.link navigate={~p"/store"} class="btn btn-sm btn-primary">
+              {gettext("Open Store")}
+            </.link>
+          </div>
         </div>
       </div>
 
@@ -57,7 +72,7 @@ defmodule GamendWeb.UserLive.Settings.PaymentsTab do
                   <th>{gettext("Provider")}</th>
                   <th>{gettext("Status")}</th>
                   <th>{gettext("Amount")}</th>
-                  <th>{gettext("Environment")}</th>
+                  <th :if={@user.is_admin}>{gettext("Environment")}</th>
                   <th>{gettext("Date")}</th>
                 </tr>
               </thead>
@@ -75,14 +90,15 @@ defmodule GamendWeb.UserLive.Settings.PaymentsTab do
                       {payment_product_sku(purchase)}
                     </div>
                   </td>
-                  <td>{purchase.provider}</td>
+                  <td>{LiveHelpers.payment_provider_label(purchase.provider)}</td>
                   <td>
                     <span class={["badge badge-sm", payment_status_badge_class(purchase.status)]}>
-                      {purchase.status}
+                      {LiveHelpers.payment_status_label(purchase.status)}
                     </span>
                   </td>
                   <td>{payment_amount(purchase)}</td>
-                  <td>{purchase.environment}</td>
+                  <%!-- Sandbox vs production is setup detail, not the player's. --%>
+                  <td :if={@user.is_admin}>{purchase.environment}</td>
                   <td class="whitespace-nowrap"><.timestamp at={purchase.inserted_at} /></td>
                 </tr>
               </tbody>
@@ -113,14 +129,14 @@ defmodule GamendWeb.UserLive.Settings.PaymentsTab do
                   <div class="font-mono text-xs text-base-content/60">{entitlement.key}</div>
                 </div>
                 <span class={["badge badge-sm", payment_status_badge_class(entitlement.status)]}>
-                  {entitlement.status}
+                  {LiveHelpers.payment_status_label(entitlement.status)}
                 </span>
               </div>
 
               <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <div class="text-xs uppercase text-base-content/70">{gettext("Kind")}</div>
-                  <div>{payment_entitlement_kind(entitlement)}</div>
+                  <div>{LiveHelpers.payment_kind_label(payment_entitlement_kind(entitlement))}</div>
                 </div>
                 <div>
                   <div class="text-xs uppercase text-base-content/70">
@@ -170,6 +186,17 @@ defmodule GamendWeb.UserLive.Settings.PaymentsTab do
     """
   end
 
+  def handle_event("open_stripe_portal", _params, socket) do
+    user = Shared.current_user(socket)
+    return_url = GamendWeb.Endpoint.url() <> ~p"/users/settings?tab=payments"
+
+    case user && Payments.create_stripe_billing_portal(user, return_url) do
+      {:ok, url} -> {:noreply, redirect(socket, external: url)}
+      {:error, reason} -> {:noreply, put_flash(socket, :error, payment_error(reason))}
+      nil -> {:noreply, socket}
+    end
+  end
+
   def handle_event("cancel_stripe_subscription", %{"id" => id}, socket) do
     user = Shared.current_user(socket)
 
@@ -181,7 +208,7 @@ defmodule GamendWeb.UserLive.Settings.PaymentsTab do
          |> assign_payment_data()}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed") <> ": " <> payment_error(reason))}
+        {:noreply, put_flash(socket, :error, payment_error(reason))}
     end
   end
 
@@ -194,13 +221,20 @@ defmodule GamendWeb.UserLive.Settings.PaymentsTab do
 
   defp parse_payment_id(_id), do: nil
 
-  defp payment_error(%Ecto.Changeset{}), do: gettext("Invalid payment state")
+  # Stripe's own message when it sent one; never a raw atom or `inspect/1`.
+  defp payment_error(reason) do
+    case payment_error_detail(reason) do
+      nil -> gettext("Failed")
+      detail -> gettext("Failed") <> ": " <> detail
+    end
+  end
 
-  defp payment_error({:stripe_error, %{"message" => message}}) when is_binary(message),
+  defp payment_error_detail(%Ecto.Changeset{}), do: gettext("Invalid payment state")
+
+  defp payment_error_detail({:stripe_error, %{"message" => message}}) when is_binary(message),
     do: message
 
-  defp payment_error(reason) when is_atom(reason), do: Atom.to_string(reason)
-  defp payment_error(reason), do: inspect(reason)
+  defp payment_error_detail(reason), do: LiveHelpers.error_message(reason)
 
   defp payment_product_title(%{product: %{title: title}}) when is_binary(title) and title != "",
     do: title

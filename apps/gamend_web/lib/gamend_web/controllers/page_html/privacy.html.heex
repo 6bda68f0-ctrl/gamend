@@ -16,7 +16,7 @@
       <ul class="list-disc ps-6 space-y-2 text-base-content/80">
         <li>
           Account details (email, provider IDs): stored when you sign up or sign in with OAuth
-          providers like Discord, Google, Facebook, Apple or Steam.
+          providers like Discord, Google, Facebook, GitHub, Apple or Steam.
         </li>
         <li>
           Service activity needed to run the app, such as logins, sessions, game activity, and
@@ -28,7 +28,8 @@
         </li>
         <li>
           Network information such as IP address, processed transiently for security, rate limiting,
-          abuse prevention, IP bans, and approximate country-level request statistics.
+          abuse prevention, and approximate country-level request statistics. If an IP address is
+          banned for abuse, it is stored until the ban is lifted or expires.
         </li>
       </ul>
     </section>
@@ -60,10 +61,29 @@
     <section>
       <h2 class="text-xl font-semibold mb-4">Third-Party Services</h2>
       <p class="text-base-content/80">
-        We use third-party services that collect or process personal data on our behalf: OAuth
-        sign-in providers, platform stores (Apple, Google, Steam) when you make a purchase, and
-        error monitoring to diagnose crashes. Please review those providers' privacy policies for
-        details.
+        We use third-party services that collect or process personal data on our behalf. Depending
+        on which features are turned on, these include:
+      </p>
+      <ul class="list-disc ps-6 mt-2 space-y-2 text-base-content/80">
+        <li>OAuth sign-in providers, when you sign in with one.</li>
+        <li>Stripe, which processes payments made on the website.</li>
+        <li>Platform stores (Apple, Google, Steam), when you make a purchase in an app.</li>
+        <li>
+          A human-verification service (Cloudflare Turnstile) on the sign-up and email sign-in
+          forms, which receives your IP address and browser details.
+        </li>
+        <li>
+          An email delivery provider, which receives your email address to send sign-in links,
+          confirmations and account messages.
+        </li>
+        <li>
+          Push notification services (Apple Push Notification service, Firebase Cloud Messaging),
+          which receive your device's push token when you allow notifications.
+        </li>
+        <li>Error monitoring, to diagnose crashes.</li>
+      </ul>
+      <p class="mt-2 text-base-content/80">
+        Please review those providers' privacy policies for details.
       </p>
     </section>
 
@@ -77,7 +97,13 @@
 
     <section>
       <h2 class="text-xl font-semibold mb-4">Your Rights</h2>
-      <p class="text-base-content/80">
+      <p :if={@contact_email} class="text-base-content/80">
+        You may request access, correction, or deletion of your personal data by emailing <a
+          href={"mailto:" <> @contact_email}
+          class="link link-primary"
+        >{@contact_email}</a>.
+      </p>
+      <p :if={!@contact_email} class="text-base-content/80">
         You may request access, correction, or deletion of your personal data by contacting us
         through the app or support channels.
       </p>
@@ -85,14 +111,20 @@
 
     <section>
       <h2 class="text-xl font-semibold mb-4">Contact</h2>
-      <p class="text-base-content/80">
+      <p :if={@contact_email} class="text-base-content/80">
+        If you have any questions about this Privacy Policy, email us at <a
+          href={"mailto:" <> @contact_email}
+          class="link link-primary"
+        >{@contact_email}</a>.
+      </p>
+      <p :if={!@contact_email} class="text-base-content/80">
         If you have any questions about this Privacy Policy, please contact us via the project's
         contact channels.
       </p>
     </section>
 
     <div class="text-center pt-8 border-t border-base-300">
-      <small class="text-xs text-base-content/60">Last updated: July 2026</small>
+      <small class="text-xs text-base-content/60">Last updated: September 2026</small>
     </div>
   </div>
 </Layouts.app>

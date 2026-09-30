@@ -60,14 +60,11 @@ defmodule Gamend.Quests do
 
   require Logger
 
-  alias Gamend.Accounts.User
   alias Gamend.Quests.Quest
   alias Gamend.Quests.QuestProgress
   alias Gamend.Repo
 
   @type user_id :: Ecto.UUID.t()
-
-  @cache_ttl_ms 60_000
 
   # Grace before the recovery sweep retries a claimed-but-ungranted row, so it
   # can't race the post-commit grants of an in-flight claim.
@@ -123,19 +120,19 @@ defmodule Gamend.Quests do
 
   defp broadcast_definition_change do
     invalidate_quests_cache()
-    Phoenix.PubSub.broadcast(@pubsub, "quests", {:quests_changed})
+    Gamend.Broadcast.publish("quests", {:quests_changed})
   end
 
   # Progress ticks go to the user's topic only — a global fan-out of every
   # objective increment would scale with total event volume across all
   # players. Completions/claims are rare enough to broadcast globally.
   defp broadcast_progress(:quest_progress = event, user_id, payload) do
-    Phoenix.PubSub.broadcast(@pubsub, "user:#{user_id}", {event, payload})
+    Gamend.Broadcast.publish("user:#{user_id}", {event, payload})
   end
 
   defp broadcast_progress(event, user_id, payload) do
-    Phoenix.PubSub.broadcast(@pubsub, "user:#{user_id}", {event, payload})
-    Phoenix.PubSub.broadcast(@pubsub, "quests", {event, user_id, payload})
+    Gamend.Broadcast.publish("user:#{user_id}", {event, payload})
+    Gamend.Broadcast.publish("quests", {event, user_id, payload})
   end
 
   # ---------------------------------------------------------------------------
@@ -205,7 +202,7 @@ defmodule Gamend.Quests do
   @decorate cacheable(
               key: {:quests, :get, quests_version(), id},
               match: &(&1 != nil),
-              opts: [ttl: @cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def get_quest(id), do: Repo.get_uuid(Quest, id)
 
@@ -256,7 +253,7 @@ defmodule Gamend.Quests do
           claimed: non_neg_integer()
         }
   def stats do
-    Gamend.Cache.cached({:quests, :stats}, [ttl: @cache_ttl_ms], fn ->
+    Gamend.Cache.cached({:quests, :stats}, [ttl: Gamend.Cache.ttl()], fn ->
       by_status =
         from(p in QuestProgress, group_by: p.status, select: {p.status, count(p.id)})
         |> Repo.all()
@@ -301,11 +298,40 @@ defmodule Gamend.Quests do
   @spec active_quests() :: [Quest.t()]
   @decorate cacheable(
               key: {:quests, :active_all, quests_version()},
-              opts: [ttl: @cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def active_quests do
     from(q in Quest, where: q.active == true, order_by: [asc: q.sort_order, asc: q.key])
     |> Repo.all()
+  end
+
+  @doc """
+  The active quests with an objective listening to `event`.
+
+  `report_event/4` is the hottest write a player makes, and it used to scan
+  every active quest to find the handful that care. That is linear in the size
+  of the whole catalogue, so a host that adds a large family of quests — one
+  per language, say — pays for all of them on every unrelated event.
+
+  Cached **per event**, not as one grouped map. Nebulex copies a value out on
+  read, so a single map of every event's quests would copy the entire
+  catalogue on every lookup, which is the cost this exists to remove. One key
+  per event copies only the quests that event can advance.
+
+  Both keys carry `quests_version/0`, so creating, updating or deleting a
+  definition drops these along with `active_quests/0`.
+  """
+  @spec active_quests_for_event(String.t()) :: [Quest.t()]
+  def active_quests_for_event(event) when is_binary(event) do
+    Gamend.Cache.cached(
+      {:quests, :for_event, event, quests_version()},
+      [ttl: Gamend.Cache.ttl()],
+      fn ->
+        Enum.filter(active_quests(), fn quest ->
+          Enum.any?(quest.objectives, &(&1.event == event))
+        end)
+      end
+    )
   end
 
   # ---------------------------------------------------------------------------
@@ -326,10 +352,11 @@ defmodule Gamend.Quests do
       when is_binary(user_id) and is_binary(event) and is_integer(amount) and amount > 0 and
              is_map(meta) do
     now = DateTime.utc_now(:second)
-    meta = stringify_keys(meta)
+    meta = Gamend.Parse.string_keys(meta)
 
     advanced =
-      active_quests()
+      event
+      |> active_quests_for_event()
       |> Enum.filter(fn quest ->
         within_window?(quest, now) and quest_listens_to?(quest, event, meta) and
           not done_cached?(user_id, quest, now)
@@ -705,13 +732,13 @@ defmodule Gamend.Quests do
 
     Gamend.Async.run(fn ->
       Gamend.Notifications.admin_create_notification(user_id, user_id, %{
-        title: title,
-        content: "",
-        metadata: %{
-          type: "quest_completed",
-          quest_key: quest.key,
-          category: quest.category,
-          quest_title: quest.title
+        "title" => title,
+        "content" => "",
+        "metadata" => %{
+          "type" => "quest_completed",
+          "quest_key" => quest.key,
+          "category" => quest.category,
+          "quest_title" => quest.title
         }
       })
     end)
@@ -1220,11 +1247,15 @@ defmodule Gamend.Quests do
 
   Hidden quests are listed but carry no details until earned (callers obscure
   them). Chain quests only appear once their prerequisite is met. Grouped
-  quests collapse to one entry carrying `:group_size`.
+  quests collapse to one entry carrying `:group_size` and `collapsed: true`;
+  the members of a group listed in full carry the size alone.
 
   ## Options
   - `:category` — filter by category
-  - `:group` — expand this one group's members; every other group stays collapsed
+  - `:group` — expand this one group's members; every other group stays
+    collapsed
+  - `:drop_groups` — group keys to leave out entirely, collapsed or not: what
+    a page with a selector over some groups does with the ones not picked
   - `:status` — `"in_progress"` (not yet completed), `"claimable"`
     (completed, waiting to be claimed) or `"done"` (completed or claimed)
   - `:page` / `:page_size`
@@ -1283,6 +1314,26 @@ defmodule Gamend.Quests do
 
   defp category_names(quests) do
     quests |> Enum.map(& &1.category) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> Enum.sort()
+  end
+
+  @doc """
+  The groups this viewer's quests fall into, as `%{key, title}` in the order
+  the list would show them — what a group selector offers. `title` is the
+  stored `group_title` (the first member's when they disagree), untranslated,
+  like every other stored string here. `category` narrows it the way the list
+  filter does; `nil` is the signed-out catalog.
+  """
+  @spec groups(user_id() | nil, String.t() | nil) :: [%{key: String.t(), title: String.t()}]
+  def groups(user_id, category \\ nil) do
+    now = DateTime.utc_now(:second)
+
+    active_quests()
+    |> Enum.filter(fn q ->
+      is_binary(q.group_key) and within_window?(q, now) and category in [nil, q.category]
+    end)
+    |> host_visible(user_id)
+    |> Enum.uniq_by(& &1.group_key)
+    |> Enum.map(&%{key: &1.group_key, title: &1.group_title || &1.group_key})
   end
 
   @doc """
@@ -1346,10 +1397,13 @@ defmodule Gamend.Quests do
   # pagination are resolved in memory; the user's rows come from one query.
   defp visible_quests(user_id, now, opts) do
     category = Keyword.get(opts, :category)
+    drop = Keyword.get(opts, :drop_groups, [])
 
     quests =
       active_quests()
-      |> Enum.filter(fn q -> within_window?(q, now) and category in [nil, q.category] end)
+      |> Enum.filter(fn q ->
+        within_window?(q, now) and category in [nil, q.category] and q.group_key not in drop
+      end)
       |> host_visible(user_id)
 
     keys = Enum.map(quests, & &1.key)
@@ -1385,9 +1439,11 @@ defmodule Gamend.Quests do
     |> Enum.filter(&matches_status?(&1, status))
   end
 
-  # One entry per group, carrying `:group_size` so a UI can say "and 51 more".
-  # `opened` lists that one group's members in full; the rest stay collapsed
-  # behind the member worth acting on (claimable first, then furthest along).
+  # One entry per group, carrying `:group_size` so a UI can say "and 51 more"
+  # and `collapsed: true`, which is what tells a card it stands for the group.
+  # `opened` lists that one group's members in full — the same size, not
+  # collapsed; the rest stay behind the member worth acting on (claimable
+  # first, then furthest along).
   defp collapse_groups(entries, opened) do
     # First-appearance order, so a group lands where its best member sorted.
     # chunk_by would only catch members sort_order happened to make adjacent.
@@ -1407,7 +1463,12 @@ defmodule Gamend.Quests do
         if key == opened do
           Enum.map(members, &Map.put(&1, :group_size, size))
         else
-          [Map.put(group_representative(members), :group_size, size)]
+          [
+            members
+            |> group_representative()
+            |> Map.put(:group_size, size)
+            |> Map.put(:collapsed, true)
+          ]
         end
     end)
   end
@@ -1564,7 +1625,7 @@ defmodule Gamend.Quests do
 
   defp progress_query(opts) do
     QuestProgress
-    |> maybe_filter_user(Keyword.get(opts, :user_id))
+    |> Gamend.Query.filter_user(Keyword.get(opts, :user_id))
     |> maybe_filter_quest_key(Keyword.get(opts, :quest_key))
     |> maybe_filter_status(Keyword.get(opts, :status))
   end
@@ -1574,27 +1635,6 @@ defmodule Gamend.Quests do
 
   defp maybe_filter_status(query, nil), do: query
   defp maybe_filter_status(query, status), do: where(query, [p], p.status == ^status)
-
-  # Accept either an exact user id (UUID) or a username/display-name substring.
-  defp maybe_filter_user(query, nil), do: query
-
-  defp maybe_filter_user(query, value) do
-    case Ecto.UUID.cast(value) do
-      {:ok, uuid} ->
-        where(query, [p], p.user_id == ^uuid)
-
-      :error ->
-        pattern = "%" <> Repo.escape_like(String.downcase(value)) <> "%"
-
-        query
-        |> join(:inner, [p], u in User, on: u.id == p.user_id)
-        |> where(
-          [p, u],
-          fragment("lower(coalesce(?, '')) LIKE ? ESCAPE '\\'", u.username, ^pattern) or
-            fragment("lower(coalesce(?, '')) LIKE ? ESCAPE '\\'", u.display_name, ^pattern)
-        )
-    end
-  end
 
   @doc """
   Force-complete a quest for a user (admin grant): every objective jumps to
@@ -1833,20 +1873,7 @@ defmodule Gamend.Quests do
   # Private helpers
   # ---------------------------------------------------------------------------
 
-  defp paginate(query, opts) do
-    page = max(Keyword.get(opts, :page, 1), 1)
-    page_size = Keyword.get(opts, :page_size, 25)
-    query |> limit(^page_size) |> offset(^((page - 1) * page_size))
-  end
+  defp paginate(query, opts), do: Gamend.Query.page(query, opts)
 
-  defp normalize_params(attrs) when is_map(attrs) do
-    stringify_keys(attrs)
-  end
-
-  defp stringify_keys(map) when is_map(map) do
-    Map.new(map, fn
-      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-      {k, v} -> {k, v}
-    end)
-  end
+  defp normalize_params(attrs) when is_map(attrs), do: Gamend.Parse.string_keys(attrs)
 end

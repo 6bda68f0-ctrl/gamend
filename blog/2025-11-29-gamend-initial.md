@@ -17,7 +17,7 @@ This is how it compares with what exists today:
 |**Colyseus**|TypeScript|Beta|No|No|Node clustering|$0|
 
 - Note 1: Since **Gamend** works with SQLite also, hosting a single instance costs just 5$.
-- Note 2: **Nakama** costs after scaling because it either requires manual configuration (hard to setup, not trivial) or enterprise version. **Colyseus** and **Gamend** both scale normally, without any enterprise edition. [reddit/nakama_not_an_opensource_distributed_server](https://www.reddit.com/r/gamedev/comments/7wzmwd/nakama_not_an_opensource_distributed_server_for/)
+- Note 2: **Nakama** costs after scaling because it either requires manual configuration (hard to set up, not trivial) or enterprise version. **Colyseus** and **Gamend** both scale normally, without any enterprise edition. [reddit/nakama_not_an_opensource_distributed_server](https://www.reddit.com/r/gamedev/comments/7wzmwd/nakama_not_an_opensource_distributed_server_for/)
 
 # Features & Payments
 

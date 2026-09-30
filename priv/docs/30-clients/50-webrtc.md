@@ -38,13 +38,12 @@ Client                           Server (ex_webrtc)
 | `"events"` | Yes | Yes | Game events, hook RPC |
 | `"state"` | No | No | High-frequency state (positions) |
 
-Configure ICE in the host config (`enabled: false` rejects offers at runtime):
+The server peer's ICE servers are settings: `GAMEND_WEBRTC_STUN_URLS` (default Google's public STUN server) and, for a server behind NAT or on a network that filters UDP, a TURN relay with `GAMEND_WEBRTC_TURN_URLS`, `GAMEND_WEBRTC_TURN_USERNAME` and `GAMEND_WEBRTC_TURN_CREDENTIAL`. The URL settings take comma-separated lists. These are the server's own servers; a client passes its own to its peer connection. `enabled: false` in the host config rejects offers at runtime, and an `ice_servers:` list there replaces the settings outright:
 
 ```text
 config :gamend_web, :webrtc,
   enabled: true,
   ice_servers: [%{urls: "stun:stun.l.google.com:19302"}]
-  # add a TURN entry for restrictive NATs
 ```
 
 ### UserChannel signaling events
@@ -53,16 +52,18 @@ config :gamend_web, :webrtc,
 |---|---|---|
 | C → S | `webrtc:offer` / S → C `webrtc:answer` | `{sdp, type}` |
 | Both | `webrtc:ice` | `{candidate, sdpMid, sdpMLineIndex}` |
-| C → S | `webrtc:send`, `webrtc:close` | `{channel, data}`, `{}` |
-| S → C | `webrtc:data` | `{channel, data}` |
+| C → S | `webrtc:close` | `{}` |
 | S → C | `webrtc:state`, `webrtc:channel_open`, `webrtc:channel_closed` | `{state}`, `{channel}`, `{}` |
+
+There is no send or data event on the channel: game data goes over the
+DataChannels only.
 
 ### Hook RPC
 
 Messages on `"events"` with `{"type": "call_hook", "plugin": ..., "fn": ..., "args": [...]}`
 invoke plugin hooks without an HTTP round-trip; the reply (`hook_reply` /
 `hook_error`) arrives on the same channel. The `"state"` channel stays an opaque
-byte pipe.
+byte pipe. A connection holds up to four channels; the server refuses more.
 
 JSON is the default; a channel opts into protobuf via the DataChannel protocol
 field (envelope: `RtcEnvelope` in `proto/gamend_realtime.proto`). **Prefer
@@ -92,8 +93,25 @@ webrtc.connect_webrtc()
 var result = await webrtc.call_hook("my_plugin", "my_func", [1, 2])
 ```
 
-Deployment: Rust toolchain in the image, UDP ports open, TURN recommended;
-on Fly.io `ExWebRTC.ICE.FlyIpFilter` handles public IP binding.
+```cpp
+// Built with GAMEND_WITH_WEBRTC; the realtime connection is up.
+config.webrtc = gamend::make_libdatachannel_transport();
+config.webrtc_format = gamend::RealtimeFormat::Protobuf;
+// ...
+client.webrtc().connect([&](const std::string& error) {
+  if (!error.empty()) return;
+  client.webrtc().send("events", R"({"type":"move","x":10})");
+  client.webrtc().call_hook("my_plugin", "my_func", gamend::json::array({1, 2}),
+    [](const gamend::HookResult& r) { if (r.ok) use(r.data); });
+});
+```
+
+The C++ SDK opens only `events` by default; `Config::data_channels` adds
+more, up to the server's four.
+
+Deployment: Rust toolchain in the image, UDP ports open, TURN recommended.
+The peer connection gets only `ice_servers`; no ICE IP filter is wired (for
+example Fly.io's `ExWebRTC.ICE.FlyIpFilter`).
 
 ## Peer-to-peer signaling
 
@@ -133,7 +151,8 @@ recomputed from the lobby on every read, so a host change applies immediately.
 | C → S | `broadcast_offer` | `{sdp}` — star host only |
 | C → S | `list_users` | `{}` |
 | S → C | `offer` / `answer` / `ice` | `{sdp \| candidate, from_user_id}` |
-| S → C | `user_joined` / `user_rejoined` / `user_left` | `{user_id, role}` |
+| S → C | `user_joined` / `user_rejoined` | `{user_id, role}` |
+| S → C | `user_left` | `{user_id}` |
 | S → C | `room_closed` | `{}` |
 
 On join the server pushes one `user_joined` per peer already connected. Rate
@@ -154,8 +173,9 @@ add_child(p2p)
 p2p.broadcast_text("events", "hello")
 ```
 
-The bundled `webrtc_lobby_hook` plugin enables star signaling on every lobby,
-closes rooms on delete, and pushes `webrtc:room_ready` (with the topic to join)
-to the host's `user:<id>` channel so a headless host connects on its own. Drop
-it to call `Signaling.configure/2` yourself, e.g. mesh rooms, or signaling only
-once a match starts.
+The bundled `webrtc_lobby_hook` plugin enables mesh signaling on every new
+lobby and closes the room when the lobby is deleted. If you switch a lobby to
+star yourself, it also pushes `webrtc:room_ready` (with the topic to join) to
+the new host's `user:<id>` channel when the lobby host changes, so a headless
+host connects on its own. Drop it to call `Signaling.configure/2` yourself,
+e.g. star rooms, or signaling only once a match starts.

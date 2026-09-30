@@ -20,6 +20,8 @@ Single-elimination bracket tournaments: players register during a registration w
   and config — "current occurrence per slug" works like leaderboard seasons.
 ```
 
+Transitions, draws, match deadlines and recurrence run on a tick every `GAMEND_TOURNAMENTS_TICK_INTERVAL_SECONDS` (default `30`), so a round can start or time out up to that late. Lower it for short rounds.
+
 ## Entries
 
 A bracket side is an entry, and an entry is a leader (one user). For team tournaments (team_size 2+, advisory) the leader registers and team composition is game policy, enforced in hooks if you care. The server tracks who leads, not who shows up. Entry states: registered → active (after the draw) → eliminated or winner.
@@ -30,11 +32,13 @@ A bracket side is an entry, and an entry is a leader (one user). For team tourna
 |---|---|
 | GET /api/v1/tournaments | List (filter by state, or slug for occurrence history) |
 | GET /api/v1/tournaments/:id | Details by id or slug (current occurrence); includes my_entry when authenticated |
-| POST /api/v1/tournaments/:id/join | Register as entry leader (before_tournament_register hook gates) |
+| POST /api/v1/tournaments/:id/join | Register as entry leader; answers the entry (before_tournament_register hook gates) |
 | DELETE /api/v1/tournaments/:id/join | Withdraw before the draw (before_tournament_leave hook can veto) |
-| GET /api/v1/tournaments/:id/standings | Placements, wins, champions |
-| GET /api/v1/tournaments/:id/bracket | Brackets, entries and matches |
-| GET /api/v1/tournaments/:id/my_match | The caller's current unresolved match, if any |
+| GET /api/v1/tournaments/:id/standings | Champions and every entry's placement |
+| GET /api/v1/tournaments/:id/bracket | A page of brackets, each with its matches and the entries they name; `?index=` for one |
+| GET /api/v1/tournaments/:id/my_match | The caller's current unresolved match; 404 `no_current_match` when none is waiting |
+
+Registration answers `registration_closed` or `tournament_full` (403) and `already_registered` (409); a hook that rejects answers `rejected` (403) with its reason in `message`. Leaving after the draw answers `already_drawn` (409).
 
 Match resolution has no public endpoint: verdicts are server-side (hooks); expose your own call_hook RPC if your flow needs a client trigger. Entry leaders receive tournament_updated, tournament_match_ready, tournament_match_resolved and tournament_finished on their user channel (see WebSocket Channels).
 

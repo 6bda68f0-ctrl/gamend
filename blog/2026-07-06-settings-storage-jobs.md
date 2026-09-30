@@ -1,6 +1,6 @@
 # Ops: Settings, Storage, Jobs, Retention
 
-Added one library settings where every env var name is derived from code. Added object storage that uses both local disk and S3/R2 API. Updated the background jobs to use Oban, and retention for every unbounded table.
+Added one settings library where every env var name is derived from code. Added object storage that uses both local disk and S3/R2 API. Updated the background jobs to use Oban, and retention for every unbounded table.
 
 ## Settings
 
@@ -28,5 +28,5 @@ Background work (push fan-out, mailers, webhooks, pruning) runs on Oban, with th
 
 ![](ops/oban.png)
 
-- [Settings reference](https://gamend.org/docs/setup)
+- [Settings reference](https://gamend.org/docs/settings)
 - [Github](https://github.com/appsinacup/gamend)

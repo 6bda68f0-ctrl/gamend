@@ -3,10 +3,12 @@ defmodule GamendWeb.Api.V1.SessionController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.Accounts
+  alias Gamend.Captcha
   alias GamendWeb.Auth.Guardian
+  alias GamendWeb.Auth.Tokens
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{OkResponse, RegistrationResponse, SessionResponse}
   alias OpenApiSpex.Schema
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
 
   tags(["Authentication"])
 
@@ -31,61 +33,175 @@ defmodule GamendWeb.Api.V1.SessionController do
       }
     },
     responses: [
-      ok: {
-        "Login successful",
-        "application/json",
-        %Schema{
-          type: :object,
-          properties: %{
-            data: %Schema{
-              type: :object,
-              properties: %{
-                access_token: %Schema{type: :string, description: "JWT access token (15 min)"},
-                refresh_token: %Schema{type: :string, description: "JWT refresh token (30 days)"},
-                expires_in: %Schema{
-                  type: :integer,
-                  description: "Seconds until access token expires"
-                },
-                user_id: %Schema{type: :string, format: :uuid},
-                username: %Schema{type: :string, description: "Unique username handle"},
-                display_name: %Schema{type: :string, description: "User display name"}
-              }
-            }
-          },
-          example: %{
-            data: %{
-              access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-              refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-              expires_in: 900,
-              user_id: "0198c0de-0002-7000-8000-000000000002",
-              username: "coolplayer-1234",
-              display_name: "CoolPlayer"
-            }
-          }
-        }
-      },
-      unauthorized: {"Invalid credentials", "application/json", @error_schema}
+      ok: {"Login successful", "application/json", SessionResponse},
+      unauthorized: Schemas.error("Invalid credentials"),
+      forbidden:
+        Schemas.error(
+          "The email is not confirmed yet (`email_not_confirmed`), the account awaits " <>
+            "activation, or it is scheduled for deletion"
+        ),
+      too_many_requests:
+        Schemas.error(
+          "Too many failed passwords for this email: password sign-in is locked for the " <>
+            "number of seconds in Retry-After (`account_locked`)"
+        )
     ]
   )
 
   def create(conn, %{"email" => email, "password" => password}) do
-    if user = Accounts.get_user_by_email_and_password(email, password) do
-      if Accounts.user_activated?(user) do
-        maybe_attach_device(conn, user)
-        issue_tokens(conn, user)
-      else
+    case Accounts.authenticate_by_password(email, password) do
+      {:ok, user} ->
+        case Tokens.refusal(user) do
+          nil ->
+            maybe_attach_device(conn, user)
+            issue_tokens(conn, user)
+
+          {status, code, message} ->
+            reply_error(conn, status, code, message)
+        end
+
+      {:error, {:locked, seconds}} ->
         conn
-        |> put_status(:forbidden)
-        |> json(%{
-          error: "account_not_activated",
-          message: "Your account is pending activation by an administrator."
-        })
-      end
-    else
-      conn
-      |> put_status(:unauthorized)
-      |> json(%{error: "Invalid email or password"})
+        |> put_resp_header("retry-after", Integer.to_string(seconds))
+        |> reply_error(
+          :too_many_requests,
+          "account_locked",
+          "Too many failed sign-in attempts. Try again later, or sign in with an emailed link."
+        )
+
+      {:error, :email_not_confirmed} ->
+        reply_error(
+          conn,
+          :forbidden,
+          "email_not_confirmed",
+          "Confirm your email address with the link we sent to it, then log in again. " <>
+            "If the link has expired, sign in on the website with an emailed login link, " <>
+            "then set a new password in your account settings."
+        )
+
+      {:error, :invalid_credentials} ->
+        reply_error(conn, :unauthorized, "invalid_credentials", "Invalid email or password")
     end
+  end
+
+  operation(:register,
+    operation_id: "register",
+    summary: "Register",
+    description:
+      "Create an account with an email and a password and queue its confirmation email, " <>
+        "as browser sign-up does. Registering is not a sign-in: it answers the new account, " <>
+        "never tokens. The password signs in with `login` once the player has opened the " <>
+        "emailed link; until then `login` answers `403 email_not_confirmed`. " <>
+        "The response does not wait for the email, which is sent and retried in the background. " <>
+        "The server's first account becomes the admin and is confirmed without an email " <>
+        "(`email_confirmed: true`), so it can log in at once. Account activation " <>
+        "(`GAMEND_AUTH_REQUIRE_ACTIVATION`) applies at login, as for every sign-up. " <>
+        "When the server requires it (`GAMEND_CAPTCHA_API_REGISTER`), a Cloudflare " <>
+        "Turnstile token goes in `captcha_token`.",
+    request_body: {
+      "Registration",
+      "application/json",
+      %Schema{
+        type: :object,
+        properties: %{
+          email: %Schema{type: :string, format: :email, description: "User email"},
+          password: %Schema{type: :string, format: :password, description: "User password"},
+          username: %Schema{
+            type: :string,
+            description: "Optional; one is generated when it is left out"
+          },
+          captcha_token: %Schema{
+            type: :string,
+            description: "Turnstile token, when the server requires a captcha"
+          }
+        },
+        required: [:email, :password],
+        example: %{
+          email: "user@example.com",
+          password: "securepassword123"
+        }
+      }
+    },
+    responses: [
+      created: {"Account created; not signed in", "application/json", RegistrationResponse},
+      bad_request: Schemas.error("Email or password missing (missing_param)"),
+      forbidden:
+        Schemas.error(
+          "The captcha failed, or a plugin refused the sign-up (registration_refused)"
+        ),
+      conflict: Schemas.error("Email or username already taken"),
+      unprocessable_entity: Schemas.error("Invalid email, username or password"),
+      service_unavailable: Schemas.error("The captcha check could not be completed")
+    ]
+  )
+
+  def register(conn, %{"email" => email, "password" => password} = params)
+      when is_binary(email) and is_binary(password) do
+    # The notifier the browser sign-up reads, so both paths send one email.
+    notifier = Application.get_env(:gamend_web, :user_notifier, Gamend.Accounts.UserNotifier)
+    ip = conn.remote_ip |> :inet.ntoa() |> to_string()
+
+    case Captcha.verify_api_register(params["captcha_token"], ip) do
+      :ok ->
+        params
+        |> Map.take(["email", "password", "username"])
+        |> Accounts.register_user_with_password_and_deliver(
+          fn token -> url(~p"/users/confirm/#{token}") end,
+          notifier
+        )
+        |> registered(conn)
+
+      {:error, :unavailable} ->
+        reply_error(
+          conn,
+          :service_unavailable,
+          "captcha_unavailable",
+          "The captcha could not be verified, try again"
+        )
+
+      {:error, :missing} ->
+        reply_error(conn, :forbidden, "captcha_required", "A captcha_token is required")
+
+      {:error, :invalid} ->
+        reply_error(conn, :forbidden, "captcha_invalid", "Captcha verification failed")
+    end
+  end
+
+  def register(conn, _params) do
+    reply_error(conn, :bad_request, "missing_param", "email and password are required")
+  end
+
+  # Not a sign-in, unlike device login, which creates an account and signs it
+  # in at once: registering proves nothing about the inbox, and a token here
+  # would let anyone play as any address. The password signs in through
+  # `create/2` once the email is confirmed.
+  defp registered({:ok, user}, conn) do
+    reply_data(conn, :created, %{
+      user_id: user.id,
+      username: user.username || "",
+      display_name: user.display_name || "",
+      email_confirmed: not is_nil(user.confirmed_at)
+    })
+  end
+
+  defp registered({:error, %Ecto.Changeset{} = changeset}, conn) do
+    if taken?(changeset),
+      do: uniqueness_conflict(conn, changeset),
+      else: unprocessable(conn, changeset)
+  end
+
+  # A `before_user_register` plugin refused the sign-up. The email is queued,
+  # never sent here, so it cannot fail this request.
+  defp registered({:error, reason}, conn) do
+    message = if is_binary(reason), do: reason, else: "The registration was refused"
+    reply_error(conn, :forbidden, "registration_refused", message)
+  end
+
+  # An email or a username someone already has: 409, the input was fine.
+  defp taken?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_message, opts}} ->
+      opts[:constraint] == :unique or opts[:validation] == :unsafe_unique
+    end)
   end
 
   operation(:create_device,
@@ -105,11 +221,12 @@ defmodule GamendWeb.Api.V1.SessionController do
       }
     },
     responses: [
-      ok:
-        {"Login successful", "application/json",
-         %Schema{type: :object, properties: %{data: GamendWeb.Schemas.OAuthSessionData}}},
-      bad_request: {"Unable to create device user", "application/json", @error_schema},
-      forbidden: {"Device auth disabled", "application/json", @error_schema}
+      ok: {"Login successful", "application/json", SessionResponse},
+      bad_request: Schemas.error("Unable to create device user"),
+      forbidden:
+        Schemas.error(
+          "Device auth disabled, or account awaiting activation or scheduled for deletion"
+        )
     ]
   )
 
@@ -121,29 +238,16 @@ defmodule GamendWeb.Api.V1.SessionController do
     if Accounts.device_auth_enabled?() do
       case Accounts.find_or_create_from_device(device_id) do
         {:ok, user} ->
-          if Accounts.user_activated?(user) do
-            issue_tokens(conn, user)
-          else
-            conn
-            |> put_status(:forbidden)
-            |> json(%{
-              error: "account_not_activated",
-              message: "Your account is pending activation by an administrator."
-            })
+          case Tokens.refusal(user) do
+            nil -> issue_tokens(conn, user)
+            {status, code, message} -> reply_error(conn, status, code, message)
           end
 
         {:error, changeset} ->
-          conn
-          |> put_status(:bad_request)
-          |> json(%{
-            error: "unable to create device user",
-            details: Ecto.Changeset.traverse_errors(changeset, fn {msg, _} -> msg end)
-          })
+          unprocessable(conn, changeset)
       end
     else
-      conn
-      |> put_status(:forbidden)
-      |> json(%{error: "device-based authentication is disabled"})
+      reply_error(conn, :forbidden, "device_auth_disabled", "Device login is disabled")
     end
   end
 
@@ -157,7 +261,7 @@ defmodule GamendWeb.Api.V1.SessionController do
         "so a client with an already-expired token can still complete sign-out.",
     parameters: [],
     responses: [
-      ok: {"Logout successful", "application/json", %Schema{type: :object}}
+      ok: {"Logout successful", "application/json", OkResponse}
     ]
   )
 
@@ -177,7 +281,7 @@ defmodule GamendWeb.Api.V1.SessionController do
       _ = Accounts.revoke_all_tokens(user)
     end
 
-    json(conn, %{})
+    reply_ok(conn)
   end
 
   operation(:refresh,
@@ -200,41 +304,9 @@ defmodule GamendWeb.Api.V1.SessionController do
       }
     },
     responses: [
-      ok: {
-        "Token refreshed successfully",
-        "application/json",
-        %Schema{
-          type: :object,
-          properties: %{
-            data: %Schema{
-              type: :object,
-              properties: %{
-                access_token: %Schema{type: :string, description: "New access token"},
-                refresh_token: %Schema{
-                  type: :string,
-                  description: "Refresh token (same as input)"
-                },
-                user_id: %Schema{type: :string, format: :uuid, description: "User ID"},
-                expires_in: %Schema{type: :integer, description: "Seconds until expiry"},
-                username: %Schema{type: :string, description: "Unique username handle"},
-                display_name: %Schema{type: :string, description: "User display name"}
-              }
-            }
-          },
-          example: %{
-            data: %{
-              access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-              refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-              user_id: "0198c0de-0002-7000-8000-000000000002",
-              expires_in: 900,
-              username: "coolplayer-1234",
-              display_name: "CoolPlayer"
-            }
-          }
-        }
-      },
-      unauthorized: {"Invalid or expired refresh token", "application/json", @error_schema},
-      bad_request: {"Bad request", "application/json", @error_schema}
+      ok: {"Token refreshed successfully", "application/json", SessionResponse},
+      unauthorized: Schemas.error("Invalid or expired refresh token"),
+      bad_request: Schemas.error("Bad request")
     ]
   )
 
@@ -248,34 +320,24 @@ defmodule GamendWeb.Api.V1.SessionController do
             {:ok, new_access_token, _claims} =
               Guardian.encode_and_sign(user, %{}, token_type: "access")
 
-            json(conn, %{
-              data: %{
-                access_token: new_access_token,
-                refresh_token: refresh_token,
-                user_id: user.id,
-                username: user.username || "",
-                display_name: user.display_name || "",
-                expires_in: 900
-              }
-            })
+            reply_data(conn, Tokens.session(user, new_access_token, refresh_token))
 
           {:error, _reason} ->
-            conn
-            |> put_status(:unauthorized)
-            |> json(%{error: "Invalid refresh token"})
+            reply_error(conn, :unauthorized, "invalid_refresh_token")
         end
 
       {:error, _reason} ->
-        conn
-        |> put_status(:unauthorized)
-        |> json(%{error: "Invalid or expired refresh token"})
+        reply_error(
+          conn,
+          :unauthorized,
+          "invalid_refresh_token",
+          "Invalid or expired refresh token"
+        )
     end
   end
 
   def refresh(conn, _params) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{error: "refresh_token is required"})
+    reply_error(conn, :bad_request, "missing_param", "refresh_token is required")
   end
 
   # Best-effort device attachment when device_id is provided during email login
@@ -289,42 +351,8 @@ defmodule GamendWeb.Api.V1.SessionController do
     :ok
   end
 
-  # Generate access + refresh JWTs and return the token response
-  defp issue_tokens(conn, user) do
-    # Only real logins reach here (password and device create); `refresh/2`
-    # builds its own token. Same login side-effects as the web session path.
-    #
-    # `touch_last_seen/1` joins them rather than running inline: it is two more
-    # writes (the `last_seen_at` update, and the activity-day insert behind it)
-    # on a path that already wrote the user row, and both are fire-and-forget by
-    # construction — nothing in the response depends on either. On SQLite's
-    # single writer those writes were the difference between a login returning
-    # and a login waiting, and signup throughput fell as concurrency rose
-    # because of them. The work still happens, and still costs the same; the
-    # caller no longer holds a connection while it does.
-    #
-    # Tests run `Gamend.Async` inline, so anything asserting on `last_seen_at`
-    # straight after a login still sees it.
-    Gamend.Async.run(fn ->
-      Accounts.touch_last_seen(user)
-      Gamend.Hooks.internal_call(:after_user_logged_in, [user])
-      Gamend.Quests.report_event(user.id, "login")
-    end)
-
-    {:ok, access_token, _} = Guardian.encode_and_sign(user, %{}, token_type: "access")
-
-    {:ok, refresh_token, _} =
-      Guardian.encode_and_sign(user, %{}, token_type: "refresh", ttl: {30, :days})
-
-    json(conn, %{
-      data: %{
-        access_token: access_token,
-        refresh_token: refresh_token,
-        expires_in: 900,
-        user_id: user.id,
-        username: user.username || "",
-        display_name: user.display_name || ""
-      }
-    })
-  end
+  # Only real logins reach here (password and device; registering is not one);
+  # `refresh/2` keeps its refresh token. Provider sign-ins go through the same
+  # `Tokens.sign_in/1`.
+  defp issue_tokens(conn, user), do: reply_data(conn, Tokens.sign_in(user))
 end

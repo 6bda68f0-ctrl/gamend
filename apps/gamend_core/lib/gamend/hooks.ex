@@ -18,6 +18,7 @@ defmodule Gamend.Hooks do
   alias Gamend.Chat.Report
   alias Gamend.Groups.Group
   alias Gamend.Hooks.Default, as: Default
+  alias Gamend.Hooks.Defaults
   alias Gamend.Hooks.PluginManager
   alias Gamend.Lobbies.Lobby
   alias Gamend.Parties.Party
@@ -73,8 +74,9 @@ defmodule Gamend.Hooks do
   `"username"`. Return `{:ok, attrs}` — possibly with a different username
   or other changes — or `{:error, reason}` to abort the registration.
 
-  Core re-validates after all hooks ran: format and uniqueness are not
-  overridable. A hook-supplied username that is invalid or already taken is
+  Core re-validates after all hooks ran, against `c:validate_username/1` or
+  its own rules and for uniqueness; this hook cannot skip that. A
+  hook-supplied username that is invalid or already taken is
   replaced with a generated one (a plugin bug must never lock a player out
   of login). For strict policy on player-initiated changes — profanity or
   reserved names — use `c:before_user_update/2`, where errors are returned
@@ -97,6 +99,22 @@ defmodule Gamend.Hooks do
 
   @callback before_user_update(User.t(), map()) :: hook_result(map())
   @callback after_user_updated(User.t()) :: any()
+
+  @doc """
+  Replaces the built-in username rules for one handle.
+
+  Receives the handle as it will be stored (NFKC-normalized, lowercased) and
+  answers `:ok`, `{:error, message}` (shown to the player), or `:default` to
+  keep core's rules: letters and digits of one script or Latin with Chinese,
+  Japanese or Korean, joined by `.` `_` `-` (`Gamend.Accounts.Username`).
+  Core still enforces length, uniqueness and the absence of invisible
+  characters. The generator asks the same question, so a policy that refuses
+  every `word-1234` must hand out handles in `c:before_user_register/2`.
+  Modules are tried in order and the first real answer wins. A hook that
+  raises or times out counts as `:default`, so a plugin bug never locks a
+  player out.
+  """
+  @callback validate_username(String.t()) :: :ok | {:error, String.t() | atom()} | :default
 
   @callback after_user_online(User.t()) :: any()
   @callback after_user_offline(User.t()) :: any()
@@ -336,6 +354,28 @@ defmodule Gamend.Hooks do
 
   @callback after_lobby_host_change(Lobby.t(), String.t()) :: any()
 
+  @doc """
+  Use this macro to get default implementations for all callbacks.
+
+  This allows you to only implement the callbacks you need. It injects the
+  same defaults as the SDK's `use Gamend.Hooks`, so a plugin compiles the same
+  against the SDK (a Mix build) and against the engine (an in-process build,
+  `Gamend.Hooks.PluginBuilder`).
+
+  ## Example
+
+      defmodule MyGame.Hooks do
+        use Gamend.Hooks
+
+        @impl true
+        def after_user_register(user) do
+          # Only implement what you need
+          :ok
+        end
+      end
+  """
+  defmacro __using__(_opts), do: Defaults.quoted()
+
   @doc "Return the configured module that implements the hooks behaviour."
   def module do
     # Primary config lives under :gamend_core.
@@ -548,6 +588,7 @@ defmodule Gamend.Hooks do
                       before_stop: 0,
                       before_user_register: 2,
                       before_user_update: 2,
+                      validate_username: 1,
                       on_custom_hook: 2
 
   @doc "Returns the set of internal lifecycle hook names that are not callable\n  through the public RPC interface."
@@ -566,6 +607,7 @@ defmodule Gamend.Hooks do
       :after_wallet_changed,
       :after_inventory_changed,
       :before_user_update,
+      :validate_username,
       :before_lobby_create,
       :after_lobby_create,
       :before_group_create,
@@ -647,13 +689,19 @@ defmodule Gamend.Hooks do
     ])
   end
 
+  # The hooks module leads, a host app's own modules follow, plugins last.
+  # `config :gamend_core, :host_hook_modules, [MyApp.Hooks]` is for a host
+  # that wants a lifecycle event without taking over `:hooks_module`, which
+  # would move every fan-out hook's primary result off `Default`. A host
+  # module exports only what it implements, and is called only for that.
   defp lifecycle_modules do
     base = module()
+    host_mods = Application.get_env(:gamend_core, :host_hook_modules, [])
 
     plugin_mods =
       Enum.map(PluginManager.hook_modules(), fn {_name, mod} -> mod end)
 
-    [base | plugin_mods]
+    ([base | host_mods] ++ plugin_mods)
     |> Enum.uniq()
   end
 
@@ -664,9 +712,54 @@ defmodule Gamend.Hooks do
   def pipeline_hook?(name, arity), do: lifecycle_pipeline_hook?(name, arity)
 
   defp lifecycle_pipeline_hook?(name, arity) when is_atom(name) and is_integer(arity) do
-    # Pipeline-style hooks transform their inputs. These are the "before_*" hooks
-    # used by domain flows.
-    name in [
+    (name in core_pipeline_hooks() or name in pipeline_hooks()) and arity > 0
+  end
+
+  @doc """
+  Register a `before_*` hook name owned by a host application or a plugin.
+
+  A pipeline hook transforms its input: each plugin receives the previous
+  plugin's output, returns `{:ok, value}` to allow a possibly-modified value or
+  `{:error, reason}` to block, and the chain halts at the first refusal.
+
+  Core's own names are a fixed list, so a host's `before_*` hook fell through to
+  the fan-out path instead, where every plugin is called with the *same*
+  arguments, only the first one's result is returned, and the others run
+  regardless of whether the first refused. With one plugin the difference is
+  invisible; with two, the second plugin's changes are dropped and its side
+  effects happen even after the first blocked the operation.
+
+      Gamend.Hooks.register_pipeline_hook(:before_build)
+  """
+  @spec register_pipeline_hook(atom()) :: :ok
+  def register_pipeline_hook(name) when is_atom(name) do
+    config = Application.get_env(:gamend_core, __MODULE__, [])
+    names = config |> Keyword.get(:pipeline_hooks, []) |> List.delete(name)
+
+    Application.put_env(
+      :gamend_core,
+      __MODULE__,
+      Keyword.put(config, :pipeline_hooks, [name | names])
+    )
+  end
+
+  @doc "Undoes `register_pipeline_hook/1`."
+  @spec unregister_pipeline_hook(atom()) :: :ok
+  def unregister_pipeline_hook(name) when is_atom(name) do
+    config = Application.get_env(:gamend_core, __MODULE__, [])
+    names = config |> Keyword.get(:pipeline_hooks, []) |> List.delete(name)
+
+    Application.put_env(:gamend_core, __MODULE__, Keyword.put(config, :pipeline_hooks, names))
+  end
+
+  @doc "Pipeline hook names registered on top of core's own."
+  @spec pipeline_hooks() :: [atom()]
+  def pipeline_hooks do
+    :gamend_core |> Application.get_env(__MODULE__, []) |> Keyword.get(:pipeline_hooks, [])
+  end
+
+  defp core_pipeline_hooks do
+    [
       :before_user_register,
       :before_user_update,
       :before_lobby_create,
@@ -693,7 +786,7 @@ defmodule Gamend.Hooks do
       :before_quest_claim,
       :before_lobby_state_change,
       :before_ready_check_open
-    ] and arity > 0
+    ]
   end
 
   # Ensure all plain-map arguments passed to before_* hooks have string keys.
@@ -701,15 +794,8 @@ defmodule Gamend.Hooks do
   defp normalize_hook_args(args) when is_list(args) do
     Enum.map(args, fn
       %_{} = struct -> struct
-      m when is_map(m) -> stringify_keys(m)
+      m when is_map(m) -> Gamend.Parse.string_keys(m)
       other -> other
-    end)
-  end
-
-  defp stringify_keys(map) when is_map(map) do
-    Map.new(map, fn
-      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-      {k, v} -> {k, v}
     end)
   end
 
@@ -955,6 +1041,9 @@ defmodule Gamend.Hooks do
       _ when name == :matchmaking_form_matches and arity == 2 ->
         run_matchmaking_form_matches(exporting_mods, args, opts, timeout)
 
+      _ when name == :validate_username and arity == 1 ->
+        run_validate_username(exporting_mods, args, opts, timeout)
+
       [first_mod | rest] ->
         first_res = safe_apply_raw(first_mod, name, args, opts, timeout)
 
@@ -993,6 +1082,28 @@ defmodule Gamend.Hooks do
             "Hooks.matchmaking_form_matches ignored mod=#{inspect(mod)}: #{inspect(other)}"
           )
 
+          {:cont, acc}
+      end
+    end)
+  end
+
+  # `validate_username` answers for one handle; `:default` means "I abstain".
+  # A hook that fails is logged and abstains: a plugin bug must never lock a
+  # player out of registration.
+  defp run_validate_username(mods, args, opts, timeout) do
+    Enum.reduce_while(mods, {:ok, :default}, fn mod, acc ->
+      case safe_apply_raw(mod, :validate_username, args, opts, timeout) do
+        {:ok, :ok} ->
+          {:halt, {:ok, :ok}}
+
+        {:ok, {:error, message}} when is_binary(message) or is_atom(message) ->
+          {:halt, {:ok, {:error, message}}}
+
+        {:ok, :default} ->
+          {:cont, acc}
+
+        other ->
+          Logger.warning("Hooks.validate_username ignored mod=#{inspect(mod)}: #{inspect(other)}")
           {:cont, acc}
       end
     end)
@@ -1294,7 +1405,8 @@ defmodule Gamend.Hooks do
 
         # Group functions by name -> arities and then filter out the excluded set
         func_map =
-          mod.__info__(:functions)
+          mod
+          |> public_functions()
           |> Enum.group_by(fn {name, _arity} -> name end, fn {_name, arity} -> arity end)
           |> Enum.reject(fn {name, _arities} -> MapSet.member?(excluded, name) end)
 
@@ -1321,6 +1433,18 @@ defmodule Gamend.Hooks do
 
       {:error, _} ->
         []
+    end
+  end
+
+  # `__info__/1` exists only on Elixir modules, so a plugin built from Gleam,
+  # LFE or Erlang crashed `GET /api/v1/hooks` (the RPC path, `PluginManager`,
+  # already knew). `module_info/1` is on every BEAM module; it also lists
+  # itself, which is no hook.
+  defp public_functions(mod) do
+    if function_exported?(mod, :__info__, 1) do
+      mod.__info__(:functions)
+    else
+      Enum.reject(mod.module_info(:exports), fn {name, _arity} -> name == :module_info end)
     end
   end
 
@@ -1405,13 +1529,10 @@ defmodule Gamend.Hooks do
   #
   # Outside a transaction the generous budget stays: a hook doing real work on
   # its own time blocks nothing but its own request.
-  defp default_hook_timeout do
-    if Gamend.Repo.in_transaction?() do
-      Application.get_env(:gamend_core, :hooks_call_timeout_in_transaction, 5_000)
-    else
-      Application.get_env(:gamend_core, :hooks_call_timeout, 60_000)
-    end
-  end
+  #
+  # Both budgets are settings (`GAMEND_HOOKS_CALL_TIMEOUT_MS` and
+  # `GAMEND_HOOKS_CALL_TIMEOUT_IN_TRANSACTION_MS`).
+  defp default_hook_timeout, do: PluginManager.call_timeout_ms()
 end
 
 defmodule Gamend.Hooks.Default do
@@ -1457,6 +1578,9 @@ defmodule Gamend.Hooks.Default do
 
   @impl true
   def before_user_update(_user, attrs), do: {:ok, attrs}
+
+  @impl true
+  def validate_username(_username), do: :default
 
   @impl true
   def before_lobby_create(attrs), do: {:ok, attrs}
@@ -1721,32 +1845,49 @@ defmodule Gamend.Hooks.Default do
   @impl true
   def on_custom_hook(_hook, _args), do: {:error, :not_implemented}
 
+  # Optimistic, so the plugins' `before_user_update` hook (up to its timeout)
+  # runs outside the lock: read, merge and ask the hook unlocked, then write
+  # under the lock only if the metadata is still what the merge started from.
+  # A concurrent change starts it over; the lock guards only the write.
+  @payment_metadata_attempts 3
+
   defp update_user_payment_metadata(user_id, fun)
        when is_binary(user_id) and is_function(fun, 1) do
-    case Gamend.Lock.serialize("user_payment_metadata", user_id, fn ->
-           apply_user_payment_metadata(user_id, fun)
-         end) do
-      {:ok, :ok} -> :ok
-      {:ok, {:error, reason}} -> {:error, reason}
-      {:error, reason} -> {:error, reason}
-    end
+    update_user_payment_metadata(user_id, fun, @payment_metadata_attempts)
   end
 
   defp update_user_payment_metadata(_user_id, _fun), do: :ok
 
-  defp apply_user_payment_metadata(user_id, fun) do
-    case Gamend.Accounts.get_user(user_id) do
-      %User{} = user -> update_loaded_user_payment_metadata(user, fun)
-      nil -> {:error, :user_not_found}
+  defp update_user_payment_metadata(user_id, fun, attempts) do
+    with %User{} = user <- Gamend.Repo.get(User, user_id) || {:error, :user_not_found},
+         {:ok, attrs} <-
+           Gamend.Accounts.run_before_user_update(user, %{metadata: fun.(user.metadata)}) do
+      "user_payment_metadata"
+      |> Gamend.Lock.serialize(user_id, fn -> write_payment_metadata(user, attrs) end)
+      |> case do
+        {:ok, :stale} when attempts > 1 ->
+          update_user_payment_metadata(user_id, fun, attempts - 1)
+
+        {:ok, :stale} ->
+          {:error, :conflict}
+
+        {:ok, {:ok, _user}} ->
+          :ok
+
+        {:ok, {:error, reason}} ->
+          {:error, reason}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
-  defp update_loaded_user_payment_metadata(%User{} = user, fun) do
-    metadata = fun.(user.metadata)
-
-    case Gamend.Accounts.update_user(user, %{metadata: metadata}) do
-      {:ok, _user} -> :ok
-      {:error, reason} -> {:error, reason}
+  defp write_payment_metadata(%User{id: id, metadata: read}, attrs) do
+    case Gamend.Repo.get(User, id) do
+      %User{metadata: ^read} = current -> Gamend.Accounts.apply_user_update(current, attrs)
+      %User{} -> :stale
+      nil -> {:error, :user_not_found}
     end
   end
 

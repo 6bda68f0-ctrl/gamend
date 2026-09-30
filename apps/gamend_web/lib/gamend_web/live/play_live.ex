@@ -25,9 +25,14 @@ defmodule GamendWeb.PlayLive do
 
   alias Gamend.Accounts.Scope
   alias GamendWeb.Auth.Guardian
+  alias GamendWeb.Plugs.FeatureGate
 
   @impl true
   def mount(_params, _session, socket) do
+    unless FeatureGate.enabled?(:play) do
+      raise GamendWeb.NotFoundError
+    end
+
     {:ok, assign(socket, token_data: build_token_data(Scope.user(socket.assigns.current_scope)))}
   end
 
@@ -59,6 +64,7 @@ defmodule GamendWeb.PlayLive do
               boots a second WASM instance. See the moduledoc. --%>
         <iframe
           id="game-frame"
+          title={gettext("Game")}
           src="/game/index.html"
           class="w-full h-full border-0"
           allow="autoplay; fullscreen"
@@ -80,7 +86,7 @@ defmodule GamendWeb.PlayLive do
     with {:ok, access_token, _claims} <-
            Guardian.encode_and_sign(user, %{}, token_type: "access"),
          {:ok, refresh_token, _claims} <-
-           Guardian.encode_and_sign(user, %{}, token_type: "refresh", ttl: {30, :days}) do
+           Guardian.encode_and_sign(user, %{}, token_type: "refresh") do
       %{access_token: access_token, refresh_token: refresh_token}
     else
       _error -> %{}

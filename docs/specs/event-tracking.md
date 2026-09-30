@@ -94,10 +94,12 @@ toggle (default on) so a host can disable capture entirely.
 ## "Update everywhere" — file list
 
 - **README** Features: Event tracking. **CHANGELOG** `[added]` Event-tracking API.
-- **.env.example** — `EVENT_TRACKING_ENABLED`, `LIMIT_*` caps, retention days.
-- **host_public_docs/** — new Event-tracking page (ingest shape, batching,
-  server-enrichment, retention, "graduate to ClickHouse later"); Data Schema
-  gains `events`.
+- **.env.example** — regenerate (`mix gamend.settings.env_example`) for the enable
+  toggle, `GAMEND_LIMITS_*` caps and `GAMEND_RETENTION_*` days (names derive from the
+  `Gamend.Settings.Provider` declarations).
+- **Guide** — new markdown page in `priv/docs/60-operations/` (ingest shape,
+  batching, server-enrichment, retention, "graduate to ClickHouse later");
+  `priv/docs/10-setup/40-data-schema.md` gains `events`.
 - **api_spec.ex** — feature list + the ingest endpoints.
 - **SDK** — `Events` stub (`track`, `flush`) + struct; a client-side batching
   helper is a nice-to-have; `@sdk_modules`, `gen.sdk`; hook mirrored.

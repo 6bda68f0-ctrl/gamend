@@ -35,7 +35,7 @@ own its own supervision tree — without forking the server.
 ## Features worth stating precisely
 
 - **Auth** — email/password, magic link, OAuth (Discord, Google, Apple,
-  Facebook, Steam), JWT API tokens.
+  Facebook, GitHub, Steam), JWT API tokens.
 - **Realtime social** — lobbies (host-managed, passworded, hidden), groups,
   parties (2–10), friends, chat with read cursors, typed notifications.
 - **Push** — FCM and APNs-direct, routed per device token, so notifications

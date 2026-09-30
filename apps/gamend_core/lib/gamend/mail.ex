@@ -37,6 +37,7 @@ defmodule Gamend.Mail do
   setting(:smtp_ssl, :boolean, default: true)
 
   setting(:smtp_tls, :atom,
+    values: [:never, :if_available, :always],
     default: :never,
     doc: "STARTTLS policy: never | if_available | always."
   )
@@ -45,6 +46,13 @@ defmodule Gamend.Mail do
 
   # Providers reject or spam-file mail from an unverified sender domain, so
   # these matter more than they look.
+  setting(:send_timeout_ms, :integer,
+    default: 30_000,
+    doc:
+      "Longest one email send may take before it is abandoned. gen_smtp itself waits " <>
+        "up to 20 minutes for each reply from the relay."
+  )
+
   setting(:smtp_from_name, :string, default: "Gamend")
   setting(:smtp_from_email, :string)
 end

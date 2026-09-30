@@ -34,10 +34,10 @@ defmodule GamendWeb.OAuthProviderToggleTest do
       assert Providers.enabled() == []
     end
 
-    test "true once the presence key is set" do
-      configure(discord_client_id: "id", steam_api_key: "key")
+    test "true once the presence key is set, in display order" do
+      configure(discord_client_id: "id", github_client_id: "id", steam_api_key: "key")
 
-      assert Providers.enabled() == [:discord, :steam]
+      assert Providers.enabled() == [:discord, :github, :steam]
     end
 
     test "an explicit disable wins over credentials" do
@@ -60,6 +60,17 @@ defmodule GamendWeb.OAuthProviderToggleTest do
       assert html =~ "/auth/discord"
       assert html =~ "/auth/google"
       refute html =~ "/auth/steam"
+    end
+
+    test "name the provider, so the row is not one word repeated", %{conn: conn} do
+      configure(discord_client_id: "id", google_client_id: "id")
+
+      {:ok, _lv, html} = live(conn, ~p"/users/log_in")
+      assert html =~ "Log in with Discord"
+      assert html =~ "Log in with Google"
+
+      {:ok, _lv, html} = live(conn, ~p"/users/register")
+      assert html =~ "Register with Discord"
     end
 
     test "no providers, no divider", %{conn: conn} do

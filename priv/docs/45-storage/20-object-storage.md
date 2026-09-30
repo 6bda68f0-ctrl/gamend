@@ -46,14 +46,14 @@ The object key is server-chosen (`<namespace>/<owner_id>/<random><ext>` via `Sto
 The backends give different guarantees at upload time, so the checks are split:
 
 - **At ticket time** (both backends): the declared content type must be in the allow-list: `image/png`, `image/jpeg`, `image/webp`, `image/gif` by default.
-- **At upload time** (local only): the size cap, the per-owner quota, and magic-byte sniffing all run, because the bytes pass through `PUT /storage/upload`. On the local backend the key also travels inside a signed token, never the query string.
+- **At upload time** (local only): the size cap, the per-owner quota, and magic-byte sniffing all run, because the bytes pass through `PUT /api/v1/storage/upload`. On the local backend the key also travels inside a signed token, never the query string.
 - **At confirm time** (both backends): size and magic bytes are re-checked against the *stored* object, and a failing object is deleted. On S3 a presigned PUT goes straight to the bucket, so confirm is the only point at which the server sees the object at all, so nothing may persist an object URL without going through it.
 
 Two limits bound the whole surface: `GAMEND_LIMITS_MAX_UPLOAD_BYTES` (5 MiB per object) and `GAMEND_LIMITS_MAX_UPLOAD_BYTES_PER_OWNER` (50 MiB per owner prefix, the cap on orphans left by tickets a client requests but never confirms).
 
 ## Serving
 
-On the local backend, objects are served by `GET /storage/*key` from the app itself; on S3 the object URL points at the bucket (or at `GAMEND_STORAGE_PUBLIC_URL` when set) and that route is unused. Cache policy is keyed by prefix: `avatars/` and `icons/` are immutable for a year, because every change mints a new key and makes their URL content-unique. Everything else revalidates via ETag. The serve route labels only real image bytes as images; any other stored type comes back as an opaque download, never rendered from the app's origin.
+On the local backend, objects are served by `GET /storage/*key` from the app itself. On S3 with `GAMEND_STORAGE_PUBLIC_URL` set, the object URL points there. On S3 without it the bucket is private: the stored URL is `/storage/<key>`, which redirects to a link signed for `GAMEND_STORAGE_SIGNED_URL_SECONDS` (default `3600`), so a URL saved as a player's avatar keeps working after any one signed link expires. Upload tickets last `GAMEND_STORAGE_UPLOAD_TTL_SECONDS` (default `600`) on both backends, and `expires_in` on the ticket says so. The route serves only the key prefixes in `GAMEND_STORAGE_PUBLIC_PREFIXES` (default `avatars/,icons/`); every other key is reached through the admin API. Add a prefix only for keys as random as an avatar's, never for hand-named ones. Cache policy is keyed by prefix: `avatars/` and `icons/` are immutable for a year, because every change mints a new key and makes their URL content-unique. Everything else revalidates via ETag. The serve route labels only real image bytes as images; any other stored type comes back as an opaque download, never rendered from the app's origin.
 
 ## Server scripting
 
@@ -61,7 +61,8 @@ On the local backend, objects are served by `GET /storage/*key` from the app its
 key = Gamend.Storage.build_key("avatars", user.id, "me.png")
 {:ok, ticket} = Gamend.Storage.presigned_upload(key, content_type: "image/png")
 
-Gamend.Storage.url(key)                       # public or signed, backend-dependent
+Gamend.Storage.url(key)                       # stable URL, safe to store
+Gamend.Storage.url(key, signed: true)         # short-lived signed link (private S3); never store it
 {:ok, data} = Gamend.Storage.get(key)
 {:ok, %{size: _, content_type: _}} = Gamend.Storage.stat(key)
 :ok = Gamend.Storage.delete(key)
@@ -76,7 +77,7 @@ Gamend.Storage.list_objects(prefix: "icons/", offset: 0, limit: 50)
 ## Operations
 
 - **Admin → Storage** (`/admin/storage`): usage summary (object count and bytes), a paginated object list filterable by key prefix with preview and per-object delete, and a direct upload. Backend-agnostic: the page works the same over local disk and S3.
-- The admin HTTP API mirrors it: `GET` / `DELETE /api/v1/admin/storage` and `PUT` / `GET /api/v1/admin/storage/object`.
+- The admin HTTP API mirrors it: `GET` / `DELETE /api/v1/admin/storage` (a page of objects), `GET /api/v1/admin/storage/usage` (count and bytes under a `prefix`), and `PUT` / `GET /api/v1/admin/storage/object`.
 - Stored avatars whose owner no longer exists are swept automatically; see [Data Retention](/docs/data-retention).
 
 ## Reference

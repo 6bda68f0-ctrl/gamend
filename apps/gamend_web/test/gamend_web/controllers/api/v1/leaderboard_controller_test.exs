@@ -85,7 +85,7 @@ defmodule GamendWeb.Api.V1.LeaderboardControllerTest do
 
     test "returns 404 for non-existent leaderboard", %{conn: conn} do
       conn = get(conn, "/api/v1/leaderboards/00000000-0000-0000-0000-000000000000")
-      assert json_response(conn, 404)
+      assert json_response(conn, 404)["error"] == "not_found"
     end
   end
 
@@ -211,7 +211,7 @@ defmodule GamendWeb.Api.V1.LeaderboardControllerTest do
 
     test "returns 404 for non-existent leaderboard", %{conn: conn} do
       conn = get(conn, "/api/v1/leaderboards/00000000-0000-0000-0000-000000000000/records")
-      assert json_response(conn, 404)
+      assert json_response(conn, 404)["error"] == "not_found"
     end
   end
 
@@ -237,6 +237,12 @@ defmodule GamendWeb.Api.V1.LeaderboardControllerTest do
 
       # Should include the target user
       assert Enum.any?(resp["data"], fn r -> r["user_id"] == target_user.id end)
+
+      # the window is one complete page
+      assert resp["meta"]["page"] == 1
+      assert resp["meta"]["count"] == length(resp["data"])
+      assert resp["meta"]["total_count"] == length(resp["data"])
+      assert resp["meta"]["has_more"] == false
     end
 
     test "respects limit parameter", %{conn: conn, leaderboard: lb, users: users} do
@@ -258,7 +264,7 @@ defmodule GamendWeb.Api.V1.LeaderboardControllerTest do
           "/api/v1/leaderboards/00000000-0000-0000-0000-000000000000/records/around/00000000-0000-0000-0000-000000000000"
         )
 
-      assert json_response(conn, 404)
+      assert json_response(conn, 404)["error"] == "not_found"
     end
 
     test "returns empty for user without record", %{conn: conn, leaderboard: lb} do
@@ -321,7 +327,7 @@ defmodule GamendWeb.Api.V1.LeaderboardControllerTest do
         |> get("/api/v1/leaderboards/#{lb.id}/records/me")
 
       resp = json_response(conn, 404)
-      assert resp["error"] == "No record found for this user"
+      assert resp["error"] == "record_not_found"
     end
 
     test "returns 404 for non-existent leaderboard", %{conn: conn} do
@@ -333,7 +339,7 @@ defmodule GamendWeb.Api.V1.LeaderboardControllerTest do
         |> put_req_header("authorization", "Bearer " <> token)
         |> get("/api/v1/leaderboards/00000000-0000-0000-0000-000000000000/records/me")
 
-      assert json_response(conn, 404)
+      assert json_response(conn, 404)["error"] == "not_found"
     end
   end
 
@@ -371,7 +377,7 @@ defmodule GamendWeb.Api.V1.LeaderboardControllerTest do
 
     test "returns 400 when slugs param is missing", %{conn: conn} do
       conn = post(conn, "/api/v1/leaderboards/resolve", %{})
-      assert json_response(conn, 400)["error"]
+      assert json_response(conn, 400)["error"] == "missing_param"
     end
 
     test "includes all leaderboard fields in response", %{conn: conn} do

@@ -6,7 +6,7 @@ defmodule GamendWeb.SessionControllerApiTest do
       conn = post(conn, "/api/v1/refresh", %{})
 
       assert conn.status == 400
-      assert json_response(conn, 400)["error"] == "refresh_token is required"
+      assert json_response(conn, 400)["error"] == "missing_param"
     end
 
     test "returns 401 when refresh_token invalid", %{conn: conn} do
@@ -14,10 +14,7 @@ defmodule GamendWeb.SessionControllerApiTest do
 
       assert conn.status == 401
 
-      assert json_response(conn, 401)["error"] in [
-               "Invalid or expired refresh token",
-               "Invalid refresh token"
-             ]
+      assert json_response(conn, 401)["error"] == "invalid_refresh_token"
     end
 
     test "refresh works without Authorization header (happy path)", %{conn: conn} do

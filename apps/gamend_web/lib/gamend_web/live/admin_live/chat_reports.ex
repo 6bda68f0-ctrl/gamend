@@ -12,6 +12,7 @@ defmodule GamendWeb.AdminLive.ChatReports do
   alias Gamend.Chat.Moderation.Notices
   alias Gamend.Chat.Mute
   alias Gamend.Chat.Report
+  alias GamendWeb.LiveHelpers
 
   @form_keys ~w(duration scope scope_ref_id reason message notify_user notify_reporter
                 reporter_message)
@@ -59,19 +60,14 @@ defmodule GamendWeb.AdminLive.ChatReports do
     {:noreply, socket |> assign(:user_filter, id) |> assign(:page, 1) |> reload()}
   end
 
-  def handle_event("prev_page", _params, socket) do
-    {:noreply, socket |> assign(:page, max(socket.assigns.page - 1, 1)) |> reload()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload()}
 
-  def handle_event("next_page", _params, socket) do
-    page = min(socket.assigns.page + 1, max(socket.assigns.total_pages, 1))
-    {:noreply, socket |> assign(:page, page) |> reload()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload()}
 
-  def handle_event("page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket |> assign(:page_size, String.to_integer(size)) |> assign(:page, 1) |> reload()}
-  end
+  def handle_event("page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload()}
 
   def handle_event("refresh", _params, socket), do: {:noreply, reload(socket)}
 
@@ -179,7 +175,7 @@ defmodule GamendWeb.AdminLive.ChatReports do
 
   defp apply_action(socket, "mute", report, form) do
     scope = form["scope"] || "global"
-    scope_ref_id = presence(String.trim(form["scope_ref_id"] || ""))
+    scope_ref_id = Gamend.Parse.blank_to_nil(String.trim(form["scope_ref_id"] || ""))
 
     if scope != "global" and is_nil(scope_ref_id) do
       assign(socket, :form_error, gettext("A scoped mute needs the lobby, group or party id."))
@@ -191,7 +187,7 @@ defmodule GamendWeb.AdminLive.ChatReports do
   defp mute(socket, report, form, scope, scope_ref_id) do
     attrs = %{
       "expires_at" => expires_at(form["duration"]),
-      "reason" => presence(String.trim(form["reason"] || "")),
+      "reason" => Gamend.Parse.blank_to_nil(String.trim(form["reason"] || "")),
       "muted_by" => admin_id(socket)
     }
 
@@ -250,7 +246,7 @@ defmodule GamendWeb.AdminLive.ChatReports do
     :ok
   end
 
-  defp notice(value, default), do: presence(String.trim(value || "")) || default
+  defp notice(value, default), do: Gamend.Parse.blank_to_nil(String.trim(value || "")) || default
 
   # ── form ──────────────────────────────────────────────────────────────────
 
@@ -304,22 +300,12 @@ defmodule GamendWeb.AdminLive.ChatReports do
 
   defp from_now(seconds), do: DateTime.add(DateTime.utc_now(:second), seconds, :second)
 
-  defp duration_options do
-    [
-      {"10m", gettext("10 minutes")},
-      {"1h", gettext("1 hour")},
-      {"24h", gettext("24 hours")},
-      {"7d", gettext("7 days")},
-      {"permanent", gettext("Permanent")}
-    ]
-  end
-
   # ── data ──────────────────────────────────────────────────────────────────
 
   defp reload(socket) do
     filters = %{
-      "status" => presence(socket.assigns.status_filter),
-      "reported_user_id" => presence(socket.assigns.user_filter)
+      "status" => Gamend.Parse.blank_to_nil(socket.assigns.status_filter),
+      "reported_user_id" => Gamend.Parse.blank_to_nil(socket.assigns.user_filter)
     }
 
     reports =
@@ -333,7 +319,7 @@ defmodule GamendWeb.AdminLive.ChatReports do
     socket
     |> assign(:reports, reports)
     |> assign(:count, total)
-    |> assign(:total_pages, ceil_div(total, socket.assigns.page_size))
+    |> assign(:total_pages, LiveHelpers.total_pages(total, socket.assigns.page_size))
   end
 
   # The message row is gone the moment it is deleted, and `message_id` is
@@ -351,12 +337,6 @@ defmodule GamendWeb.AdminLive.ChatReports do
       _other -> default
     end
   end
-
-  defp presence(""), do: nil
-  defp presence(value), do: value
-
-  defp ceil_div(_num, 0), do: 0
-  defp ceil_div(num, den), do: div(num + den - 1, den)
 
   defp reporter_name(%Report{reporter_id: nil}), do: gettext("Filter")
   defp reporter_name(%Report{reporter: reporter}), do: user_display(reporter)
@@ -418,7 +398,7 @@ defmodule GamendWeb.AdminLive.ChatReports do
               type="text"
               name="reported_user_id"
               value={@user_filter}
-              placeholder={gettext("Filter by reported user id")}
+              placeholder={gettext("Filter by reported user ID")}
               phx-debounce="300"
               class="input input-sm w-80 font-mono"
             />
@@ -512,7 +492,7 @@ defmodule GamendWeb.AdminLive.ChatReports do
                         phx-value-id={report.id}
                         class="btn btn-outline btn-warning btn-xs"
                       >
-                        {gettext("Mute user")}
+                        {gettext("Mute player")}
                       </button>
                     </div>
                   </td>
@@ -558,7 +538,7 @@ defmodule GamendWeb.AdminLive.ChatReports do
                 <label class="label text-xs">{gettext("Duration")}</label>
                 <select name="duration" class="select select-bordered select-sm">
                   <option
-                    :for={{value, label} <- duration_options()}
+                    :for={{value, label} <- GamendWeb.AdminLive.Shared.duration_options()}
                     value={value}
                     selected={@form["duration"] == value}
                   >

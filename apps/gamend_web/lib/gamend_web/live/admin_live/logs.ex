@@ -25,6 +25,7 @@ defmodule GamendWeb.AdminLive.Logs do
 
   alias Gamend.ClientLogs
   alias GamendWeb.AdminLogBuffer
+  alias GamendWeb.LiveHelpers
 
   @refresh_interval 3_000
   @page_size 200
@@ -37,16 +38,18 @@ defmodule GamendWeb.AdminLive.Logs do
       <div class="space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div class="flex items-center gap-3">
-            <.link navigate={~p"/admin"} class="btn btn-outline btn-sm">&larr; Admin</.link>
+            <.link navigate={~p"/admin"} class="btn btn-outline btn-sm">&larr; Back to Admin</.link>
             <h1 class="text-xl font-bold">Logs</h1>
           </div>
 
           <div class="flex items-center gap-2 text-xs text-base-content/70">
-            <span>Buffer: {@total_buffered} entries</span>
+            <span>
+              Buffer: {ngettext("%{count} entry", "%{count} entries", @total_buffered)}
+            </span>
             <span>&middot;</span>
             <span>{@source_counts.client} from clients</span>
-            <span :if={@level_counts[:error]} class="text-error font-semibold">
-              &middot; {@level_counts[:error]} errors
+            <span :if={@buffer_level_counts[:error]} class="text-error font-semibold">
+              &middot; {ngettext("%{count} error", "%{count} errors", @buffer_level_counts[:error])}
             </span>
           </div>
         </div>
@@ -72,8 +75,10 @@ defmodule GamendWeb.AdminLive.Logs do
           <div>
             <span class="font-semibold">Client entries are being discarded.</span>
             Collection asks for <span class="font-mono">{@policy.level}</span>
-            but this server's Logger level is <span class="font-mono">{@logger_level}</span>, which drops everything below <span class="font-mono">warn</span>. Lower the Logger level, or raise the client
-            capture level, or expect to see only warnings and errors.
+            but this server's Logger level is <span class="font-mono">{@logger_level}</span>, which drops everything below it. Lower the Logger level, or raise the client
+            capture level, or expect to see only entries at
+            <span class="font-mono">{@logger_level}</span>
+            and above.
           </div>
         </div>
 
@@ -112,7 +117,7 @@ defmodule GamendWeb.AdminLive.Logs do
           <span :if={level != "all"} class="ml-1 opacity-70">
             ({Map.get(@level_counts, String.to_existing_atom(level), 0)})
           </span>
-          <span :if={level == "all"} class="ml-1 opacity-70">({@total_buffered})</span>
+          <span :if={level == "all"} class="ml-1 opacity-70">({@facet_total})</span>
         </button>
       </div>
 
@@ -142,7 +147,7 @@ defmodule GamendWeb.AdminLive.Logs do
           id="log-module-filter"
           name="module"
           value={@module_filter}
-          placeholder="Module (eg Gamend.Hooks)"
+          placeholder="Module (e.g. Gamend.Hooks)"
           class="input input-sm"
           phx-debounce="300"
         />
@@ -233,7 +238,15 @@ defmodule GamendWeb.AdminLive.Logs do
       </div>
 
       <div class="flex items-center justify-between text-xs text-base-content/70">
-        <span>Showing {length(@logs)} of {@total_buffered} buffered entries</span>
+        <%!-- Two numbers, because they answer two different questions: how much
+              the filters match, and how much is in the buffer behind them. One
+              number here read as "the buffer only has one error in it". --%>
+        <span>
+          Showing {length(@logs)} of {@matching_total} matching
+          <span :if={@matching_total != @total_buffered} class="opacity-70">
+            ({@total_buffered} buffered)
+          </span>
+        </span>
         <span>Errors in last hour: {@recent_errors}</span>
       </div>
     </div>
@@ -248,9 +261,9 @@ defmodule GamendWeb.AdminLive.Logs do
       <div :if={not @policy.enabled} class="alert alert-info text-sm">
         <div>
           <span class="font-semibold">Client log collection is off.</span>
-          Clients are told to send nothing. Enable it in
-          <.link navigate={~p"/admin/config"} class="link">config</.link>
-          (<span class="font-mono">client_logs.enabled</span>).
+          Clients are told to send nothing. Enable it with
+          <span class="font-mono">GAMEND_CLIENT_LOGS_ENABLED=true</span>
+          (see <.link navigate={~p"/admin/settings"} class="link">Settings</.link>) and restart.
         </div>
       </div>
 
@@ -333,7 +346,7 @@ defmodule GamendWeb.AdminLive.Logs do
               <th>Last seen</th>
               <th>Session</th>
               <th>User</th>
-              <th>Build</th>
+              <th>Platform · version</th>
               <th class="text-right">Entries</th>
               <th class="text-right">Errors</th>
               <th class="text-right">Dropped</th>
@@ -395,7 +408,7 @@ defmodule GamendWeb.AdminLive.Logs do
           <button
             phx-click="page"
             phx-value-dir="prev"
-            disabled={@session_page == 0}
+            disabled={@session_page <= 1}
             class="btn btn-ghost btn-xs"
           >
             &larr; Prev
@@ -403,7 +416,7 @@ defmodule GamendWeb.AdminLive.Logs do
           <button
             phx-click="page"
             phx-value-dir="next"
-            disabled={(@session_page + 1) * @session_page_size >= @session_total}
+            disabled={@session_page >= @session_total_pages}
             class="btn btn-ghost btn-xs"
           >
             Next &rarr;
@@ -431,7 +444,11 @@ defmodule GamendWeb.AdminLive.Logs do
               started <.timestamp at={@selected.started_at} format="full" empty="—" />
             </span>
             <span :if={@selected.dropped_count > 0} class="text-warning font-semibold">
-              {@selected.dropped_count} entries never arrived
+              {ngettext(
+                "%{count} entry never arrived",
+                "%{count} entries never arrived",
+                @selected.dropped_count
+              )}
             </span>
           </div>
         </div>
@@ -533,7 +550,8 @@ defmodule GamendWeb.AdminLive.Logs do
        selected: nil,
        selected_entries: [],
        selected_lobbies: [],
-       session_page: 0,
+       session_page: 1,
+       session_total_pages: 0,
        session_page_size: @session_page_size,
        session_filters: empty_session_filters()
      )
@@ -552,7 +570,7 @@ defmodule GamendWeb.AdminLive.Logs do
 
         {:noreply,
          socket
-         |> assign(tab: "client", session_filters: filters, session_page: 0)
+         |> assign(tab: "client", session_filters: filters, session_page: 1)
          |> load_sessions()}
 
       _ ->
@@ -644,25 +662,21 @@ defmodule GamendWeb.AdminLive.Logs do
       errors_only: Map.get(params, "errors_only") == "true"
     }
 
-    {:noreply, socket |> assign(session_filters: filters, session_page: 0) |> load_sessions()}
+    {:noreply, socket |> assign(session_filters: filters, session_page: 1) |> load_sessions()}
   end
 
   def handle_event("clear_session_filters", _params, socket) do
     {:noreply,
      socket
-     |> assign(session_filters: empty_session_filters(), session_page: 0)
+     |> assign(session_filters: empty_session_filters(), session_page: 1)
      |> load_sessions()}
   end
 
-  def handle_event("page", %{"dir" => dir}, socket) do
-    page =
-      case dir do
-        "next" -> socket.assigns.session_page + 1
-        _ -> max(socket.assigns.session_page - 1, 0)
-      end
+  def handle_event("page", %{"dir" => "next"}, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page(:session_page) |> load_sessions()}
 
-    {:noreply, socket |> assign(session_page: page) |> load_sessions()}
-  end
+  def handle_event("page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page(:session_page) |> load_sessions()}
 
   def handle_event("select_session", %{"id" => id}, socket) do
     {:noreply, select_session(socket, id)}
@@ -684,41 +698,92 @@ defmodule GamendWeb.AdminLive.Logs do
 
   # ── Loading ─────────────────────────────────────────────────────────────────
 
-  defp refresh_logs(socket) do
-    assign(socket,
-      logs:
-        AdminLogBuffer.list(
-          module: socket.assigns.module_filter,
-          level: socket.assigns.level_filter,
-          query: socket.assigns.search_query,
-          session: socket.assigns.session_filter,
-          user: socket.assigns.user_filter,
-          source: socket.assigns.source_filter,
-          limit: @page_size
-        )
-    )
+  defp filter_opts(socket) do
+    [
+      module: socket.assigns.module_filter,
+      level: socket.assigns.level_filter,
+      query: socket.assigns.search_query,
+      session: socket.assigns.session_filter,
+      user: socket.assigns.user_filter,
+      source: socket.assigns.source_filter
+    ]
   end
 
-  defp refresh_counts(socket) do
-    level_counts = safe(&AdminLogBuffer.count_by_level/0, %{})
+  defp refresh_logs(socket) do
+    socket
+    |> assign(
+      logs:
+        safe(
+          fn -> AdminLogBuffer.list(Keyword.put(filter_opts(socket), :limit, @page_size)) end,
+          []
+        )
+    )
+    |> refresh_filter_counts()
+  end
+
+  # The level chips are a filter control, so each count has to mean "how many
+  # you would see if you clicked this": every other filter applied, the level
+  # itself ignored. Counting the whole buffer instead is what let this page
+  # offer `error(7)` and then list one entry — six of those seven were client
+  # entries, and `source_filter` defaults to server-only.
+  #
+  # Recomputed with the list rather than on the counts tick, so it can never
+  # disagree with the rows underneath it.
+  defp refresh_filter_counts(socket) do
+    level_counts = safe(fn -> AdminLogBuffer.count_by_level(filter_opts(socket)) end, %{})
+    facet_total = level_counts |> Map.values() |> Enum.sum()
+
+    matching_total =
+      case level_atom(socket.assigns.level_filter) do
+        nil -> facet_total
+        level -> Map.get(level_counts, level, 0)
+      end
 
     assign(socket,
       level_counts: level_counts,
+      facet_total: facet_total,
+      matching_total: matching_total
+    )
+  end
+
+  # `nil` means "no level filter" — including a level string that names no
+  # level, which `AdminLogBuffer` also ignores rather than filtering to nothing.
+  defp level_atom(level) when level in [nil, "", "all"], do: nil
+
+  defp level_atom(level) when is_binary(level) do
+    String.to_existing_atom(level)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp level_atom(_level), do: nil
+
+  defp refresh_counts(socket) do
+    # Unfiltered, deliberately: the header line is labelled "Buffer", and a
+    # number under that label must describe the buffer and not the view.
+    buffer_level_counts = safe(&AdminLogBuffer.count_by_level/0, %{})
+
+    socket
+    |> assign(
+      buffer_level_counts: buffer_level_counts,
       source_counts: safe(&AdminLogBuffer.count_by_source/0, %{server: 0, client: 0}),
-      total_buffered: Enum.reduce(level_counts, 0, fn {_, v}, acc -> acc + v end),
+      total_buffered: buffer_level_counts |> Map.values() |> Enum.sum(),
       recent_errors: safe(fn -> AdminLogBuffer.count_recent_errors(3600) end, 0),
       policy: ClientLogs.capture_policy(),
       logger_level: Logger.level(),
       logger_blocks: ClientLogs.logger_level_blocks_collection?()
     )
+    |> refresh_filter_counts()
   end
 
   defp load_sessions(socket) do
     opts = session_opts(socket.assigns.session_filters, socket.assigns.session_page)
+    total = ClientLogs.count_sessions(Keyword.drop(opts, [:page, :page_size]))
 
     assign(socket,
       sessions: ClientLogs.list_sessions(opts),
-      session_total: ClientLogs.count_sessions(Keyword.drop(opts, [:limit, :offset]))
+      session_total: total,
+      session_total_pages: LiveHelpers.total_pages(total, @session_page_size)
     )
   end
 
@@ -738,7 +803,7 @@ defmodule GamendWeb.AdminLive.Logs do
   end
 
   defp session_opts(filters, page) do
-    [limit: @session_page_size, offset: page * @session_page_size]
+    [page: page, page_size: @session_page_size]
     |> put_unless_blank(:query, filters.query)
     |> put_unless_blank(:user_id, filters.user_id)
     |> put_unless_blank(:lobby_id, filters.lobby_id)

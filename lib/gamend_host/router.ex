@@ -35,13 +35,13 @@ defmodule GamendHost.Router do
   gamend_admin_live_routes(@require_admin_on_mount)
   gamend_authenticated_live_routes(@require_authenticated_on_mount)
 
-  # `HostPublicDocs` and `HostBlogLive` are this host's; the changelog and
-  # roadmap pages are core's now — see `GamendWeb.ContentPages`.
+  # `HostPublicDocs` is this host's; the changelog, roadmap and blog pages are
+  # core's now — see `GamendWeb.ContentPages`.
   gamend_current_user_routes(@current_user_on_mount,
     docs: HostPublicDocs,
     changelog: ChangelogLive,
     roadmap: RoadmapLive,
-    blog: HostBlogLive
+    blog: BlogLive
   )
 
   gamend_oauth_routes()

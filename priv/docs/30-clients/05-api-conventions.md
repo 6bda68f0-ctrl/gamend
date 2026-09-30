@@ -55,7 +55,16 @@ var ends_at = data["ends_at"]             # null is meaningful - keep it untyped
 
 ## Response shapes
 
-Reads return the payload under `data`. Paginated lists add `meta`, always with the same six keys, and no endpoint omits any of them:
+Every JSON response is one of four shapes, and a test fails the server's build if an endpoint answers any other way:
+
+| Shape | Answers | Body |
+|---|---|---|
+| Resource | a read, or a write with something to return | `{"data": {...}}` |
+| Page | any list of records | `{"data": [...], "meta": {...}}` |
+| Done | a write with nothing to return | `{"ok": true}` |
+| Error | every 4xx and 5xx | `{"error": "code", "message": "..."}` |
+
+Nothing else appears at the top level. A write returns what it wrote: creating a lobby answers `201` with the lobby under `data`, and changing your display name answers your whole profile. A list is always a page, with the same six `meta` keys:
 
 ```json
 {"data": ["..."],
@@ -65,7 +74,7 @@ Reads return the payload under `data`. Paginated lists add `meta`, always with t
 
 `count` is how many entries this page carries; `has_more` says a next page exists. Request the window with `?page=` and `?page_size=`, which the server clamps to its configured maximum. The one variation: an endpoint returning two parallel collections (pending friend requests) puts both lists under `data.incoming` / `data.outgoing`, with one standard meta each under `meta.incoming` / `meta.outgoing`.
 
-Mutations return `data` with the affected resource, or `{"ok": true}` when there is nothing worth returning, sometimes with a detail alongside, e.g. `{"ok": true, "removed": 3}`.
+The one list that is not a page is a fixed vocabulary, such as the enabled sign-in providers: an array of codes under `data`.
 
 ## Errors
 
@@ -75,7 +84,9 @@ An error is a snake_case machine code with the matching HTTP status:
 {"error": "not_in_lobby"}
 ```
 
-Branch on the status and the `error` string. Codes like `blocked`, `not_friends` and `chat_daily_limit` are stable contract; a few responses add a human-readable `message` alongside, which is not. An unknown `/api/v1` path returns the same shape, `404` with `{"error": "not_found"}`.
+Branch on the status and the `error` string: it is always `snake_case`, and codes like `blocked`, `not_friends` and `chat_daily_limit` are stable contract. A human-readable `message` may ride along; it is not.
+
+The status follows the reason. `404` means the thing is not there, including your own current one: no party is `not_in_party`, no tournament match waiting is `no_current_match`, never a `null` under `data`. `409` means what you asked for already holds (`already_member`, `already_registered`, every `already_*`). `403` is a refusal (`full`, `registration_closed`, or `rejected` by the game's own hook, whose words are in `message`). `400` is a malformed request (`missing_param`). A rejected form answers `422` with `"error": "validation_failed"` and the per-field messages under `errors` (`409` when the clash is a uniqueness constraint, such as a taken lobby title); `errors` appears with no other code. An unknown `/api/v1` path, or any failure the server renders itself, returns the same shape: `404` with `{"error": "not_found", "message": "Not Found"}`.
 
 ## Binary uploads
 

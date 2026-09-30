@@ -41,6 +41,20 @@ defmodule Gamend.Payments do
     end
   end
 
+  @doc ~S"""
+    Counts `list_catalog/2`'s entries.
+  """
+  @spec count_catalog(String.t() | nil) :: non_neg_integer()
+  def count_catalog(_provider \\ nil) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        0
+
+      _ ->
+        raise "Gamend.Payments.count_catalog/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
   @doc false
   @spec count_entitlements(keyword()) :: non_neg_integer()
   def count_entitlements(_opts \\ []) do
@@ -113,6 +127,23 @@ defmodule Gamend.Payments do
     end
   end
 
+  @doc ~S"""
+    Counts `list_user_entitlements/2`'s entitlements; takes `:include_inactive`.
+  """
+  @spec count_user_entitlements(
+          Ecto.UUID.t(),
+          keyword()
+        ) :: non_neg_integer()
+  def count_user_entitlements(_user_id, _opts \\ []) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        0
+
+      _ ->
+        raise "Gamend.Payments.count_user_entitlements/2 is a stub - only available at runtime on Gamend"
+    end
+  end
+
   @doc false
   @spec create_product(map()) :: {:ok, Gamend.Payments.Product.t()} | {:error, Ecto.Changeset.t()}
   def create_product(_attrs) do
@@ -170,13 +201,31 @@ defmodule Gamend.Payments do
     end
   end
 
+  @doc ~S"""
+    Open Stripe's customer portal for this account: cancel, change card, download
+    invoices. `{:error, :no_stripe_customer}` when the account never paid through
+    Stripe Checkout.
+    
+  """
+  @spec create_stripe_billing_portal(Gamend.Accounts.User.t(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def create_stripe_billing_portal(_user, _return_url) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        {:ok, nil}
+
+      _ ->
+        raise "Gamend.Payments.create_stripe_billing_portal/2 is a stub - only available at runtime on Gamend"
+    end
+  end
+
   @doc false
   @spec create_stripe_checkout(Gamend.Accounts.User.t(), map()) ::
           {:ok,
            %{
              purchase: Gamend.Payments.Purchase.t(),
-             checkout_url: String.t(),
-             provider_session_id: String.t()
+             checkout_url: String.t() | nil,
+             provider_session_id: String.t() | nil
            }}
           | {:error, term()}
   def create_stripe_checkout(_user, _attrs) do
@@ -186,6 +235,22 @@ defmodule Gamend.Payments do
 
       _ ->
         raise "Gamend.Payments.create_stripe_checkout/2 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    Whether the user has EVER held `key`, active or not. What a once-per-account
+    grant (a trial) checks, since the row outlives its end.
+    
+  """
+  @spec entitlement_ever?(Ecto.UUID.t(), String.t()) :: boolean()
+  def entitlement_ever?(_user_id, _key) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        :erlang.phash2(make_ref(), 2) == 0
+
+      _ ->
+        raise "Gamend.Payments.entitlement_ever?/2 is a stub - only available at runtime on Gamend"
     end
   end
 
@@ -339,6 +404,46 @@ defmodule Gamend.Payments do
     end
   end
 
+  @doc ~S"""
+    The user's `key` row, active or not, or `nil`.
+  """
+  @spec get_user_entitlement_by_key(Ecto.UUID.t(), String.t()) ::
+          Gamend.Payments.Entitlement.t() | nil
+  def get_user_entitlement_by_key(_user_id, _key) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        nil
+
+      _ ->
+        raise "Gamend.Payments.get_user_entitlement_by_key/2 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    Grant an entitlement without a purchase: a trial, a contributor's reward,
+    a support gesture. Upserts the one `(user, key)` row.
+    
+    Never shortens what the user already has: an active row with no end (a
+    lifetime purchase) keeps no end, and an active row ending later than
+    `:expires_at` keeps its later end. A row a purchase created keeps its
+    `source_purchase_id`, so its provider sync still finds it.
+    
+    Options: `:expires_at` (a `DateTime`, `nil` for no end), `:metadata` (a map
+    merged into the row's, e.g. `%{"source" => "trial", "granted_by" => id}`).
+    
+  """
+  @spec grant_entitlement(Ecto.UUID.t(), String.t(), keyword()) ::
+          {:ok, Gamend.Payments.Entitlement.t()} | {:error, term()}
+  def grant_entitlement(_user_id, _key, _opts \\ []) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        {:ok, nil}
+
+      _ ->
+        raise "Gamend.Payments.grant_entitlement/3 is a stub - only available at runtime on Gamend"
+    end
+  end
+
   @doc false
   @spec handle_apple_webhook(binary()) :: {:ok, atom()} | {:error, term()}
   def handle_apple_webhook(_raw_body) do
@@ -435,15 +540,22 @@ defmodule Gamend.Payments do
     end
   end
 
-  @doc false
-  @spec list_catalog(String.t() | nil) :: [Gamend.Payments.ProviderProduct.t()]
-  def list_catalog(_provider \\ nil) do
+  @doc ~S"""
+    Active catalog entries, optionally for one provider. Pass `:page` and
+    `:page_size` for one page; without them, every entry.
+    
+  """
+  @spec list_catalog(
+          String.t() | nil,
+          keyword()
+        ) :: [Gamend.Payments.ProviderProduct.t()]
+  def list_catalog(_provider \\ nil, _opts \\ []) do
     case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
       :placeholder ->
         []
 
       _ ->
-        raise "Gamend.Payments.list_catalog/1 is a stub - only available at runtime on Gamend"
+        raise "Gamend.Payments.list_catalog/2 is a stub - only available at runtime on Gamend"
     end
   end
 
@@ -483,7 +595,11 @@ defmodule Gamend.Payments do
     end
   end
 
-  @doc false
+  @doc ~S"""
+    The user's entitlements, by key: active ones only unless
+    `include_inactive: true`. Pass `:page` and `:page_size` for one page.
+    
+  """
   @spec list_user_entitlements(
           Ecto.UUID.t(),
           keyword()
@@ -603,6 +719,25 @@ defmodule Gamend.Payments do
 
       _ ->
         raise "Gamend.Payments.stripe_config_status/0 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    The Stripe customer this account has paid as, or nil: the newest Stripe
+    purchase whose stored checkout session names one. Stripe creates the customer
+    at checkout (subscriptions always; one-off payments since
+    `customer_creation: "always"`), and `checkout.session.completed` stores the
+    session on the purchase.
+    
+  """
+  @spec stripe_customer_id(Gamend.Accounts.User.t()) :: String.t() | nil
+  def stripe_customer_id(_user) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        nil
+
+      _ ->
+        raise "Gamend.Payments.stripe_customer_id/1 is a stub - only available at runtime on Gamend"
     end
   end
 

@@ -7,6 +7,8 @@ defmodule GamendWeb.AdminLive.Friends do
   use GamendWeb, :live_view
 
   alias Gamend.Friends
+  alias GamendWeb.AdminLive.Shared
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -26,28 +28,18 @@ defmodule GamendWeb.AdminLive.Friends do
   def handle_event("filter", params, socket) do
     {:noreply,
      socket
-     |> assign(:status_filter, Map.get(params, "status", "all"))
-     |> assign(:user_filter, String.trim(Map.get(params, "user_id", "")))
-     |> assign(:page, 1)
+     |> Shared.put_filters(params, status_filter: {"status", "all"}, user_filter: "user_id")
      |> reload()}
   end
 
-  def handle_event("prev_page", _params, socket) do
-    {:noreply, socket |> assign(:page, max(socket.assigns.page - 1, 1)) |> reload()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload()}
 
-  def handle_event("next_page", _params, socket) do
-    page = min(socket.assigns.page + 1, max(socket.assigns.total_pages, 1))
-    {:noreply, socket |> assign(:page, page) |> reload()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload()}
 
-  def handle_event("page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:page_size, String.to_integer(size))
-     |> assign(:page, 1)
-     |> reload()}
-  end
+  def handle_event("page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload()}
 
   def handle_event("remove", %{"id" => id}, socket) do
     socket =
@@ -66,12 +58,7 @@ defmodule GamendWeb.AdminLive.Friends do
   # ── data ──────────────────────────────────────────────────────────────────
 
   defp reload(socket) do
-    filters = [
-      status: status_filter(socket.assigns.status_filter),
-      user_id: presence(socket.assigns.user_filter),
-      page: socket.assigns.page,
-      page_size: socket.assigns.page_size
-    ]
+    filters = Shared.list_opts(socket.assigns, status: :status_filter, user_id: :user_filter)
 
     friendships = Friends.list_all_friendships(filters)
     total = Friends.count_all_friendships(filters)
@@ -79,33 +66,28 @@ defmodule GamendWeb.AdminLive.Friends do
     socket
     |> assign(:friendships, friendships)
     |> assign(:count, total)
-    |> assign(:total_pages, ceil_div(total, socket.assigns.page_size))
+    |> assign(:total_pages, LiveHelpers.total_pages(total, socket.assigns.page_size))
   end
-
-  defp status_filter("all"), do: nil
-  defp status_filter(status), do: status
-
-  defp presence(""), do: nil
-  defp presence(value), do: value
-
-  defp ceil_div(_num, 0), do: 0
-  defp ceil_div(num, den), do: div(num + den - 1, den)
 
   defp user_name(nil), do: "—"
 
-  defp user_name(user) do
-    cond do
-      is_binary(user.display_name) and user.display_name != "" -> user.display_name
-      is_binary(user.username) and user.username != "" -> user.username
-      is_binary(user.email) and user.email != "" -> user.email
-      true -> user.id
-    end
-  end
+  # `display_label/1` rather than a local chain: it ends at the username, which
+  # every account has, instead of falling through to the email (leaking it into
+  # a list that does not otherwise show it) and then the raw id.
+  defp user_name(user), do: Gamend.Accounts.display_label(user)
 
   defp status_class("pending"), do: "badge-info"
   defp status_class("accepted"), do: "badge-success"
   defp status_class("rejected"), do: "badge-ghost"
   defp status_class(_status), do: "badge-ghost"
+
+  # `Friends.delete_friendship/1` also deletes an accepted pair's direct
+  # messages, which nothing can bring back.
+  defp remove_confirm("accepted"),
+    do: "Remove this friendship? Their direct-message history is deleted too."
+
+  defp remove_confirm("pending"), do: "Cancel this friend request?"
+  defp remove_confirm(_status), do: "Remove this rejected request?"
 
   # ── render ────────────────────────────────────────────────────────────────
 
@@ -144,7 +126,7 @@ defmodule GamendWeb.AdminLive.Friends do
               type="text"
               name="user_id"
               value={@user_filter}
-              placeholder="Filter by user id (either side)"
+              placeholder="Filter by user ID (either side)"
               phx-debounce="300"
               class="input input-sm w-80 font-mono"
             />
@@ -157,7 +139,7 @@ defmodule GamendWeb.AdminLive.Friends do
                   <th>Requester</th>
                   <th>Target</th>
                   <th>Status</th>
-                  <th>Since</th>
+                  <th>Requested</th>
                   <th>Updated</th>
                   <th></th>
                 </tr>
@@ -189,6 +171,7 @@ defmodule GamendWeb.AdminLive.Friends do
                     <button
                       phx-click="remove"
                       phx-value-id={friendship.id}
+                      data-confirm={remove_confirm(friendship.status)}
                       class="btn btn-outline btn-error btn-xs"
                     >
                       Remove

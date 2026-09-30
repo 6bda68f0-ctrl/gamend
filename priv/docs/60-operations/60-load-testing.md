@@ -29,15 +29,15 @@ MIX_ENV=prod GAMEND_AUTH_SECRET_KEY_BASE=$(mix phx.gen.secret) \
   GAMEND_DB_SQLITE_PATH=/tmp/bench.db \
   GAMEND_RATELIMIT_ENABLED=false \
   GAMEND_AUTH_DEVICE_AUTH_ENABLED=true \
-  GAMEND_FEATURES_LIST_LOBBIES_ENABLED=true \
-  GAMEND_FEATURES_LIST_GROUPS_ENABLED=true \
+  GAMEND_FEATURES_LIST_LOBBIES=true \
+  GAMEND_FEATURES_LIST_GROUPS=true \
   mix phx.server
 ```
 
 **2. Turn rate limiting off.** Limits are per IP: 10 auth and 240 general
 requests a minute. Every virtual user shares one IP, so a run with limits on
-measures the limiter. Confirm with the `rate_limit deny` counter on `/metrics`:
-it must stay at zero.
+measures the limiter. Confirm with the `gamend_rate_limit_denies_total` counter
+on `/metrics`: it must stay at zero.
 
 **3. Load only the stress plugin.** The example plugin writes a leaderboard
 score on *every login*; left loaded it charges your server for a sample
@@ -113,7 +113,7 @@ adds internet latency to every measurement). Plus a 10 GB volume and
 `GAMEND_AUTH_SECRET_KEY_BASE`, which is `required: :prod` with no gate, so a
 bench app missing it never becomes healthy.
 
-The matrix does not start eight machines. It resizes the same one with
+The matrix does not start nine machines. It resizes the same one with
 `fly scale vm`, one cell at a time, which is why cells run in sequence:
 
 ```bash
@@ -138,15 +138,16 @@ and a day:
 
 | profile | what runs | per cell at `SUITE_DURATION=30s` |
 |---|---|---|
-| `core` (default) | 6 scenarios, one operation each | ~3.5 min |
+| `core` (default) | 7 scenarios | ~3.5 min |
 | `suite` | all 21 isolated scenarios | ~12 min |
 | `full` | suite plus the four journeys | ~32 min |
 
-`core` is the right profile for sweeping hardware, because its six scenarios are
+`core` is the right profile for sweeping hardware, because its scenarios are
 the distinct cost classes and everything else is a combination of them: `me`
 (cached read), `hook_noop` (plugin call, no database), `kv_write`,
-`kv_write_locked`, `auth_device` (registration) and `auth_email` (bcrypt, the
-one purely-CPU path). Subtracting one from the next attributes cost. The flows
+`kv_write_locked`, `auth_device` (registration), `auth_email` (Argon2id, the
+one purely-CPU path) and `web_pages` (rendered HTML rather than API JSON, four
+page loads an iteration). Subtracting one from the next attributes cost. The flows
 tell you nothing new about a machine size, so run them on the size you intend to
 ship.
 
@@ -195,7 +196,7 @@ numbers look like a machine that got slower rather than one that died.
 
 Fly bills per second, so the cost is the wall-clock of the run rather than
 the monthly price of the sizes it walks: a five-minute cell is the monthly
-price divided by roughly 8,760. **A full eight-cell run at `PROFILE=core` is
+price divided by roughly 8,760. **A full nine-cell run at `PROFILE=core` is
 well under a dollar.** Only the adapter decides the image, so walking four
 SQLite sizes is one deploy and four resizes; the script skips the deploy when
 the image has not changed.

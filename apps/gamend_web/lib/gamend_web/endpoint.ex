@@ -1,6 +1,10 @@
 defmodule GamendWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :gamend_web
 
+  alias GamendWeb.ProjectStatic
+  alias Phoenix.Socket.Transport
+  alias Phoenix.Transports.WebSocket
+
   @session_options [
     store: :cookie,
     key: "_gamend_key",
@@ -9,24 +13,37 @@ defmodule GamendWeb.Endpoint do
     secure: Application.compile_env(:gamend_web, :session_secure, false)
   ]
 
-  # timeout: the game client runs on requestAnimationFrame, which browsers
-  # stop entirely for background tabs — heartbeats pause and the default 60s
-  # would drop every alt-tabbed player. 5 minutes keeps the TCP-alive-but-
-  # silent socket open across short tab switches; hard disconnects still
-  # terminate immediately (this only defers reaping half-open connections).
-  socket "/socket", GamendWeb.UserSocket,
-    websocket: [log: false, compress: true, max_frame_size: 131_072, timeout: 300_000],
-    longpoll: false
+  # The game socket. Its idle timeout and frame cap are settings
+  # (`GamendWeb.Realtime`), but `socket/3` fixes a transport's options when the
+  # endpoint compiles. So it is declared with no transport, which keeps Phoenix
+  # supervising it, and `game_socket/2` below serves `/socket/websocket` with
+  # options built at runtime.
+  socket "/socket", GamendWeb.UserSocket, websocket: false, longpoll: false
 
+  # `:user_agent` alongside the peer data: a page that adapts to the
+  # visitor's platform — a download page highlighting their OS — reads it in
+  # `mount/3` from the dead render and again on connect, and without it the
+  # connected mount got `nil` and the highlight dropped a moment after it
+  # appeared.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [:peer_data, session: @session_options], log: false, compress: true],
-    longpoll: [connect_info: [session: @session_options], log: false]
+    websocket: [
+      connect_info: [:peer_data, :user_agent, session: @session_options],
+      log: false,
+      compress: true
+    ],
+    longpoll: [connect_info: [:user_agent, session: @session_options], log: false]
 
+  # First, where Phoenix's own socket dispatch runs.
+  plug :game_socket
   plug GamendWeb.Plugs.AcmeChallenge
   # After AcmeChallenge so certbot's HTTP-01 fetch is answered before any
   # redirect can touch it; before everything else so a plain-HTTP request
   # costs one 301 and nothing more.
   plug GamendWeb.Plugs.ForceSSL
+  # A host app's own plugs, ahead of everything that assumes the request is
+  # for this site: a second host name the app answers must not be sent to the
+  # canonical host, given a session, or have its trailing slash taken away.
+  plug :host_plugs
   # After ForceSSL so a plain-HTTP request to an alias costs one redirect to
   # https on the canonical host rather than two hops.
   plug GamendWeb.Plugs.CanonicalHost
@@ -34,6 +51,9 @@ defmodule GamendWeb.Endpoint do
   plug GamendWeb.Plugs.SecurityHeaders
   plug GamendWeb.Plugs.WellKnown
   plug GamendWeb.Plugs.GameHeaders
+  # First of the static plugs: a project's own files (`GamendWeb.ProjectStatic`)
+  # replace the engine's under the same name.
+  plug :serve_project_static
   plug :serve_game_static
   plug :serve_host_static
   plug :serve_asset_static
@@ -77,15 +97,80 @@ defmodule GamendWeb.Endpoint do
     event_prefix: [:phoenix, :endpoint],
     log: {__MODULE__, :access_log_level, []}
 
-  plug Plug.Parsers,
-    parsers: [:urlencoded, :multipart, :json],
-    pass: ["*/*"],
-    length: 1_048_576,
-    body_reader: {GamendWeb.Plugs.RawBodyReader, :read_body, []},
-    json_decoder: Phoenix.json_library()
+  # Test-only: every documented API response is checked against its schema.
+  if Application.compile_env(:gamend_web, :response_contract, false) do
+    plug GamendWeb.ResponseContract
+  end
+
+  # Before the body is parsed: a request over its limit is refused without
+  # reading up to a megabyte of JSON or multipart first. CORS first, so a 429
+  # still carries the headers a browser needs to let a web client read it.
+  plug GamendWeb.Plugs.DynamicCors
+  plug GamendWeb.Plugs.RateLimiter
+
+  plug :parse_body
 
   plug Plug.MethodOverride
   plug Plug.Head
+
+  # What Phoenix generates for a `socket/3` websocket transport: the same
+  # config, loaded the same way, handed to the same plug. Built once per pair of
+  # values, as `socket/3` builds it once per compile.
+  defp game_socket(%Plug.Conn{path_info: ["socket", "websocket"]} = conn, _opts) do
+    conn
+    |> WebSocket.call({__MODULE__, GamendWeb.UserSocket, game_socket_opts()})
+    |> halt()
+  end
+
+  defp game_socket(conn, _opts), do: conn
+
+  defp game_socket_opts do
+    timeout = max(Gamend.Settings.get(GamendWeb.Realtime, :socket_timeout_ms), 1_000)
+    max_frame = max(Gamend.Settings.get(GamendWeb.Realtime, :socket_max_frame_bytes), 1_024)
+    key = {__MODULE__, :game_socket, timeout, max_frame}
+
+    case :persistent_term.get(key, nil) do
+      nil ->
+        opts =
+          Transport.load_config(
+            [log: false, compress: true, max_frame_size: max_frame, timeout: timeout],
+            WebSocket
+          )
+
+        :persistent_term.put(key, opts)
+        opts
+
+      opts ->
+        opts
+    end
+  end
+
+  @parsers_opts [
+    parsers: [:urlencoded, :multipart, :json],
+    pass: ["*/*"],
+    body_reader: {GamendWeb.Plugs.RawBodyReader, :read_body, []},
+    json_decoder: Phoenix.json_library()
+  ]
+
+  # The body limit is a setting (`GAMEND_HTTP_MAX_BODY_BYTES`), which a plug
+  # declared with `plug Plug.Parsers, length: ...` would fix at compile time.
+  # The parsers are built at runtime instead, once per limit.
+  defp parse_body(conn, _opts), do: Plug.Parsers.call(conn, parsers_opts())
+
+  defp parsers_opts do
+    length = GamendWeb.Http.max_body_bytes()
+    key = {__MODULE__, :parsers, length}
+
+    case :persistent_term.get(key, nil) do
+      nil ->
+        opts = Plug.Parsers.init(Keyword.put(@parsers_opts, :length, length))
+        :persistent_term.put(key, opts)
+        opts
+
+      opts ->
+        opts
+    end
+  end
 
   @compiled_session_opts Plug.Session.init(@session_options)
   plug :maybe_session
@@ -94,8 +179,10 @@ defmodule GamendWeb.Endpoint do
   defp maybe_session(conn, _opts), do: Plug.Session.call(conn, @compiled_session_opts)
 
   plug GamendWeb.Plugs.LocalePath
-  plug GamendWeb.Plugs.DynamicCors
-  plug GamendWeb.Plugs.RateLimiter
+  # After the static plugs — a file that exists is served as asked for — and
+  # before the router, so `/docs/intro/` becomes `/docs/intro` for every
+  # route rather than each page checking its own spelling.
+  plug GamendWeb.Plugs.TrailingSlash
   plug :dispatch_router
 
   @access_log_pt_key {__MODULE__, :access_log_level}
@@ -125,6 +212,42 @@ defmodule GamendWeb.Endpoint do
   # the same way and describes the site's current shape, so it belongs here too.
   @revalidating_static ~w(robots.txt llms.txt .well-known)
 
+  # The project overlay (`GamendWeb.ProjectStatic`): GAMEND_CONTENT_STATIC_DIRS,
+  # `static/` then `priv/static/` in the working directory by default. A path is served with the options the built-in
+  # file at that path would get (the game build's headers and revalidation, the
+  # crawler files' revalidation, a year for the rest), so moving a file between
+  # the engine and the project changes nothing a browser sees.
+  #
+  # On every static request, so a miss has to cost next to nothing: no overlay
+  # directory is one persistent_term read, and a first path segment the overlay
+  # may not serve (`assets`, `live`, `api`, ...) is one list lookup more.
+  defp serve_project_static(%Plug.Conn{path_info: [first | _]} = conn, _opts) do
+    with [_ | _] = dirs <- ProjectStatic.dirs(),
+         true <- first in ProjectStatic.overlay_paths() do
+      serve_project_dirs(conn, dirs, first)
+    else
+      _ -> conn
+    end
+  end
+
+  defp serve_project_static(conn, _opts), do: conn
+
+  defp serve_project_dirs(conn, dirs, first) do
+    kind =
+      cond do
+        first == "game" -> :game_static_opts
+        first in @revalidating_static -> :revalidating_static_opts
+        true -> :host_static_opts
+      end
+
+    Enum.reduce_while(dirs, conn, fn dir, conn ->
+      case Plug.Static.call(conn, configurable_static_opts(kind, dir, [first])) do
+        %{halted: true} = halted -> {:halt, halted}
+        passed -> {:cont, passed}
+      end
+    end)
+  end
+
   defp serve_host_static(conn, _opts) do
     paths = host_static_paths() -- ~w(game)
 
@@ -132,7 +255,7 @@ defmodule GamendWeb.Endpoint do
       conn,
       configurable_static_opts(
         :host_static_opts,
-        host_static_app(),
+        GamendWeb.host_app(),
         paths -- @revalidating_static
       )
     )
@@ -145,7 +268,7 @@ defmodule GamendWeb.Endpoint do
           passed,
           configurable_static_opts(
             :revalidating_static_opts,
-            host_static_app(),
+            GamendWeb.host_app(),
             paths -- (paths -- @revalidating_static)
           )
         )
@@ -155,14 +278,14 @@ defmodule GamendWeb.Endpoint do
   defp serve_game_static(conn, _opts) do
     Plug.Static.call(
       conn,
-      configurable_static_opts(:game_static_opts, host_static_app(), ~w(game))
+      configurable_static_opts(:game_static_opts, GamendWeb.host_app(), ~w(game))
     )
   end
 
   defp serve_asset_static(conn, _opts) do
     Plug.Static.call(
       conn,
-      configurable_static_opts(:asset_static_opts, asset_static_app(), ~w(assets))
+      configurable_static_opts(:asset_static_opts, GamendWeb.asset_app(), ~w(assets))
     )
   end
 
@@ -173,6 +296,35 @@ defmodule GamendWeb.Endpoint do
       conn,
       configurable_static_opts(:bundled_static_opts, :gamend_web, ~w(fonts flags))
     )
+  end
+
+  # `config :gamend_web, :host_plugs, [MyApp.GamesHost, {MyApp.Other, opts}]`.
+  # Each is `init/1`ed once per configuration and cached; the first to halt
+  # ends the request, as any plug in this pipeline would.
+  defp host_plugs(conn, _opts) do
+    Enum.reduce_while(compiled_host_plugs(), conn, fn {plug, opts}, conn ->
+      conn = plug.call(conn, opts)
+      if conn.halted, do: {:halt, conn}, else: {:cont, conn}
+    end)
+  end
+
+  defp compiled_host_plugs do
+    configured = Application.get_env(:gamend_web, :host_plugs, [])
+
+    case :persistent_term.get({__MODULE__, :host_plugs}, nil) do
+      {^configured, compiled} ->
+        compiled
+
+      _ ->
+        compiled =
+          Enum.map(configured, fn
+            {plug, opts} -> {plug, plug.init(opts)}
+            plug -> {plug, plug.init([])}
+          end)
+
+        :persistent_term.put({__MODULE__, :host_plugs}, {configured, compiled})
+        compiled
+    end
   end
 
   defp dispatch_router(conn, _opts) do
@@ -261,21 +413,7 @@ defmodule GamendWeb.Endpoint do
     )
   end
 
-  defp host_static_app do
-    Application.get_env(:gamend_web, :host_static_app, :gamend_web)
-  end
-
-  defp asset_static_app do
-    Application.get_env(:gamend_web, :asset_static_app, host_static_app())
-  end
-
-  defp host_static_paths do
-    Application.get_env(
-      :gamend_web,
-      :host_static_paths,
-      ~w(images game favicon.ico robots.txt .well-known theme.css)
-    )
-  end
+  defp host_static_paths, do: ProjectStatic.host_static_paths()
 
   defp gzip_static? do
     Application.get_env(:gamend_web, :gzip_static, false)

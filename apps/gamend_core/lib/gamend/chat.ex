@@ -40,8 +40,6 @@ defmodule Gamend.Chat do
   # Cache helpers
   # ---------------------------------------------------------------------------
 
-  @chat_cache_ttl_ms 60_000
-
   defp chat_version(chat_type, chat_ref_id) do
     Gamend.Cache.get!({:chat, :version, chat_type, chat_ref_id}) || 1
   end
@@ -110,12 +108,12 @@ defmodule Gamend.Chat do
 
   defp broadcast_chat(chat_type, chat_ref_id, sender_id, event) do
     topic = chat_topic(chat_type, chat_ref_id, sender_id)
-    Phoenix.PubSub.broadcast(Gamend.PubSub, topic, event)
+    Gamend.Broadcast.publish(topic, event)
 
     # For friend DMs, also broadcast to the recipient's user topic so the
     # UserChannel can forward the message without subscribing to every pair.
     if chat_type == "friend" do
-      Phoenix.PubSub.broadcast(Gamend.PubSub, "user:#{chat_ref_id}", event)
+      Gamend.Broadcast.publish("user:#{chat_ref_id}", event)
     end
   end
 
@@ -283,15 +281,13 @@ defmodule Gamend.Chat do
   # party at a time (`users.lobby_id`, `users.party_id`), so those consolidate
   # by type and carry the id in metadata.
   defp send_chat_notifications(message) do
-    alias Gamend.Notifications
-
     case message.chat_type do
       "friend" ->
         # Consolidated: one notification per recipient for ALL friend DMs
         # Use recipient_id as sender_id so upsert groups all friend messages together
         recipient_id = message.chat_ref_id
 
-        Notifications.create_chat_notification(recipient_id, recipient_id, %{
+        notify_chat(recipient_id, %{
           "title" => "New messages from friends",
           "content" => "",
           "metadata" => %{"type" => "chat_friend", "chat_type" => "friend"}
@@ -310,7 +306,7 @@ defmodule Gamend.Chat do
         for member_id <- member_ids, member_id != message.sender_id do
           # Consolidated: one notification per recipient per group
           # Use recipient's own ID as sender_id so upsert groups all group messages together
-          Notifications.create_chat_notification(member_id, member_id, %{
+          notify_chat(member_id, %{
             "title" => "New messages in group #{group_name}",
             "content" => "",
             "metadata" => %{
@@ -326,7 +322,7 @@ defmodule Gamend.Chat do
 
         for user <- lobby_users, user.id != message.sender_id do
           # Consolidated: one notification per recipient per lobby
-          Notifications.create_chat_notification(user.id, user.id, %{
+          notify_chat(user.id, %{
             "title" => "New messages in your lobby",
             "content" => "",
             "metadata" => %{
@@ -350,12 +346,12 @@ defmodule Gamend.Chat do
   end
 
   defp send_party_chat_notifications(message) do
-    alias Gamend.{Notifications, Parties}
+    alias Gamend.Parties
 
     members = Parties.get_party_members(message.chat_ref_id)
 
     for member <- members, member.id != message.sender_id do
-      Notifications.create_chat_notification(member.id, member.id, %{
+      notify_chat(member.id, %{
         "title" => "New messages in your party",
         "content" => "",
         "metadata" => %{
@@ -369,6 +365,20 @@ defmodule Gamend.Chat do
     error ->
       Logger.warning("Party chat notification failed: #{inspect(error)}")
       :ok
+  end
+
+  # Runs in a background task, so a rejected write has no caller to return to.
+  # Log it: an unregistered `metadata["type"]` once dropped every chat
+  # notification without a trace.
+  defp notify_chat(recipient_id, attrs) do
+    case Gamend.Notifications.create_chat_notification(recipient_id, recipient_id, attrs) do
+      {:ok, _notification} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("chat notification not delivered to #{recipient_id}: #{inspect(reason)}")
+        :ok
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -506,8 +516,11 @@ defmodule Gamend.Chat do
   """
   @spec list_messages(String.t(), Ecto.UUID.t(), keyword()) :: [Message.t()]
   def list_messages(chat_type, chat_ref_id, opts \\ []) do
-    page = Keyword.get(opts, :page, 1)
-    page_size = Keyword.get(opts, :page_size, 25)
+    # Clamped here rather than in the query: `page` and `page_size` are part of
+    # the cache key below, so an unclamped caller would mint an unbounded
+    # number of distinct entries as well as reading an unbounded number of rows.
+    page = Gamend.Limits.clamp_page(Keyword.get(opts, :page))
+    page_size = Gamend.Limits.clamp_page_size(Keyword.get(opts, :page_size))
     offset = (page - 1) * page_size
 
     do_list_messages(chat_type, chat_ref_id, page, page_size, offset)
@@ -517,15 +530,12 @@ defmodule Gamend.Chat do
               key:
                 {:chat, :list, chat_version(chat_type, chat_ref_id), chat_type, chat_ref_id, page,
                  page_size},
-              opts: [ttl: @chat_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
-  defp do_list_messages(chat_type, chat_ref_id, page, page_size, offset) do
-    _ = page
-
+  defp do_list_messages(chat_type, chat_ref_id, page, page_size, _offset) do
     base_query(chat_type, chat_ref_id)
     |> order_by([m], desc: m.inserted_at, desc: m.id)
-    |> limit(^page_size)
-    |> offset(^offset)
+    |> Gamend.Query.page(page: page, page_size: page_size)
     |> preload(:sender)
     |> Repo.all()
   end
@@ -851,7 +861,7 @@ defmodule Gamend.Chat do
   @decorate cacheable(
               key: {:chat, :message, message_row_version(), id},
               match: &(&1 != nil),
-              opts: [ttl: @chat_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def get_message(id) do
     Repo.get(Message, id)
@@ -945,15 +955,11 @@ defmodule Gamend.Chat do
   @doc "List all messages (admin). Supports filters: sender_id, chat_type, chat_ref_id, content."
   @spec list_all_messages(map(), keyword()) :: [Message.t()]
   def list_all_messages(filters \\ %{}, opts \\ []) do
-    page = Keyword.get(opts, :page, 1)
-    page_size = Keyword.get(opts, :page_size, 25)
     sort_by = Keyword.get(opts, :sort_by, nil)
-    offset = (page - 1) * page_size
 
     base_admin_query(filters)
     |> admin_sort(sort_by)
-    |> limit(^page_size)
-    |> offset(^offset)
+    |> Gamend.Query.page(opts)
     |> preload(:sender)
     |> Repo.all()
   end

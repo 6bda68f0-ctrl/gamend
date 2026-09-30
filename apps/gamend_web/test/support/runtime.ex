@@ -1,47 +1,29 @@
 defmodule GamendWeb.TestSupport.Runtime do
   @moduledoc false
 
-  alias Gamend.Chat.Moderation.Cache, as: ModerationCache
-  alias Gamend.Hooks.PluginManager
+  alias Gamend.TestSupport.Runtime, as: CoreRuntime
   alias GamendWeb.Plugs.GeoCountry
   alias GamendWeb.Plugs.IpBan
 
-  @supervisor __MODULE__.Supervisor
+  @doc "The core test runtime, plus the web app's processes."
+  def start_suite do
+    CoreRuntime.start_suite(
+      setup: &setup/0,
+      services: [
+        GamendWeb.ConnectionTracker,
+        {GamendWeb.RateLimit, clean_period: :timer.minutes(5)},
+        GamendWeb.AdminLogBuffer
+      ],
+      endpoints: maybe_endpoint_child()
+    )
+  end
 
-  def ensure_started do
+  defp setup do
     ensure_host_code_path()
     maybe_configure_host_router()
     maybe_register_content_paths()
-    ensure_schedule_table()
     IpBan.init_table()
     GeoCountry.init_table()
-    # Tables only. Moderation.Sync is deliberately absent, like IpBanSync: its
-    # boot load would run outside the sandbox. Tests that need remote-event
-    # application drive Cache.apply_remote/2 directly.
-    ModerationCache.init_table()
-
-    case Supervisor.start_link(children(), strategy: :one_for_one, name: @supervisor) do
-      {:ok, _pid} -> :ok
-      {:error, {:already_started, _pid}} -> :ok
-    end
-  end
-
-  defp children do
-    [
-      Gamend.Repo,
-      {Gamend.Cache, []},
-      Gamend.Cache.Stats,
-      {Task.Supervisor, name: Gamend.TaskSupervisor, max_children: 200},
-      {Phoenix.PubSub, name: Gamend.PubSub},
-      Gamend.Presence,
-      Gamend.Cache.Sync,
-      GamendWeb.ConnectionTracker,
-      Gamend.Accounts.PresenceWriter,
-      {GamendWeb.RateLimit, clean_period: :timer.minutes(5)},
-      GamendWeb.AdminLogBuffer,
-      PluginManager,
-      {Oban, Gamend.Jobs.oban_config()}
-    ] ++ maybe_endpoint_child()
   end
 
   defp maybe_endpoint_child do
@@ -80,11 +62,5 @@ defmodule GamendWeb.TestSupport.Runtime do
     if File.dir?(host_ebin) do
       Code.prepend_path(String.to_charlist(host_ebin))
     end
-  end
-
-  defp ensure_schedule_table do
-    # Idempotent: creates the Schedule registry + protected-callback tables if
-    # they don't exist yet.
-    Gamend.Schedule.start_link()
   end
 end

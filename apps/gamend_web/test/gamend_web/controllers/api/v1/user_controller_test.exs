@@ -61,11 +61,12 @@ defmodule GamendWeb.Api.V1.UserControllerTest do
 
     conn = get(conn, "/api/v1/users/#{u.id}")
     assert conn.status == 200
-    resp = json_response(conn, 200)
+    resp = json_response(conn, 200)["data"]
     assert resp["id"] == u.id
     refute Map.has_key?(resp, "email")
-    assert Map.has_key?(resp, "lobby_id")
-    assert resp["lobby_id"] == ""
+    # Another user's lobby and party are private: not even an empty field.
+    refute Map.has_key?(resp, "lobby_id")
+    refute Map.has_key?(resp, "party_id")
     assert resp["last_seen_at"] == "1970-01-01T00:00:00Z"
   end
 
@@ -130,9 +131,7 @@ defmodule GamendWeb.Api.V1.UserControllerTest do
       allow_keys([])
 
       resp =
-        conn
-        |> get("/api/v1/users/#{user.id}")
-        |> json_response(200)
+        conn |> get("/api/v1/users/#{user.id}") |> json_response(200) |> Map.fetch!("data")
 
       assert resp["metadata"] == %{}
     end
@@ -144,9 +143,7 @@ defmodule GamendWeb.Api.V1.UserControllerTest do
       allow_keys(["learning"])
 
       resp =
-        conn
-        |> get("/api/v1/users/#{user.id}")
-        |> json_response(200)
+        conn |> get("/api/v1/users/#{user.id}") |> json_response(200) |> Map.fetch!("data")
 
       assert resp["metadata"]["learning"]["lesson_id"] == "es_es"
       refute Map.has_key?(resp["metadata"], "map_route")

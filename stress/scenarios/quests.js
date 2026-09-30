@@ -17,7 +17,7 @@
  * marker -- `period_key` for a repeat quest is the constant `"static"`, so the
  * marker never rolls over either. A reused player therefore claims exactly once
  * and then reports events that advance nothing for an hour, which would leave
- * this scenario timing a 409 and calling it a claim.
+ * this scenario timing a 403 `not_completed` and calling it a claim.
  *
  * That hour is also why the user has to be new to the *run*, not just to the
  * iteration: device ids are derived from RUN_TAG, VU and iteration, so a second

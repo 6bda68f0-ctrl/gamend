@@ -14,8 +14,6 @@ defmodule GamendWeb.Api.V1.NotFoundController do
   use GamendWeb, :controller
 
   def not_found(conn, _params) do
-    conn
-    |> put_status(:not_found)
-    |> json(%{error: "not_found"})
+    reply_error(conn, :not_found, "not_found", "Not Found")
   end
 end

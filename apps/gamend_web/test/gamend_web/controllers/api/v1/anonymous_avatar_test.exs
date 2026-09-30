@@ -76,6 +76,7 @@ defmodule GamendWeb.Api.V1.AnonymousAvatarTest do
       anon
       |> post("/api/v1/me/avatar/upload_url", %{content_type: "image/png"})
       |> json_response(200)
+      |> Map.fetch!("data")
 
     up =
       anon
@@ -85,8 +86,11 @@ defmodule GamendWeb.Api.V1.AnonymousAvatarTest do
         @png
       )
 
-    assert json_response(up, 200)["key"] == key
-    assert json_response(post(anon, "/api/v1/me/avatar", %{key: key}), 200)["ok"]
+    assert json_response(up, 200) == %{"ok" => true}
+
+    assert json_response(post(anon, "/api/v1/me/avatar", %{key: key}), 200)["data"]["profile_url"] =~
+             key
+
     assert Accounts.get_user(user.id).profile_url =~ key
   end
 
@@ -98,6 +102,6 @@ defmodule GamendWeb.Api.V1.AnonymousAvatarTest do
       |> authed(user)
       |> post("/api/v1/me/avatar/upload_url", %{content_type: "image/png"})
 
-    assert json_response(resp, 200)["key"] =~ "avatars/#{user.id}/"
+    assert json_response(resp, 200)["data"]["key"] =~ "avatars/#{user.id}/"
   end
 end

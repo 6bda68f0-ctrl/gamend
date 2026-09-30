@@ -66,6 +66,40 @@ describe("rankEntry", () => {
     assert.ok(rankEntry(entry, "espanol") < 4)
     assert.equal(rankEntry(entry, "portugues"), 4)
   })
+
+  test("a subtitle word finds a row, below any title or keyword hit", () => {
+    const section = {
+      title: "Usernames",
+      href: "/docs/authentication#usernames",
+      subtitle: "Authentication · Handles are UTF-8 (utf8) text in one script.",
+    }
+    const byKeyword = {title: "Encodings", href: "/e", keywords: ["utf8"]}
+
+    assert.ok(rankEntry(section, "utf8") < 4)
+    assert.ok(rankEntry(section, "utf-8") < 4, "a phrase with a separator counts too")
+    assert.ok(rankEntry(section, "handl") < 4, "the start of a word counts")
+    assert.ok(rankEntry(byKeyword, "utf8") < rankEntry(section, "utf8"))
+  })
+
+  test("a subtitle matches whole words and their starts, never the middle of one", () => {
+    const entry = {title: "Lobbies", href: "/l", subtitle: "Hidden lobbies never appear in lists."}
+
+    assert.equal(rankEntry(entry, "idden"), 4)
+    assert.ok(rankEntry(entry, "hidd") < 4)
+  })
+
+  test("a subtitle is not searched for one or two letters", () => {
+    const entry = {title: "Lobbies", href: "/l", subtitle: "Hidden lobbies never appear in lists."}
+
+    assert.equal(rankEntry(entry, "hi"), 4)
+  })
+
+  test("a row ranks the same the second time, from what it remembered", () => {
+    const entry = {title: "Parties", href: "/p", keywords: ["group"], subtitle: "Invite-only crews."}
+
+    assert.equal(rankEntry(entry, "crews"), rankEntry(entry, "crews"))
+    assert.equal(rankEntry(entry, "group"), rankEntry(entry, "group"))
+  })
 })
 
 describe("searchEntries", () => {

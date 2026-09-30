@@ -27,7 +27,7 @@ defmodule GamendWeb.Api.V1.Admin.AnalyticsControllerTest do
     user = AccountsFixtures.user_fixture()
     :ok = Analytics.record_activity(user.id, DateTime.utc_now())
 
-    body = json_response(get(conn, "/api/v1/admin/analytics"), 200)
+    body = json_response(get(conn, "/api/v1/admin/analytics"), 200)["data"]
 
     assert body["day"] == Date.to_iso8601(Date.utc_today())
     assert body["dau"] >= 1
@@ -41,27 +41,33 @@ defmodule GamendWeb.Api.V1.Admin.AnalyticsControllerTest do
     {:ok, _} = Gamend.Economy.grant(user.id, "coins", 42, reason: "test_grant")
     :ok = Analytics.count("level.finished", 3)
 
-    body = json_response(get(conn, "/api/v1/admin/analytics/snapshot"), 200)
+    body = json_response(get(conn, "/api/v1/admin/analytics/snapshot"), 200)["data"]
     assert is_map(body["players"]) and is_map(body["activity"])
 
-    body = json_response(get(conn, "/api/v1/admin/analytics/economy?days=3&currency=coins"), 200)
+    body =
+      json_response(get(conn, "/api/v1/admin/analytics/economy?days=3&currency=coins"), 200)[
+        "data"
+      ]
+
     assert body["days"] == 3
     assert Enum.any?(body["totals"], &(&1["reason"] == "test_grant" and &1["granted"] == 42))
     assert Enum.all?(body["flow"], &(&1["currency"] == "coins"))
 
-    body = json_response(get(conn, "/api/v1/admin/analytics/counts?key=level.*&days=2"), 200)
+    body =
+      json_response(get(conn, "/api/v1/admin/analytics/counts?key=level.*&days=2"), 200)["data"]
+
     assert body["key"] == "level.*"
     assert Enum.any?(body["totals"], &(&1["key"] == "level.finished" and &1["total"] >= 3))
     assert body["series"]["level.finished"][Date.to_iso8601(Date.utc_today())] >= 3
   end
 
   test "daily series honours ?days and clamps garbage to the default", %{conn: conn} do
-    body = json_response(get(conn, "/api/v1/admin/analytics/daily?days=7"), 200)
+    body = json_response(get(conn, "/api/v1/admin/analytics/daily?days=7"), 200)["data"]
     assert body["days"] == 7
     assert length(body["series"]) == 7
     assert List.last(body["series"])["day"] == Date.to_iso8601(Date.utc_today())
 
-    body = json_response(get(conn, "/api/v1/admin/analytics/daily?days=9999"), 200)
+    body = json_response(get(conn, "/api/v1/admin/analytics/daily?days=9999"), 200)["data"]
     assert body["days"] == 30
   end
 end

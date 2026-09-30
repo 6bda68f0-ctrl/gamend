@@ -16,19 +16,34 @@ The plan behind it, including the machine matrix and what we expect to find, is
 
 ## Quick start (local)
 
+For **checking a change works under load** — every scenario's checks pass, no
+errors — start the server in bench mode. For **numbers you compare or publish**,
+use the `MIX_ENV=prod` server under [What a local number means](#what-a-local-number-means)
+instead: a plain `mix phx.server` measures the code reloader, not gamend.
+
 ```bash
 cd modules/plugins_examples/stress_hook && mix deps.get && mix compile && mix plugin.bundle && cd -
-GAMEND_CONTENT_PLUGINS_DIR=modules/plugins_examples GAMEND_RATELIMIT_ENABLED=false \
+GAMEND_DEV_BENCH=1 MIX_BUILD_PATH=_build/bench \
+  GAMEND_CONTENT_PLUGINS_DIR=modules/plugins_examples GAMEND_RATELIMIT_ENABLED=false \
   GAMEND_FEATURES_LIST_LOBBIES_ENABLED=true GAMEND_FEATURES_LIST_GROUPS_ENABLED=true \
   mix phx.server
 ```
 
-Then, in another shell:
+(`GAMEND_DEV_BENCH=1` switches off the code reloader, HEEx annotations and
+expensive runtime checks; its own build path avoids a `mix clean` when you
+toggle it. The `gamend-bench` launch config does the same on port 4020.)
+
+Then, in another shell — each run into its own directory, so the report shows
+that run and nothing left over from an earlier one:
 
 ```bash
-cd stress && BASE_URL=http://localhost:4000 ./suite.sh
-node report.mjs results/ --md results/report.md --page results/report.html
+cd stress && RESULTS_DIR=results/$(date +%F-%H%M) BASE_URL=http://localhost:4000 ./suite.sh
 ```
+
+To compare two builds, run each into its own `RESULTS_DIR` on a freshly migrated
+database. A database already carrying a previous run's million rows is slower on
+every read, and that difference will look like a regression in whichever build
+ran second.
 
 That runs all 19 scenarios one at a time (a few minutes at the defaults), prints
 a table, and writes the two report files described under

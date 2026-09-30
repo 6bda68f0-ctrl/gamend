@@ -20,6 +20,7 @@ defmodule GamendWeb.PageControllerTest do
     theme = %{
       "title" => "Gamend",
       "tagline" => "Game + Backend",
+      "contact_email" => "legal@example.com",
       "logo" => "/images/logo.png",
       "banner" => "/images/banner.png",
       "favicon" => "/favicon.ico",
@@ -354,6 +355,34 @@ defmodule GamendWeb.PageControllerTest do
 
     assert body =~ "Terms and Conditions"
     assert body =~ "Acceptance of Terms"
+  end
+
+  test "legal pages give the theme's contact email as a mailto link", %{conn: conn} do
+    for path <- ["/privacy", "/data_deletion", "/terms"] do
+      body = conn |> get(path) |> html_response(200)
+
+      assert body =~ ~s(href="mailto:legal@example.com"), path
+      refute body =~ "support channels", path
+    end
+  end
+
+  test "legal pages fall back to support channels without a contact email", %{conn: conn} do
+    path =
+      Path.join(System.tmp_dir!(), "theme_no_email_#{System.unique_integer([:positive])}.json")
+
+    File.write!(path, Jason.encode!(%{"title" => "Gamend"}))
+    on_exit(fn -> File.rm(path) end)
+
+    Gamend.SettingsHelpers.put(:gamend_core, Gamend.ContentSettings, :theme_config, path)
+    JSONConfig.reload()
+    Content.reload()
+
+    for path <- ["/privacy", "/data_deletion", "/terms"] do
+      body = conn |> get(path) |> html_response(200)
+
+      refute body =~ "mailto:", path
+      assert body =~ "support", path
+    end
   end
 
   test "privacy link present in layout", %{conn: conn} do

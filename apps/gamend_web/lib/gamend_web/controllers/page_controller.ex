@@ -7,26 +7,65 @@ defmodule GamendWeb.PageController do
     render_presentation_page(conn, "/", gettext("Home"))
   end
 
+  # A markdown page from the `:pages` collection, when the host registered one
+  # — `content/pages/faq.md` answering `/faq` with nothing routed — else a
+  # theme page from the JSON. A host without the collection sees no change.
   def configured_page(conn, %{"path" => path}) do
-    render_presentation_page(conn, "/" <> Enum.join(path, "/"), gettext("Page"))
+    slug = Enum.join(path, "/")
+
+    case Gamend.Content.get_doc(:pages, slug) do
+      nil -> render_presentation_page(conn, "/" <> slug, gettext("Page"))
+      page -> render_markdown_page(conn, page, slug)
+    end
+  end
+
+  defp render_markdown_page(conn, page, slug) do
+    conn
+    |> assign(:page_title, page.title)
+    |> assign(:page, page)
+    |> assign(:html, Gamend.Content.doc_html(:pages, slug))
+    |> assign(:wide, Map.get(page, :meta, %{})["layout"] == "wide")
+    |> render(:markdown_page)
   end
 
   def privacy(conn, _params) do
     conn
     |> assign(:page_title, gettext("Privacy"))
+    |> assign_contact_email()
     |> render(:privacy)
   end
 
   def data_deletion(conn, _params) do
     conn
-    |> assign(:page_title, gettext("Delete"))
+    |> assign(:page_title, gettext("Data deletion"))
+    |> assign_contact_email()
     |> render(:data_deletion)
   end
 
   def terms(conn, _params) do
     conn
     |> assign(:page_title, gettext("Terms"))
+    |> assign_contact_email()
     |> render(:terms)
+  end
+
+  # The legal pages name an address when the theme gives one (`contact_email`).
+  # Without it they fall back to "our support channels", which a store review or
+  # a GDPR request cannot act on — so a host shipping these pages should set it.
+  defp assign_contact_email(conn) do
+    locale = Gettext.get_locale(GamendWeb.Gettext)
+    theme = GamendWeb.Layouts.resolve_theme(locale, conn.assigns[:theme] || %{})
+    assign(conn, :contact_email, contact_email(theme))
+  end
+
+  defp contact_email(theme) do
+    with email when is_binary(email) <- Map.get(theme, "contact_email"),
+         email = String.trim(email),
+         true <- Regex.match?(~r/\A[^\s@]+@[^\s@]+\.[^\s@]+\z/, email) do
+      email
+    else
+      _ -> nil
+    end
   end
 
   defp render_presentation_page(conn, path, fallback_title) do

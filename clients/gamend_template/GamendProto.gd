@@ -284,6 +284,7 @@ static func _linked_providers_to_dict(lp) -> Dictionary:
 		"apple": lp.get_apple(),
 		"steam": lp.get_steam(),
 		"device": lp.get_device(),
+		"github": lp.get_github(),
 	}
 
 

@@ -33,10 +33,15 @@ defmodule Gamend.Notifications.Types do
     "party_invite_declined" => "A party invite was declined",
     "party_kicked" => "Removed from a party",
     "lobby_kicked" => "Removed from a lobby",
+    "chat_friend" => "New direct messages from friends",
+    "chat_group" => "New messages in a group chat",
+    "chat_lobby" => "New messages in your lobby chat",
+    "chat_party" => "New messages in your party chat",
     "chat_report" => "A chat report is waiting for a moderator",
     "chat_report_resolved" => "A report you filed was reviewed",
     "chat_warning" => "A moderator sent a warning",
-    "chat_mute" => "Muted in chat"
+    "chat_mute" => "Muted in chat",
+    "quest_completed" => "A quest or achievement was completed"
   }
 
   @doc "Core notification codes, mapped to their description."

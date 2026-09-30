@@ -53,7 +53,7 @@ defmodule GamendWeb.Auth.PipelineTest do
         |> put_req_header("authorization", "Bearer " <> token)
         |> get("/api/v1/me")
 
-      body = json_response(conn, 200)
+      body = json_response(conn, 200)["data"]
       assert body["id"] == user.id
       assert body["email"] == user.email
     end

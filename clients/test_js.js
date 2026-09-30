@@ -37,7 +37,7 @@ async function runOAuthFlow(provider) {
 
     // Step 1: Get the authorization URL with session_id
     console.log(`Step 1: Requesting ${provider} authorization URL...`);
-    const authResponse = await authApi.oauthRequest(provider);
+    const authResponse = (await authApi.oauthRequest(provider)).data;
     const authUrl = authResponse.authorization_url;
     const sessionId = authResponse.session_id;
 
@@ -63,7 +63,7 @@ async function runOAuthFlow(provider) {
       try {
         // Poll the session status
         const statusResponse = await authApi.oauthSessionStatus(sessionId);
-        sessionData = statusResponse;
+        sessionData = statusResponse.data;
 
         console.log(`Polling session status... (${attempts + 1}/${maxAttempts}) - Status: ${sessionData.status}`);
 
@@ -75,7 +75,7 @@ async function runOAuthFlow(provider) {
           return null;
         } else if (sessionData.status === 'conflict') {
           console.error('❌ OAuth conflict:', sessionData.message || 'Account already linked to another user');
-          return { status: 'conflict', data: sessionData.data || sessionData };
+          return { status: 'conflict', data: sessionData.result || sessionData };
         }
 
         // Wait 1 second before next poll
@@ -100,7 +100,7 @@ async function runOAuthFlow(provider) {
 
     // Extract token data from session. The server returns {status, data}
     // (preferred), but older shapes put tokens at the top level. Handle both.
-    const payload = sessionData.data || sessionData;
+    const payload = sessionData.result || sessionData;
     const tokenData = {
       accessToken: payload.access_token || payload.accessToken,
       refreshToken: payload.refresh_token || payload.refreshToken,
@@ -208,7 +208,7 @@ async function runAllTests() {
   await testWebRTCFullFlow(rtToken, rtUserId);
   console.log('');
 
-  const providers = ['steam', 'discord', 'google', 'facebook', 'apple'];
+  const providers = ['steam', 'discord', 'google', 'facebook', 'github', 'apple'];
   for (const provider of providers) {
     console.log(`\n--- Testing ${provider.toUpperCase()} ---\n`);
     const result = await runOAuthFlow(provider);
@@ -242,7 +242,7 @@ async function testLobbyAPI(apiClient) {
     // Create a lobby (authenticated user becomes host and joined automatically)
     console.log('Creating a new lobby...');
     const createRequest = { createLobbyRequest: { title: `JS test lobby ${Date.now()}`, max_users: 6 } };
-    const lobby = await lobbiesApi.createLobby(createRequest);
+    const lobby = (await lobbiesApi.createLobby(createRequest)).data;
     console.log('✅ Lobby created:', lobby);
 
     // List public lobbies (should include the newly created lobby)

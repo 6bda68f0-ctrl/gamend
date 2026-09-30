@@ -3,17 +3,25 @@ defmodule GamendWeb.Api.V1.PaymentWebhookController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.Payments
+  alias GamendWeb.Api.V1.PaymentErrors
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.PaymentWebhookReceiptResponse
 
   tags(["Payments"])
+
+  # Called by the provider, not a game client. A non-2xx answer makes it
+  # retry, which is what a `*_not_configured` 503 is for.
+  @responses [
+    ok: {"Accepted", "application/json", PaymentWebhookReceiptResponse},
+    bad_request: Schemas.error("Unverifiable or malformed event"),
+    service_unavailable: Schemas.error("The provider is not configured on this server")
+  ]
 
   operation(:stripe,
     operation_id: "payments_stripe_webhook",
     summary: "Receive Stripe webhook events",
     request_body: {"Stripe event", "application/json", %OpenApiSpex.Schema{type: :object}},
-    responses: [
-      ok: {"Accepted", "application/json", %OpenApiSpex.Schema{type: :object}},
-      bad_request: {"Invalid webhook", "application/json", %OpenApiSpex.Schema{type: :object}}
-    ]
+    responses: @responses
   )
 
   def stripe(conn, _params) do
@@ -22,12 +30,10 @@ defmodule GamendWeb.Api.V1.PaymentWebhookController do
 
     case Payments.handle_stripe_webhook(raw_body, signature) do
       {:ok, status} ->
-        json(conn, %{ok: true, status: status})
+        reply_data(conn, %{status: to_string(status)})
 
       {:error, reason} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: normalize_error(reason)})
+        PaymentErrors.reply(conn, reason)
     end
   end
 
@@ -35,10 +41,7 @@ defmodule GamendWeb.Api.V1.PaymentWebhookController do
     operation_id: "payments_google_webhook",
     summary: "Receive Google Play RTDN Pub/Sub push events",
     request_body: {"Google RTDN event", "application/json", %OpenApiSpex.Schema{type: :object}},
-    responses: [
-      ok: {"Accepted", "application/json", %OpenApiSpex.Schema{type: :object}},
-      bad_request: {"Invalid webhook", "application/json", %OpenApiSpex.Schema{type: :object}}
-    ]
+    responses: @responses
   )
 
   def google(conn, params) do
@@ -63,12 +66,10 @@ defmodule GamendWeb.Api.V1.PaymentWebhookController do
 
     case Payments.handle_google_webhook(raw_body, authorization) do
       {:ok, status} ->
-        json(conn, %{ok: true, status: status})
+        reply_data(conn, %{status: to_string(status)})
 
       {:error, reason} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: normalize_error(reason)})
+        PaymentErrors.reply(conn, reason)
     end
   end
 
@@ -76,10 +77,7 @@ defmodule GamendWeb.Api.V1.PaymentWebhookController do
     operation_id: "payments_apple_webhook",
     summary: "Receive App Store Server Notification v2 events",
     request_body: {"Apple notification", "application/json", %OpenApiSpex.Schema{type: :object}},
-    responses: [
-      ok: {"Accepted", "application/json", %OpenApiSpex.Schema{type: :object}},
-      bad_request: {"Invalid webhook", "application/json", %OpenApiSpex.Schema{type: :object}}
-    ]
+    responses: @responses
   )
 
   def apple(conn, _params) do
@@ -87,12 +85,10 @@ defmodule GamendWeb.Api.V1.PaymentWebhookController do
 
     case Payments.handle_apple_webhook(raw_body) do
       {:ok, status} ->
-        json(conn, %{ok: true, status: status})
+        reply_data(conn, %{status: to_string(status)})
 
       {:error, reason} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: normalize_error(reason)})
+        PaymentErrors.reply(conn, reason)
     end
   end
 
@@ -100,7 +96,4 @@ defmodule GamendWeb.Api.V1.PaymentWebhookController do
     do: "Bearer " <> token
 
   defp query_token(_params), do: nil
-
-  defp normalize_error(reason) when is_atom(reason), do: Atom.to_string(reason)
-  defp normalize_error(reason), do: inspect(reason)
 end

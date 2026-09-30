@@ -25,6 +25,8 @@ POST /matchmaking/tickets ──► ticket (queued)
         "match_found" pushed on each player's user channel
 ```
 
+A ticket may set its own min_players and max_players; one that leaves them out gets the server's, GAMEND_LIMITS_MATCHMAKING_DEFAULT_MIN_PLAYERS (2) and GAMEND_LIMITS_MATCHMAKING_DEFAULT_MAX_PLAYERS (5).
+
 Parameters match exactly: a ticket queued with map=dust2 never joins one with map=inferno. Skill bands, regions or modes are therefore encoded by the game client (or a server hook) as parameter values, and each distinct combination forms its own queue.
 
 Blacklists are applied while the group is being formed, not after: two players who have blocked each other are never put in the same match, and each is matched with someone else instead. A player blocked with everyone ahead of them in the queue is skipped over rather than allowed to stall the players behind them. See the Friends & Blacklist guide.
@@ -32,7 +34,10 @@ Blacklists are applied while the group is being formed, not after: two players w
 ## Client flow
 
 Queue operations are HTTP under `/api/v1/matchmaking/tickets` - see
-[/api/docs](/api/docs). The socket is only used for the result.
+[/api/docs](/api/docs). The socket is only used for the result. Joining answers
+the ticket (201); joining twice is `already_queued` (409); a party member who is
+not the leader gets `not_party_leader` (403). `GET /tickets/me` answers the
+caller's ticket, or 404 `not_queued` when there is none.
 
 After joining, keep the user channel connected and wait for `match_found` on
 `user:{user_id}`, carrying `{lobby_id, match_params}`. Disconnecting cancels
@@ -124,12 +129,12 @@ Packing is FIFO by the party's oldest ticket, anchored on the longest-waiting gr
 
 ## Leaving the queue
 
-Going offline does not immediately cost a queue position. A ticket is pruned only once its owner has been offline longer than GAMEND_LIMITS_MATCHMAKING_OFFLINE_GRACE_MS (5 minutes by default), so a brief disconnect is survivable. A player who queued over HTTP and never opened a socket has no last-seen time, so the same grace period runs from when they queued.
+Closing the user channel cancels the player's tickets at once, so a disconnect leaves the queue. The periodic sweep is the backstop for tickets nothing cancelled: it prunes a ticket once its owner has been offline longer than GAMEND_LIMITS_MATCHMAKING_OFFLINE_GRACE_MS (5 minutes by default). That covers a channel that died without closing, and a player who queued over HTTP and never opened a socket: they have no last-seen time, so the grace period runs from when they queued.
 
 ## Operations
 
 - The Admin → Matchmaking page shows live queue depths and the ticket list, with per-ticket force-cancel and a manual sweep trigger.
-- Admin HTTP mirrors of everything: GET/DELETE under /api/v1/admin/matchmaking.
+- Admin HTTP: GET /api/v1/admin/matchmaking/tickets, GET /api/v1/admin/matchmaking/stats and DELETE /api/v1/admin/matchmaking/tickets/:id. The manual sweep is on the admin page only; there is no HTTP route for it.
 - Tuning via env vars: GAMEND_LIMITS_MATCHMAKING_TICK_MS (sweep interval), GAMEND_LIMITS_MATCHMAKING_TIMEOUT_MS (wait before a below-max group forms), GAMEND_LIMITS_MATCHMAKING_OFFLINE_GRACE_MS (how long a disconnected player keeps their place), GAMEND_LIMITS_MAX_MATCHMAKING_PLAYERS, GAMEND_LIMITS_MAX_MATCHMAKING_PARAMS_SIZE.
 - Multi-instance safe: every node runs the worker, but the sweep body is serialized cluster-wide by an advisory lock, so exactly one node forms matches per tick.
 
@@ -137,7 +142,7 @@ Going offline does not immediately cost a queue position. A ticket is pruned onl
 
 A ready check asks a set of players to each answer before something proceeds. A host opens one over their lobby with POST /lobbies/ready_check and calls it off with DELETE, for host-managed lobbies only, since a hostless matchmaking lobby belongs to the server. The host is pre-marked ready: clicking the button is their answer.
 
-A player is in at most one check at a time, so answering needs no id: GET /me/ready_check returns the open one (or null) and POST /me/ready_check with {"ready": true} or false answers it. Members see each other's states; the four events ready_check_started, ready_check_updated, ready_check_passed and ready_check_failed arrive on the lobby channel.
+A player is in at most one open check per lane: the match lane (a lobby ready-up or a matchmaking accept) and the party lane (the party's ready board, opened with POST /parties/ready_check). So answering needs no id, only a scope: GET /me/ready_check returns `{"data": {"lobby": …, "party": …}}`, each the open check or null (answering a lane with no open check is 404 `no_open_check`), and POST /me/ready_check with {"ready": true} or false answers one, with `"scope": "lobby"` (the default, which also answers a matchmaking accept) or `"scope": "party"`. Members see each other's states; the four events ready_check_started, ready_check_updated, ready_check_passed and ready_check_failed arrive on the lobby channel for a lobby check, on the party channel for a party check, and on the user channel for a matchmaking accept.
 
 What core does on failure is nothing. A declined or timed-out check kicks nobody, deletes no lobby and moves no lobby state. It records who did not answer and stops there. The host can kick them with the kick they already have, or your after_ready_check_failed hook can decide. Likewise a passed check starts no match by itself: call Lobbies.transition_state/3 from after_ready_check_passed, and gate your own start in before_lobby_state_change with ReadyChecks.passed?/1.
 

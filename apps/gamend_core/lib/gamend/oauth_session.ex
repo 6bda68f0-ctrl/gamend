@@ -20,10 +20,10 @@ defmodule Gamend.OAuthSession do
 
   @typedoc "A short-lived OAuth session used for polling by SDKs."
   @type t :: %__MODULE__{
-          id: integer() | nil,
+          id: Ecto.UUID.t() | nil,
           session_id: String.t(),
-          provider: String.t(),
-          status: String.t(),
+          provider: String.t() | nil,
+          status: String.t() | nil,
           data: map()
         }
 

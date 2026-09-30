@@ -16,7 +16,13 @@ GAMEND_DB_URL="postgresql://username:password@host:port/database"
 GAMEND_DB_URL="postgresql://myuser:mypass@localhost:5432/gamend_prod"
 ```
 
-The app will automatically detect PostgreSQL when GAMEND_DB_URL is set or when GAMEND_DB_POSTGRES_HOST and GAMEND_DB_POSTGRES_USER environment variables are configured.
+At runtime the app switches its Repo configuration to PostgreSQL when GAMEND_DB_URL is set or when GAMEND_DB_POSTGRES_HOST and GAMEND_DB_POSTGRES_USER environment variables are configured. The adapter itself is a compile-time choice, though, so a production build must also be made for PostgreSQL: set `GAMEND_DB_ADAPTER=postgres` when compiling, which for Docker is the build arg:
+
+```bash
+docker build --build-arg GAMEND_DB_ADAPTER=postgres .
+```
+
+An image built without it is a SQLite image, whatever the runtime variables say.
 
 ## Individual environment variables (alternative)
 

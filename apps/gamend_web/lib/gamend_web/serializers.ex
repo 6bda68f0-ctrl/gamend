@@ -13,11 +13,20 @@ defmodule GamendWeb.Serializers do
   alias Gamend.Accounts
   alias Gamend.Accounts.User
   alias Gamend.Groups
+  alias Gamend.Leaderboards.Leaderboard
   alias Gamend.Lobbies
   alias Gamend.Lobbies.SpectatorTracker
   alias Gamend.Parties
 
-  @spec display_name(integer() | nil) :: String.t()
+  @doc """
+  The raw `display_name` column for a user id, `""` when unset or unknown.
+
+  For a wire field literally named `display_name`, which the API conventions
+  define as the person's *chosen* name, shipped alongside `username`. A client
+  wanting a label reads both. Not a label: for one, `Gamend.Accounts.display_name/1`
+  falls back to the username.
+  """
+  @spec display_name(Ecto.UUID.t() | nil) :: String.t()
   def display_name(nil), do: ""
 
   def display_name(user_id) do
@@ -108,6 +117,29 @@ defmodule GamendWeb.Serializers do
     }
   end
 
+  @doc """
+  The signed-in user as `GET /me` sends it (`GamendWeb.Schemas.CurrentUser`).
+  Every change to the caller's own account answers the same, so a client
+  never merges a partial echo into its copy.
+  """
+  @spec serialize_current_user(User.t()) :: map()
+  def serialize_current_user(%User{} = user) do
+    %{
+      id: user.id,
+      email: user.email || "",
+      profile_url: user.profile_url || "",
+      metadata: user.metadata || %{},
+      username: user.username || "",
+      display_name: user.display_name || "",
+      lobby_id: user.lobby_id || "",
+      party_id: user.party_id || "",
+      is_online: user.is_online || false,
+      last_seen_at: User.last_seen_at_or_fallback(user),
+      linked_providers: Accounts.get_linked_providers(user),
+      has_password: Accounts.has_password?(user)
+    }
+  end
+
   @spec serialize_chat_message(term(), keyword()) :: map()
   def serialize_chat_message(message, opts \\ []) do
     sender = loaded_assoc(message, :sender)
@@ -128,6 +160,49 @@ defmodule GamendWeb.Serializers do
       if(sender, do: sender.email, else: ""),
       Keyword.get(opts, :include_sender_email, false)
     )
+  end
+
+  @doc "A leaderboard as the player and admin APIs send it (`GamendWeb.Schemas.Leaderboard`)."
+  @spec serialize_leaderboard(Leaderboard.t()) :: map()
+  def serialize_leaderboard(%Leaderboard{} = lb) do
+    %{
+      id: lb.id,
+      slug: lb.slug,
+      title: lb.title,
+      description: lb.description || "",
+      icon_url: lb.icon_url || "",
+      sort_order: to_string(lb.sort_order),
+      operator: to_string(lb.operator),
+      starts_at: lb.starts_at,
+      ends_at: lb.ends_at,
+      is_active: Leaderboard.active?(lb),
+      metadata: lb.metadata || %{},
+      inserted_at: lb.inserted_at,
+      updated_at: lb.updated_at
+    }
+  end
+
+  @doc """
+  A tournament match as the player and admin APIs send it
+  (`GamendWeb.Schemas.TournamentMatch`); `leaders` maps each entry id to its
+  leader's user id.
+  """
+  @spec serialize_tournament_match(term(), %{optional(term()) => term()}) :: map()
+  def serialize_tournament_match(match, leaders) do
+    %{
+      id: match.id,
+      bracket_index: match.bracket_index,
+      round: match.round,
+      slot: match.slot,
+      a_entry_id: match.a_entry_id || "",
+      b_entry_id: match.b_entry_id || "",
+      a_leader_id: leaders[match.a_entry_id] || "",
+      b_leader_id: leaders[match.b_entry_id] || "",
+      winner_entry_id: match.winner_entry_id || "",
+      deadline_at: match.deadline_at,
+      resolved_at: match.resolved_at,
+      metadata: match.metadata || %{}
+    }
   end
 
   @spec serialize_quest_progress(term()) :: map()
@@ -240,19 +315,45 @@ defmodule GamendWeb.Serializers do
     |> Enum.map(&User.serialize_brief/1)
   end
 
+  @doc """
+  A KV entry for the admin API. `data` is the stored value; an entry is scoped
+  to a user or a lobby (or neither), and the unused scope is `""` per the null
+  policy above. The two admin KV controllers each carried a private copy.
+  """
+  @spec serialize_kv_entry(Gamend.KV.Entry.t()) :: map()
+  def serialize_kv_entry(entry) do
+    %{
+      id: entry.id,
+      key: entry.key,
+      user_id: entry.user_id || "",
+      lobby_id: entry.lobby_id || "",
+      data: entry.value || %{},
+      metadata: entry.metadata || %{},
+      inserted_at: entry.inserted_at,
+      updated_at: entry.updated_at
+    }
+  end
+
   defp loaded_assoc(struct, field) do
     value = Map.get(struct, field)
 
     if Ecto.assoc_loaded?(value), do: value, else: nil
   end
 
-  defp assoc_display_name(nil), do: ""
-  defp assoc_display_name(%{display_name: name}) when is_binary(name), do: name
+  # `sender_name`, `host_name`, `creator_name` and `leader_name` are labels for a
+  # person, so they follow `Gamend.Accounts.display_name/1`: the display name,
+  # else the username. They used to stop at the display name and send `""`,
+  # while a party or group invite's `sender_name` — built in core — already fell
+  # back to the username, so the same field named the same player two ways. A
+  # deleted user is still `""`.
+  #
+  # Not `display_name:` fields — those carry the raw column (see `display_name/1`).
+  defp assoc_display_name(%User{} = user), do: Accounts.display_name(user)
   defp assoc_display_name(_assoc), do: ""
 
   defp assoc_or_lookup_display_name(_assoc, nil), do: ""
-  defp assoc_or_lookup_display_name(%{} = assoc, _id), do: assoc_display_name(assoc)
-  defp assoc_or_lookup_display_name(_assoc, id), do: display_name(id)
+  defp assoc_or_lookup_display_name(%User{} = user, _id), do: Accounts.display_name(user)
+  defp assoc_or_lookup_display_name(_assoc, id), do: Accounts.display_name(id)
 
   # A group with no creator (a system group) has no creator id — emit the empty
   # string, not a -1 sentinel. The REST contract types creator_id as a string,

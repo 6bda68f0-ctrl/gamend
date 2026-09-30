@@ -2,6 +2,7 @@ defmodule GamendWeb.AdminLive.Chat do
   use GamendWeb, :live_view
 
   alias Gamend.Chat
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -30,7 +31,13 @@ defmodule GamendWeb.AdminLive.Chat do
               <button
                 type="button"
                 phx-click="bulk_delete"
-                data-confirm={"Delete #{MapSet.size(@selected_ids)} selected messages?"}
+                data-confirm={
+                  ngettext(
+                    "Delete %{count} selected message?",
+                    "Delete %{count} selected messages?",
+                    MapSet.size(@selected_ids)
+                  )
+                }
                 class="btn btn-sm btn-outline btn-error"
                 disabled={MapSet.size(@selected_ids) == 0}
               >
@@ -55,7 +62,7 @@ defmodule GamendWeb.AdminLive.Chat do
                         />
                       </th>
                       <th>ID</th>
-                      <th>Sender ID</th>
+                      <th>Sender</th>
                       <th>Type</th>
                       <th>Ref ID</th>
                       <th>Content</th>
@@ -90,6 +97,9 @@ defmodule GamendWeb.AdminLive.Chat do
                           </option>
                           <option value="friend" selected={@filters["chat_type"] == "friend"}>
                             Friend
+                          </option>
+                          <option value="party" selected={@filters["chat_type"] == "party"}>
+                            Party
                           </option>
                         </select>
                       </th>
@@ -143,7 +153,8 @@ defmodule GamendWeb.AdminLive.Chat do
                           "badge badge-sm",
                           m.chat_type == "lobby" && "badge-primary",
                           m.chat_type == "group" && "badge-secondary",
-                          m.chat_type == "friend" && "badge-accent"
+                          m.chat_type == "friend" && "badge-accent",
+                          m.chat_type == "party" && "badge-info"
                         ]}>
                           {m.chat_type}
                         </span>
@@ -251,13 +262,26 @@ defmodule GamendWeb.AdminLive.Chat do
     socket =
       cond do
         failed == 0 ->
-          put_flash(socket, :info, "Deleted #{deleted} messages")
+          put_flash(
+            socket,
+            :info,
+            ngettext("Deleted %{count} message", "Deleted %{count} messages", deleted)
+          )
 
         deleted == 0 ->
           put_flash(socket, :error, "Failed to delete selected messages")
 
         true ->
-          put_flash(socket, :error, "Deleted #{deleted} messages; failed #{failed}")
+          put_flash(
+            socket,
+            :error,
+            ngettext(
+              "Deleted %{count} message; %{failed} failed",
+              "Deleted %{count} messages; %{failed} failed",
+              deleted,
+              failed: failed
+            )
+          )
       end
 
     {:noreply, socket |> reload_messages()}
@@ -280,25 +304,16 @@ defmodule GamendWeb.AdminLive.Chat do
   end
 
   @impl true
-  def handle_event("admin_chat_prev", _params, socket) do
-    page = max(1, socket.assigns.page - 1)
-    {:noreply, socket |> assign(:page, page) |> reload_messages()}
-  end
+  def handle_event("admin_chat_prev", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload_messages()}
 
   @impl true
-  def handle_event("admin_chat_next", _params, socket) do
-    page = socket.assigns.page + 1
-    {:noreply, socket |> assign(:page, page) |> reload_messages()}
-  end
+  def handle_event("admin_chat_next", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload_messages()}
 
   @impl true
-  def handle_event("admin_chat_page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:page_size, String.to_integer(size))
-     |> assign(:page, 1)
-     |> reload_messages()}
-  end
+  def handle_event("admin_chat_page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload_messages()}
 
   defp reload_messages(socket) do
     page = socket.assigns.page
@@ -309,9 +324,7 @@ defmodule GamendWeb.AdminLive.Chat do
     total_count = Chat.count_all_messages(filters)
 
     total_pages =
-      if page_size > 0,
-        do: div(total_count + page_size - 1, page_size),
-        else: 0
+      LiveHelpers.total_pages(total_count, page_size)
 
     socket
     |> assign(:messages, messages)

@@ -31,10 +31,11 @@ defmodule Gamend.Leaderboards do
   alias Gamend.Repo
   alias Gamend.Types
 
+  alias Gamend.Accounts
   alias Gamend.Leaderboards.Leaderboard
   alias Gamend.Leaderboards.Record
+  alias Gamend.Repo.AdvisoryLock
 
-  @leaderboards_cache_ttl_ms 60_000
   @records_cache_ttl_ms 10_000
 
   # Name of the ranking CTE used by `list_records_around_user/3`. One
@@ -197,7 +198,7 @@ defmodule Gamend.Leaderboards do
 
   @decorate cacheable(
               key: {:leaderboards, :get, leaderboards_cache_version(), id},
-              opts: [ttl: @leaderboards_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   defp get_leaderboard_cached(id) when is_binary(id) do
     Repo.get(Leaderboard, id)
@@ -305,7 +306,7 @@ defmodule Gamend.Leaderboards do
 
   @decorate cacheable(
               key: {:leaderboards, :list_groups, leaderboards_cache_version(), page, page_size},
-              opts: [ttl: @leaderboards_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   defp list_leaderboard_groups_cached(page, page_size) do
     offset = max((page - 1) * page_size, 0)
@@ -377,7 +378,7 @@ defmodule Gamend.Leaderboards do
 
   @decorate cacheable(
               key: {:leaderboards, :count_groups, leaderboards_cache_version()},
-              opts: [ttl: @leaderboards_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   defp count_leaderboard_groups_cached do
     from(lb in Leaderboard,
@@ -427,8 +428,9 @@ defmodule Gamend.Leaderboards do
   @spec list_leaderboards() :: [Leaderboard.t()]
   @spec list_leaderboards(keyword()) :: [Leaderboard.t()]
   def list_leaderboards(opts \\ []) do
-    page = Keyword.get(opts, :page, 1)
-    page_size = Keyword.get(opts, :page_size, 25)
+    # Clamped before the cached call: both values are in its cache key.
+    page = Gamend.Limits.clamp_page(Keyword.get(opts, :page))
+    page_size = Gamend.Limits.clamp_page_size(Keyword.get(opts, :page_size))
     order_by = Keyword.get(opts, :order_by, :inserted_at)
 
     list_leaderboards_cached(opts, order_by, page, page_size)
@@ -438,16 +440,13 @@ defmodule Gamend.Leaderboards do
               key:
                 {:leaderboards, :list, leaderboards_cache_version(), opts, order_by, page,
                  page_size},
-              opts: [ttl: @leaderboards_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   defp list_leaderboards_cached(opts, order_by, page, page_size) do
-    offset = max((page - 1) * page_size, 0)
-
     opts
     |> build_leaderboard_query()
     |> apply_order_by(order_by)
-    |> offset(^offset)
-    |> limit(^page_size)
+    |> Gamend.Query.page(page: page, page_size: page_size)
     |> Repo.all()
   end
 
@@ -464,7 +463,7 @@ defmodule Gamend.Leaderboards do
 
   @decorate cacheable(
               key: {:leaderboards, :count, leaderboards_cache_version(), opts},
-              opts: [ttl: @leaderboards_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   defp count_leaderboards_cached(opts) do
     opts
@@ -592,18 +591,21 @@ defmodule Gamend.Leaderboards do
           {:ok, Record.t()} | {:error, term()}
   def submit_score(leaderboard_id, user_id, score, metadata \\ %{})
       when is_binary(leaderboard_id) and is_binary(user_id) and is_integer(score) do
-    case get_leaderboard(leaderboard_id) do
-      nil ->
-        {:error, :leaderboard_not_found}
-
-      leaderboard ->
-        # Check if leaderboard is still active
-        if Leaderboard.ended?(leaderboard) do
-          {:error, :leaderboard_ended}
-        else
-          do_submit_score(leaderboard, user_id, score, metadata)
-          |> run_after_score_submitted()
-        end
+    with {:board, %Leaderboard{} = leaderboard} <- {:board, get_leaderboard(leaderboard_id)},
+         # Checked before the insert, because SQLite cannot tell Ecto which
+         # constraint an INSERT violated — see `Gamend.Accounts.user_exists?/1`.
+         # Without this, a score for an unknown user raised
+         # `Ecto.ConstraintError`, so an admin request naming a stale id got a
+         # 500 rather than an answer.
+         {:user, true} <- {:user, Accounts.user_exists?(user_id)},
+         {:ended, false} <- {:ended, Leaderboard.ended?(leaderboard)} do
+      leaderboard
+      |> do_submit_score(user_id, score, metadata)
+      |> run_after_score_submitted()
+    else
+      {:board, nil} -> {:error, :leaderboard_not_found}
+      {:user, false} -> {:error, :user_not_found}
+      {:ended, true} -> {:error, :leaderboard_ended}
     end
   end
 
@@ -665,10 +667,17 @@ defmodule Gamend.Leaderboards do
         metadata: metadata
       })
 
-    case Repo.insert(changeset,
-           on_conflict: build_score_upsert(leaderboard, score, metadata, now),
-           conflict_target: [:leaderboard_id, :label]
-         ) do
+    # The board was checked before this, but it can still be deleted before
+    # the write lands — see `Gamend.Repo.rescue_foreign_key/2`. A label record
+    # references nothing else, so that is the only key that can fire.
+    insert = fn ->
+      Repo.insert(changeset,
+        on_conflict: build_score_upsert(leaderboard, score, metadata, now),
+        conflict_target: [:leaderboard_id, :label]
+      )
+    end
+
+    case Repo.rescue_foreign_key(:leaderboard_not_found, insert) do
       {:ok, _} ->
         _ = invalidate_records_cache(leaderboard.id)
         record = get_label_record(leaderboard.id, label)
@@ -709,10 +718,22 @@ defmodule Gamend.Leaderboards do
         metadata: metadata
       })
 
-    case Repo.insert(changeset,
-           on_conflict: build_score_upsert(leaderboard, score, metadata, now),
-           conflict_target: [:leaderboard_id, :user_id]
-         ) do
+    # Board and user were checked before this, but either can still be
+    # deleted before the write lands — see `Gamend.Repo.rescue_foreign_key/2`.
+    insert = fn ->
+      Repo.insert(changeset,
+        on_conflict: build_score_upsert(leaderboard, score, metadata, now),
+        conflict_target: [:leaderboard_id, :user_id]
+      )
+    end
+
+    case Repo.rescue_foreign_key(:foreign_key, insert) do
+      {:error, :foreign_key} ->
+        # SQLite does not say which key fired, so ask again.
+        if Accounts.user_exists?(user_id),
+          do: {:error, :leaderboard_not_found},
+          else: {:error, :user_not_found}
+
       {:ok, _} ->
         # Invalidate caches and re-fetch to get accurate data after upsert
         _ = invalidate_records_cache(leaderboard.id)
@@ -907,9 +928,13 @@ defmodule Gamend.Leaderboards do
 
   ## Options
 
-  See `t:Gamend.Types.pagination_opts/0` for available options.
+  See `t:Gamend.Types.pagination_opts/0` for available options, plus:
 
-  Returns records with `rank` field populated.
+    * `:meta` — `{key, value}`, keeping only records whose `metadata[key]`
+      equals `value`. Ranks are computed **within** the filtered set, because
+      "the Spanish board" means first among Spanish, not 57th overall. That is
+      the opposite of `:search`, which ranks over the whole board so a found
+      player's real position is what shows.
   """
   @spec list_records(String.t()) :: [Record.t()]
   @spec list_records(String.t(), keyword()) :: [Record.t()]
@@ -922,13 +947,53 @@ defmodule Gamend.Leaderboards do
         page = Keyword.get(opts, :page, 1)
         page_size = Keyword.get(opts, :page_size, 25)
 
-        case search_pattern(opts) do
-          nil ->
+        case {search_pattern(opts), meta_filter(opts)} do
+          {nil, nil} ->
             list_records_cached(leaderboard.id, leaderboard.sort_order, page, page_size)
 
-          pattern ->
+          {nil, meta} ->
+            meta_records(leaderboard.id, leaderboard.sort_order, meta, page, page_size)
+
+          {pattern, _meta} ->
             search_records(leaderboard.id, leaderboard.sort_order, pattern, page, page_size)
         end
+    end
+  end
+
+  # One filtered page, ranked within the filter. Uncached for the same reason
+  # `search_records/5` is: the value is caller-supplied, and caching would fill
+  # the cache with one entry per value anyone ever picked.
+  defp meta_records(leaderboard_id, sort_order, {key, value}, page, page_size) do
+    offset = max((page - 1) * page_size, 0)
+
+    from(r in Record,
+      where: r.leaderboard_id == ^leaderboard_id,
+      where: ^meta_match(key, value),
+      order_by: ^record_order(sort_order),
+      offset: ^offset,
+      limit: ^page_size,
+      preload: [:user]
+    )
+    |> Repo.all()
+    |> Enum.with_index(offset + 1)
+    |> Enum.map(fn {record, rank} -> %{record | rank: rank} end)
+  end
+
+  defp meta_filter(opts) do
+    case Keyword.get(opts, :meta) do
+      {key, value} when is_binary(key) and is_binary(value) and value != "" -> {key, value}
+      _ -> nil
+    end
+  end
+
+  # Adapter-specific, the same way `Gamend.Notifications` reads a metadata key:
+  # Postgres wants `->>`, SQLite `json_extract`. Both compare as text, so the
+  # value is bound as a parameter rather than spliced into the fragment.
+  defp meta_match(key, value) do
+    if AdvisoryLock.postgres?() do
+      dynamic([r], fragment("?->>? = ?", r.metadata, ^key, ^value))
+    else
+      dynamic([r], fragment("json_extract(?, '$.' || ?) = ?", r.metadata, ^key, ^value))
     end
   end
 
@@ -1010,7 +1075,17 @@ defmodule Gamend.Leaderboards do
   def count_records(leaderboard_id, opts \\ []) when is_binary(leaderboard_id) do
     case search_pattern(opts) do
       nil ->
-        count_records_cached(leaderboard_id)
+        case meta_filter(opts) do
+          nil ->
+            count_records_cached(leaderboard_id)
+
+          {key, value} ->
+            from(r in Record,
+              where: r.leaderboard_id == ^leaderboard_id,
+              where: ^meta_match(key, value)
+            )
+            |> Repo.aggregate(:count, :id)
+        end
 
       pattern ->
         from(r in Record,

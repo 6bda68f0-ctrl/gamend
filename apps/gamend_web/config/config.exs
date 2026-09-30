@@ -1,5 +1,10 @@
 import Config
 
+# The core's base configuration (repo adapter, jobs, cache, mailer, storage)
+# and, under test, its test settings. The web app is published and tested
+# standalone, so it reads them from the core rather than keeping a copy.
+import_config "../../gamend_core/config/config.exs"
+
 # `mix cmd` (how host precommits run this app's tasks) pipes child output, so
 # this BEAM boots with ANSI off even when the invoking terminal supports
 # color. The parent sets FORCE_ANSI=true only when its own stdout is a TTY,
@@ -21,8 +26,6 @@ config :gamend_web, :scopes,
     test_setup_helper: :register_and_log_in_user
   ]
 
-config :gamend_core, ecto_repos: [Gamend.Repo]
-
 config :gamend_web,
   ecto_repos: [Gamend.Repo],
   generators: [timestamp_type: :utc_datetime],
@@ -36,33 +39,6 @@ config :gamend_web,
   well_known_static_app: :gamend_web,
   host_static_paths: ~w(images game favicon.ico robots.txt .well-known theme.css)
 
-default_adapter =
-  if System.get_env("GAMEND_DB_ADAPTER") == "postgres",
-    do: Ecto.Adapters.Postgres,
-    else: Ecto.Adapters.SQLite3
-
-config :gamend_core, Gamend.Repo,
-  adapter: default_adapter,
-  # All tables use UUID (v7) primary/foreign keys — see Gamend.UUIDv7.
-  migration_primary_key: [name: :id, type: :binary_id],
-  migration_foreign_key: [type: :binary_id]
-
-# Background jobs (Gamend.Jobs / Gamend.Schedule). The `:engine` is
-# injected at runtime from the Repo's actual adapter by
-# Gamend.Jobs.oban_config/0. Kept in sync with config/host_config.exs — the
-# web app is also published/tested standalone.
-config :gamend_core, Oban,
-  repo: Gamend.Repo,
-  queues: [default: 10, hooks: 20, mailers: 5, storage: 5, webhooks: 10],
-  plugins: [
-    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
-    {Oban.Plugins.Cron, crontab: [{"* * * * *", Gamend.Schedule.TickWorker}]}
-  ]
-
-# Object storage — defaults to local disk (see config/host_config.exs).
-config :gamend_core, Gamend.Storage, adapter: :local
-config :ex_aws, json_codec: Jason
-
 config :gamend_web, GamendWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
@@ -75,14 +51,6 @@ config :gamend_web, GamendWeb.Endpoint,
 
 config :phoenix,
   gzippable_exts: ~w(.js .map .css .txt .text .html .json .svg .eot .ttf .wasm .pck)
-
-config :gamend_core, Gamend.Mailer, adapter: Swoosh.Adapters.Local
-
-config :gamend_core, Gamend.Cache,
-  inclusion_policy: :inclusive,
-  levels: [
-    {Gamend.Cache.L1, []}
-  ]
 
 config :esbuild,
   version: "0.25.4",
@@ -129,12 +97,6 @@ config :gamend_web, :webrtc,
   enabled: true,
   ice_servers: [%{urls: "stun:stun.l.google.com:19302"}]
 
-# MDEx renders every markdown surface (guides, blog, changelog). Its NIF only
-# builds in the syntax highlighter when told to at compile time, and each app
-# that compiles the NIF needs the flag - otherwise fenced code renders as one
-# undifferentiated colour, or raises once highlighting is requested.
-config :mdex_native, syntax_highlighter: :lumis
-
 import_config "#{config_env()}.exs"
 
 config :mime, :types, %{
@@ -142,7 +104,7 @@ config :mime, :types, %{
 }
 
 # Ueberauth drives Steam only: its OpenID 2.0 callback verification has no
-# OAuth-shaped equivalent. Discord, Google, Facebook and Apple run through
+# OAuth-shaped equivalent. Discord, Google, Facebook, GitHub and Apple run through
 # GamendWeb.AuthController and Gamend.OAuth.Exchanger directly, so that one
 # code path can serve the browser redirect flow, the SDK session-polling flow
 # and the native-token endpoints alike. ueberauth_apple stays a dependency for

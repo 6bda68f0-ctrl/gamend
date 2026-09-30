@@ -1,10 +1,6 @@
 [
-  # Phoenix/OpenApi macros emit this line-1 false positive on Elixir 1.20 / OTP 29.
-  {"lib/gamend_web/live/admin_live/leaderboards.ex",
-   "The pattern can never match the type true."},
-  {"lib/gamend_web/live/admin_live/sessions.ex",
-   "The pattern can never match the type true."},
-  {"lib/gamend_web/live/admin_live/users/index.ex",
-   "The pattern can never match the type true."},
-  {"lib/gamend_web/live/lobby_live/index.ex", "The pattern can never match the type true."}
+  # `use Gettext.Backend` generates plural handling that passes Expo's opaque
+  # plural-forms term through a call Dialyzer cannot see into, on OTP 29 /
+  # Elixir 1.20. Not our code.
+  {"lib/gamend_web/gettext.ex", :call_without_opaque}
 ]

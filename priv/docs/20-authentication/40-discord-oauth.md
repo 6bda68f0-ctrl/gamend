@@ -29,20 +29,14 @@ These are the URLs Discord will redirect users back to after authorization.
 
 From the OAuth2 General tab, copy these values:
 
-Client ID
+- **Client ID** — found at the top of OAuth2 General
+- **Client Secret** — click "Reset Secret" to generate it
 
-Found at the top of OAuth2 General
-
-```text
-123456789012345678
-```
-
-Client Secret
-
-Click "Reset Secret" to generate
+They look like this:
 
 ```text
-abcdefghijklmnopqrstuvwx
+Client ID:     123456789012345678
+Client Secret: abcdefghijklmnopqrstuvwx
 ```
 
 ## Configure application secrets
@@ -59,6 +53,6 @@ GAMEND_OAUTH_DISCORD_CLIENT_SECRET="your_client_secret_here"
 After deploying with the secrets:
 
 1. Go to your app's login page
-2. Click "Sign in with Discord"
+2. Click "Log in with Discord"
 3. Authorize the application on Discord
 4. You should be redirected back and logged in

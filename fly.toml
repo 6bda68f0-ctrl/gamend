@@ -12,6 +12,12 @@ primary_region = "ams"
   # Uploads and mirrored avatars, on the same volume as the database. The
   # default lives inside the release image, which every deploy replaces.
   GAMEND_STORAGE_DIR = "/data/storage"
+  # Games ship their logs here (POST /api/v1/client_logs); off by default.
+  GAMEND_CLIENT_LOGS_ENABLED = "true"
+  # Per address and minute. The defaults, 10 and 240, throttle Balaur's
+  # e2e suite, which runs against gamend.org.
+  GAMEND_RATELIMIT_AUTH_LIMIT = "60"
+  GAMEND_RATELIMIT_GENERAL_LIMIT = "1200"
 
 [http_service]
   internal_port = 4000

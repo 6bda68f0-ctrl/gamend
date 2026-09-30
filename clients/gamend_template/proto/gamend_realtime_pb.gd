@@ -718,6 +718,11 @@ class LinkedProviders:
 		service.field = __device
 		data[__device.tag] = service
 		
+		__github = PBField.new("github", PB_DATA_TYPE.BOOL, PB_RULE.OPTIONAL, 7, true, DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL])
+		service = PBServiceField.new()
+		service.field = __github
+		data[__github.tag] = service
+		
 	var data = {}
 	
 	var __google: PBField
@@ -785,6 +790,17 @@ class LinkedProviders:
 		__device.value = DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL]
 	func set_device(value : bool) -> void:
 		__device.value = value
+	
+	var __github: PBField
+	func has_github() -> bool:
+		return data[7].state == PB_SERVICE_STATE.FILLED
+	func get_github() -> bool:
+		return __github.value
+	func clear_github() -> void:
+		data[7].state = PB_SERVICE_STATE.UNFILLED
+		__github.value = DEFAULT_VALUES_3[PB_DATA_TYPE.BOOL]
+	func set_github(value : bool) -> void:
+		__github.value = value
 	
 	func _to_string() -> String:
 		return PBPacker.message_to_string(data)

@@ -132,7 +132,7 @@ defmodule GamendWeb.ChatLive do
               >
                 <.user_avatar user={f} class="w-6 h-6 shrink-0" />
                 <.presence_dot status={PresenceStatus.status(f)} />
-                <span class="truncate flex-1">{LiveHelpers.public_user_name(f)}</span>
+                <.player_name name={LiveHelpers.public_user_name(f)} class="flex-1 max-w-full" />
                 <%= if (count = Map.get(@friend_unread, f.id, 0)) > 0 do %>
                   <span class="badge badge-sm badge-info">{count}</span>
                 <% end %>
@@ -308,7 +308,7 @@ defmodule GamendWeb.ChatLive do
                 type="text"
                 name="content"
                 value={@draft}
-                placeholder={gettext("Send")}
+                placeholder={gettext("Message")}
                 class="input input-bordered input-sm flex-1"
                 autocomplete="off"
               />
@@ -611,14 +611,7 @@ defmodule GamendWeb.ChatLive do
     end
   end
 
-  defp parse_page(page) when is_binary(page) do
-    case Integer.parse(page) do
-      {n, ""} when n > 1 -> min(n, @max_pages)
-      _ -> 1
-    end
-  end
-
-  defp parse_page(_page), do: 1
+  defp parse_page(page), do: page |> Gamend.Parse.integer(1) |> max(1) |> min(@max_pages)
 
   # Only the sender's own, loaded messages can be edited. Re-opening the same
   # message keeps the text typed so far.
@@ -757,7 +750,7 @@ defmodule GamendWeb.ChatLive do
     if Ecto.assoc_loaded?(msg.sender) && msg.sender do
       LiveHelpers.public_user_name(msg.sender)
     else
-      "User #{msg.sender_id}"
+      LiveHelpers.public_user_name(msg.sender_id)
     end
   end
 

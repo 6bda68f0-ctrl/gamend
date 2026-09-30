@@ -197,4 +197,39 @@ defmodule GamendWeb.AdminLive.UsersTest do
     # Should not crash, and should return 0 results (unless we had a user with that google_id, but we don't here)
     assert html =~ "Users (0)"
   end
+
+  test "the unverified filter shows only emails nobody confirmed", %{conn: conn} do
+    {:ok, admin} =
+      AccountsFixtures.user_fixture()
+      |> User.admin_changeset(%{"is_admin" => true})
+      |> Repo.update()
+
+    _verified = AccountsFixtures.user_fixture(%{email: "verified@example.com"})
+    _pending = AccountsFixtures.unconfirmed_user_fixture(%{email: "pending@example.com"})
+
+    {:ok, view, _html} = conn |> log_in_user(admin) |> live(~p"/admin/users")
+
+    html =
+      view
+      |> element(~S(input[phx-click="toggle_provider"][phx-value-provider="unverified"]))
+      |> render_click(%{"provider" => "unverified"})
+
+    assert html =~ "pending@example.com"
+    refute html =~ "verified@example.com"
+  end
+
+  test "?filter=unverified starts with the filter on", %{conn: conn} do
+    {:ok, admin} =
+      AccountsFixtures.user_fixture()
+      |> User.admin_changeset(%{"is_admin" => true})
+      |> Repo.update()
+
+    _verified = AccountsFixtures.user_fixture(%{email: "verified@example.com"})
+    _pending = AccountsFixtures.unconfirmed_user_fixture(%{email: "pending@example.com"})
+
+    {:ok, _view, html} = conn |> log_in_user(admin) |> live(~p"/admin/users?filter=unverified")
+
+    assert html =~ "pending@example.com"
+    refute html =~ "verified@example.com"
+  end
 end

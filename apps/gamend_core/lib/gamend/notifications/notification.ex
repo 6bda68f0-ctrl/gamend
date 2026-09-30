@@ -63,19 +63,26 @@ defmodule Gamend.Notifications.Notification do
   # A notification's type is a client contract: the server never reads it, so
   # an unregistered code would be delivered and silently ignored by every
   # client. Reject it at write time instead. See Gamend.Notifications.Types.
+  #
+  # `:map` casts keep atom keys, which the JSON column turns into strings, so
+  # `%{type: "x"}` stores the same `"type"` a client routes on. Check both.
   defp validate_notification_type(changeset) do
-    case get_field(changeset, :metadata) do
-      %{"type" => type} ->
+    case type_of(get_field(changeset, :metadata)) do
+      nil ->
+        changeset
+
+      type ->
         if Types.known?(type) do
           changeset
         else
           add_error(changeset, :metadata, "unknown notification type #{inspect(type)}")
         end
-
-      _ ->
-        changeset
     end
   end
+
+  defp type_of(%{"type" => type}), do: type
+  defp type_of(%{type: type}), do: type
+  defp type_of(_metadata), do: nil
 end
 
 # Hand-written rather than @derive so nil strings encode as "" (see

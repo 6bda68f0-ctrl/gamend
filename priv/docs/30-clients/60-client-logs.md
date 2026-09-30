@@ -33,9 +33,11 @@ Every re-emitted client line carries a logfmt prefix naming its session:
 Collection is off by default, and the server decides what is collected: clients fetch a policy at startup (`GET /api/v1/client_logs/policy`) and discard everything below the floor on the device, so unused verbosity costs nothing.
 
 ```json
-{"enabled": true, "level": "info", "categories": {"perf": "off"},
- "batch_max": 200, "message_max_bytes": 2000}
+{"data": {"enabled": true, "level": "info", "categories": {"perf": "off"},
+          "batch_max": 200, "message_max_bytes": 2000}}
 ```
+
+An upload answers `202` with `{"data": {"accepted", "dropped", "errors", "client_session_id"}}`. A refusal is `invalid_batch` (400), `session_forbidden` (403, the run belongs to another user) or `collection_disabled` (503: back off and retry later).
 
 The knobs live in the `client_logs` settings group: `GAMEND_CLIENT_LOGS_ENABLED`, `GAMEND_CLIENT_LOGS_LEVEL`, and per-category overrides in `GAMEND_CLIENT_LOGS_CATEGORY_LEVELS` (`perf:off,network:warn`). See the [Settings](/docs/settings) guide. Changes take effect on each client's next policy fetch, no new build. One interaction worth knowing: client lines re-enter the server's own `Logger` (only client `warn`/`error` map to those levels; everything lower is emitted at `info`), so a host whose `Logger` runs at `:warning` drops client `info` no matter what the policy says. The admin page warns about this rather than showing an empty list.
 

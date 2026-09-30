@@ -20,7 +20,7 @@ defmodule GamendWeb.AdminLive.Geo do
         <%!-- Header --%>
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div class="flex items-center gap-3">
-            <.link navigate={~p"/admin"} class="btn btn-outline btn-sm">&larr; Admin</.link>
+            <.link navigate={~p"/admin"} class="btn btn-outline btn-sm">&larr; Back to Admin</.link>
             <h1 class="text-xl font-bold">Geo Traffic</h1>
           </div>
 
@@ -69,7 +69,8 @@ defmodule GamendWeb.AdminLive.Geo do
           <div class="card bg-base-100 p-3 text-center">
             <div class="text-2xl font-bold font-mono">
               {if(@top_country,
-                do: "#{country_flag(elem(@top_country, 0))} #{elem(@top_country, 0)}",
+                do:
+                  "#{GamendWeb.AdminLive.Shared.country_flag(elem(@top_country, 0))} #{elem(@top_country, 0)}",
                 else: "—"
               )}
             </div>
@@ -87,7 +88,8 @@ defmodule GamendWeb.AdminLive.Geo do
           <div>
             <div class="font-semibold">No GeoIP database loaded</div>
             <div class="text-xs opacity-80">
-              All requests are counted as "XX" (Unknown). Download
+              Countries come only from Cloudflare's CF-IPCountry header; a request without
+              it is counted as "XX" (Unknown). Download
               <a
                 href="https://dev.maxmind.com/geoip/geolite2-free-geolocation-data"
                 target="_blank"
@@ -96,8 +98,8 @@ defmodule GamendWeb.AdminLive.Geo do
                 GeoLite2-Country.mmdb
               </a>
               under <code class="bg-base-200 px-1 rounded">data</code>
-              or set <code class="bg-base-200 px-1 rounded">GEOIP_DB_PATH</code>
-              to a custom location to enable country resolution.
+              or set <code class="bg-base-200 px-1 rounded">GAMEND_CONTENT_GEOIP_DB_PATH</code>
+              to a custom location to resolve countries from the client IP.
             </div>
           </div>
         </div>
@@ -163,7 +165,7 @@ defmodule GamendWeb.AdminLive.Geo do
                 >
                   <td class="font-mono text-base-content/70">{idx}</td>
                   <td>
-                    <span class="text-lg mr-1">{country_flag(country)}</span>
+                    <span class="text-lg mr-1">{GamendWeb.AdminLive.Shared.country_flag(country)}</span>
                     <span class="font-mono font-semibold">{country}</span>
                     <span :if={country == "XX"} class="text-xs text-base-content/70 ml-1">
                       (Unknown)
@@ -327,18 +329,6 @@ defmodule GamendWeb.AdminLive.Geo do
 
   defp format_number(n) when is_number(n), do: to_string(n)
   defp format_number(n), do: to_string(n)
-
-  defp country_flag(code) when is_binary(code) and byte_size(code) == 2 do
-    code
-    |> String.upcase()
-    |> String.to_charlist()
-    |> Enum.map(fn c -> c - ?A + 0x1F1E6 end)
-    |> List.to_string()
-  rescue
-    _ -> "🌐"
-  end
-
-  defp country_flag(_), do: "🌐"
 
   defp bar_color(rank) when rank <= 1, do: "bg-primary"
   defp bar_color(rank) when rank <= 3, do: "bg-secondary"

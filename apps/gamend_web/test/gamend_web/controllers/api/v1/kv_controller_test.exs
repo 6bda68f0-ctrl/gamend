@@ -20,7 +20,18 @@ defmodule GamendWeb.Api.V1.KvControllerTest do
 
     user = non_admin_fixture()
     resp = conn |> auth_conn(user) |> get("/api/v1/kv/global_foo") |> json_response(200)
-    assert resp["data"] == %{"a" => 1}
+    assert resp["data"]["data"] == %{"a" => 1}
+    assert %{"key" => "global_foo", "user_id" => "", "lobby_id" => ""} = resp["data"]
+  end
+
+  test "GET /api/v1/kv/:key answers not_found for a missing key", %{conn: conn} do
+    resp =
+      conn
+      |> auth_conn(non_admin_fixture())
+      |> get("/api/v1/kv/no_such_key")
+      |> json_response(404)
+
+    assert resp["error"] == "not_found"
   end
 
   test "owner_only allows only requested user owner", %{conn: conn} do
@@ -37,7 +48,7 @@ defmodule GamendWeb.Api.V1.KvControllerTest do
       |> get("/api/v1/kv/user_key?user_id=#{owner.id}")
       |> json_response(200)
 
-    assert resp["data"] == %{"v" => 2}
+    assert resp["data"]["data"] == %{"v" => 2}
 
     assert conn
            |> auth_conn(other)
@@ -66,7 +77,7 @@ defmodule GamendWeb.Api.V1.KvControllerTest do
       |> get("/api/v1/kv/lobby_key?lobby_id=#{lobby.id}")
       |> json_response(200)
 
-    assert resp["data"] == %{"v" => 3}
+    assert resp["data"]["data"] == %{"v" => 3}
 
     assert conn
            |> auth_conn(outsider)
@@ -99,8 +110,8 @@ defmodule GamendWeb.Api.V1.KvControllerTest do
       |> get("/api/v1/kv/shared_key?lobby_id=#{lobby.id}")
       |> json_response(200)
 
-    assert owner_resp["data"] == %{"scope" => "user"}
-    assert member_resp["data"] == %{"scope" => "lobby"}
+    assert owner_resp["data"]["data"] == %{"scope" => "user"}
+    assert member_resp["data"]["data"] == %{"scope" => "lobby"}
 
     assert conn
            |> auth_conn(outsider)
@@ -123,7 +134,7 @@ defmodule GamendWeb.Api.V1.KvControllerTest do
     assert conn |> auth_conn(user) |> get("/api/v1/kv/admin_key") |> response(403)
 
     resp = conn |> auth_conn(admin) |> get("/api/v1/kv/admin_key") |> json_response(200)
-    assert resp["data"] == %{"v" => 4}
+    assert resp["data"]["data"] == %{"v" => 4}
   end
 
   test "server_only blocks all client KV reads", %{conn: conn} do

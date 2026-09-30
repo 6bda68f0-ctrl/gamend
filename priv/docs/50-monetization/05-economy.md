@@ -20,7 +20,7 @@ Every successful change appends a ledger entry in the same transaction: the delt
 | Read | `balance/2`, `balances/1` | `quantity/2`, `inventory/1` |
 | Extras | — | `set_metadata/3` per stack |
 
-Codes are 1–64 byte strings; anything else is `{:error, :invalid_currency}` / `{:error, :invalid_item}`. Granting an amount of `0` is a no-op that returns the current balance, not an error. A reward that works out to nothing after caps or discounts should not crash.
+Codes are 1–64 byte strings; anything else is `{:error, :invalid_currency}` / `{:error, :invalid_item}`. Granting or spending an amount of `0` of a currency is a no-op that returns the current balance, not an error: a reward that works out to nothing after caps or discounts should not crash. Items are stricter: `grant_item/4` and `consume_item/4` take a positive quantity, and `0` raises a `FunctionClauseError`, so check the quantity before calling them.
 
 **Idempotency.** Pass `:idempotency_key` and a retried call (network retry, at-least-once job) becomes a no-op that returns the current balance. The key is enforced by the ledger itself, so even two concurrent calls racing with the same key apply exactly once.
 

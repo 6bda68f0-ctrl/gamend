@@ -42,6 +42,8 @@ defmodule GamendWeb.SwaggerHTML do
           .sdk-bar a.js-sdk:hover { background: #e5cd00; }
           .sdk-bar a.godot-sdk { background: #478cbf; color: #fff; }
           .sdk-bar a.godot-sdk:hover { background: #3a7aab; }
+          .sdk-bar a.cpp-sdk { background: #00599c; color: #fff; }
+          .sdk-bar a.cpp-sdk:hover { background: #004482; }
           .sdk-bar a svg { width: 16px; height: 16px; }
         </style>
       </head>
@@ -69,6 +71,24 @@ defmodule GamendWeb.SwaggerHTML do
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
             </svg>
             Godot SDK
+          </a>
+          <a
+            href="https://gamend.org/docs/cpp-sdk"
+            target="_blank"
+            rel="noopener"
+            class="cpp-sdk"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M8 6l-6 6 6 6M16 6l6 6-6 6" />
+            </svg>
+            C++ SDK
           </a>
         </div>
         <div id="swagger-ui"></div>

@@ -2,8 +2,10 @@ defmodule GamendWeb.AdminLive.Users do
   use GamendWeb, :live_view
 
   alias Gamend.Accounts
+  alias Gamend.Accounts.LoginLockouts
   alias Gamend.Accounts.User
   alias Gamend.Async
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def render(assigns) do
@@ -23,7 +25,13 @@ defmodule GamendWeb.AdminLive.Users do
                 <button
                   type="button"
                   phx-click="bulk_delete"
-                  data-confirm={"Delete #{MapSet.size(@selected_ids)} selected users?"}
+                  data-confirm={
+                    ngettext(
+                      "Delete %{count} selected user?",
+                      "Delete %{count} selected users?",
+                      MapSet.size(@selected_ids)
+                    )
+                  }
                   class="btn btn-sm btn-outline btn-error"
                   disabled={MapSet.size(@selected_ids) == 0}
                 >
@@ -141,6 +149,16 @@ defmodule GamendWeb.AdminLive.Users do
                   <input
                     type="checkbox"
                     phx-click="toggle_provider"
+                    phx-value-provider="github"
+                    checked={"github" in @filters}
+                    class="checkbox"
+                  />
+                  <span class="label-text ml-2">GitHub</span>
+                </label>
+                <label class="label cursor-pointer">
+                  <input
+                    type="checkbox"
+                    phx-click="toggle_provider"
                     phx-value-provider="device"
                     checked={"device" in @filters}
                     class="checkbox"
@@ -188,6 +206,16 @@ defmodule GamendWeb.AdminLive.Users do
                   />
                   <span class="label-text ml-2">Unactivated</span>
                 </label>
+                <label class="label cursor-pointer">
+                  <input
+                    type="checkbox"
+                    phx-click="toggle_provider"
+                    phx-value-provider="unverified"
+                    checked={"unverified" in @filters}
+                    class="checkbox"
+                  />
+                  <span class="label-text ml-2">Unverified email</span>
+                </label>
               </div>
             </div>
             <div class="overflow-x-auto">
@@ -217,6 +245,7 @@ defmodule GamendWeb.AdminLive.Users do
                     <th>Apple ID</th>
                     <th>Google ID</th>
                     <th>Facebook ID</th>
+                    <th>GitHub ID</th>
                     <th>Admin</th>
                     <th>Activated</th>
                     <th>Metadata</th>
@@ -320,6 +349,13 @@ defmodule GamendWeb.AdminLive.Users do
                         <span class="text-gray-500">-</span>
                       <% end %>
                     </td>
+                    <td class="font-mono text-sm">
+                      <%= if user.github_id do %>
+                        {user.github_id}
+                      <% else %>
+                        <span class="text-gray-500">-</span>
+                      <% end %>
+                    </td>
                     <td>
                       <%= if user.is_admin do %>
                         <span class="badge badge-success badge-sm">Yes</span>
@@ -333,6 +369,13 @@ defmodule GamendWeb.AdminLive.Users do
                       <% else %>
                         <span class="badge badge-error badge-sm">No</span>
                       <% end %>
+                      <span
+                        :if={user.deletion_scheduled_at}
+                        class="badge badge-warning badge-sm"
+                        title="Scheduled for deletion"
+                      >
+                        Deleting
+                      </span>
                     </td>
                     <td>
                       <%= if user.metadata && user.metadata != %{} do %>
@@ -418,8 +461,65 @@ defmodule GamendWeb.AdminLive.Users do
               </.link>
             </div>
 
+            <div
+              :if={@selected_user.deletion_scheduled_at}
+              id="admin-user-deletion-scheduled"
+              role="alert"
+              class="alert alert-warning mb-3 flex flex-wrap items-center justify-between gap-2"
+            >
+              <span>
+                The player deleted this account. It is deleted on
+                <.timestamp at={@selected_user.deletion_scheduled_at} format="full" />.
+              </span>
+              <button
+                type="button"
+                id="admin-keep-account"
+                phx-click="cancel_user_deletion"
+                phx-value-id={@selected_user.id}
+                class="btn btn-sm"
+              >
+                Keep account
+              </button>
+            </div>
+
+            <div
+              :if={@login_locked}
+              id="admin-user-login-locked"
+              role="alert"
+              class="alert alert-warning mb-3 flex flex-wrap items-center justify-between gap-2"
+            >
+              <span>Password sign-in is locked after too many failed attempts.</span>
+              <button
+                type="button"
+                id="admin-unlock-login"
+                phx-click="unlock_login"
+                phx-value-id={@selected_user.id}
+                class="btn btn-sm"
+              >
+                Unlock
+              </button>
+            </div>
+
             <.form for={@form} id="user-form" phx-submit="save_user">
-              <.input field={@form[:email]} type="email" label="Email" />
+              <%!-- Read-only: `User.admin_changeset/2` does not cast `email`, so an
+                   edit here was dropped while the flash still said "updated". --%>
+              <div class="form-control">
+                <label class="label" for="admin-user-email">
+                  <span class="label-text">Email</span>
+                </label>
+                <input
+                  id="admin-user-email"
+                  type="email"
+                  value={@selected_user.email}
+                  class="input input-bordered opacity-60"
+                  disabled
+                />
+                <label class="label">
+                  <span class="label-text-alt text-base-content/70">
+                    Only the player can change their email, from their account page
+                  </span>
+                </label>
+              </div>
               <.input field={@form[:display_name]} type="text" label="Display name" />
               <div class="form-control">
                 <label class="label cursor-pointer">
@@ -465,15 +565,23 @@ defmodule GamendWeb.AdminLive.Users do
             <%= if @user_tokens == [] do %>
               <p class="text-sm opacity-60">No tokens found.</p>
             <% else %>
-              <div class="flex justify-end mb-2">
+              <div :if={session_count(@user_tokens) > 0} class="flex justify-end mb-2">
+                <%!-- `revoke_all_user_sessions/1` deletes "session" tokens only;
+                     login, confirm and change-email tokens stay. --%>
                 <button
                   type="button"
                   phx-click="revoke_all_sessions"
                   phx-value-user-id={@selected_user.id}
-                  data-confirm={"Revoke all #{length(@user_tokens)} tokens for this user?"}
+                  data-confirm={
+                    ngettext(
+                      "Revoke this user's %{count} session?",
+                      "Revoke all %{count} of this user's sessions?",
+                      session_count(@user_tokens)
+                    )
+                  }
                   class="btn btn-xs btn-outline btn-error"
                 >
-                  Revoke All
+                  Revoke all sessions
                 </button>
               </div>
               <div class="overflow-x-auto">
@@ -546,10 +654,11 @@ defmodule GamendWeb.AdminLive.Users do
     sort_field = "inserted_at"
     sort_dir = "desc"
 
-    # Support ?filter=unactivated from dashboard link
+    # Support ?filter=unactivated (dashboard link) and ?filter=unverified
     initial_filters =
       case params["filter"] do
         "unactivated" -> ["unactivated"]
+        "unverified" -> ["unverified"]
         _ -> []
       end
 
@@ -573,6 +682,7 @@ defmodule GamendWeb.AdminLive.Users do
      |> assign(:selected_user, nil)
      |> assign(:form, nil)
      |> assign(:user_tokens, [])
+     |> assign(:login_locked, false)
      |> assign(:search_query, "")
      |> assign(:filters, initial_filters)
      |> assign(:sort_field, sort_field)
@@ -591,7 +701,31 @@ defmodule GamendWeb.AdminLive.Users do
      socket
      |> assign(:selected_user, user)
      |> assign(:form, form)
-     |> assign(:user_tokens, tokens)}
+     |> assign(:user_tokens, tokens)
+     |> assign(:login_locked, login_locked?(user))}
+  end
+
+  def handle_event("cancel_user_deletion", %{"id" => id}, socket) do
+    case Accounts.cancel_deletion(Accounts.get_user!(id)) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> assign(:selected_user, user)
+         |> put_flash(:info, "The account will not be deleted")}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed")}
+    end
+  end
+
+  def handle_event("unlock_login", %{"id" => id}, socket) do
+    user = Accounts.get_user!(id)
+    :ok = LoginLockouts.clear(user.email)
+
+    {:noreply,
+     socket
+     |> assign(:login_locked, false)
+     |> put_flash(:info, "Password sign-in unlocked")}
   end
 
   # Search / filter handlers
@@ -599,7 +733,15 @@ defmodule GamendWeb.AdminLive.Users do
     page = 1
     page_size = socket.assigns[:users_page_size] || 25
 
-    {users, total_count, total_pages} = load_users(page, page_size, q, socket.assigns[:filters])
+    {users, total_count, total_pages} =
+      load_users(
+        page,
+        page_size,
+        q,
+        socket.assigns[:filters],
+        socket.assigns.sort_field,
+        socket.assigns.sort_dir
+      )
 
     {:noreply,
      socket
@@ -615,7 +757,8 @@ defmodule GamendWeb.AdminLive.Users do
     page = 1
     page_size = socket.assigns[:users_page_size] || 25
 
-    {users, total_count, total_pages} = load_users(page, page_size, "", [])
+    {users, total_count, total_pages} =
+      load_users(page, page_size, "", [], socket.assigns.sort_field, socket.assigns.sort_dir)
 
     {:noreply,
      socket
@@ -642,7 +785,8 @@ defmodule GamendWeb.AdminLive.Users do
     page_size = socket.assigns[:users_page_size] || 25
     q = socket.assigns[:search_query] || ""
 
-    {users, total_count, total_pages} = load_users(page, page_size, q, filters)
+    {users, total_count, total_pages} =
+      load_users(page, page_size, q, filters, socket.assigns.sort_field, socket.assigns.sort_dir)
 
     {:noreply,
      socket
@@ -689,7 +833,8 @@ defmodule GamendWeb.AdminLive.Users do
      socket
      |> assign(:selected_user, nil)
      |> assign(:form, nil)
-     |> assign(:user_tokens, [])}
+     |> assign(:user_tokens, [])
+     |> assign(:login_locked, false)}
   end
 
   def handle_event("revoke_token", %{"id" => id}, socket) do
@@ -712,60 +857,18 @@ defmodule GamendWeb.AdminLive.Users do
     {:noreply,
      socket
      |> assign(:user_tokens, tokens)
-     |> put_flash(:info, "Revoked #{count} session(s)")}
+     |> put_flash(
+       :info,
+       ngettext("Revoked %{count} session", "Revoked %{count} sessions", count)
+     )}
   end
 
   def handle_event("save_user", %{"user" => user_params}, socket) do
-    user = socket.assigns.selected_user
-
-    attrs =
-      user_params
-      |> Map.put(
-        "confirmed_at",
-        if(user_params["confirmed"] == "on", do: DateTime.utc_now(:second), else: nil)
-      )
-      |> Map.put("is_admin", user_params["is_admin"] == "on")
-      |> Map.put("is_activated", user_params["is_activated"] == "on")
-      |> Map.update("metadata", %{}, fn metadata_str ->
-        case Jason.decode(metadata_str) do
-          {:ok, map} when is_map(map) -> map
-          _ -> %{}
-        end
-      end)
-
-    case Accounts.update_user(user, attrs) do
-      {:ok, updated_user} ->
-        # Send activation email if the user was just activated
-        if not user.is_activated and updated_user.is_activated do
-          Async.run(fn ->
-            Accounts.UserNotifier.deliver_account_activated(updated_user)
-          end)
-        end
-
-        # re-fetch current page of users, keeping search and filters
-        page = socket.assigns[:users_page] || 1
-        page_size = socket.assigns[:users_page_size] || 25
-
-        {users, total_count, total_pages} =
-          load_users(
-            page,
-            page_size,
-            socket.assigns[:search_query] || "",
-            socket.assigns[:filters] || []
-          )
-
-        {:noreply,
-         socket
-         |> put_flash(:info, "User updated successfully")
-         |> assign(:recent_users, users)
-         |> assign(:users_count, total_count)
-         |> assign(:users_total_pages, total_pages)
-         |> assign(:selected_user, nil)
-         |> assign(:form, nil)
-         |> sync_selected_ids(user_ids(users))}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :form, to_form(changeset, as: "user"))}
+    # Text that is not a JSON object is refused rather than saved as %{}, which
+    # would wipe the player's metadata behind a success flash.
+    case decode_metadata(user_params["metadata"]) do
+      {:ok, metadata} -> save_user(socket, Map.put(user_params, "metadata", metadata))
+      :error -> {:noreply, put_flash(socket, :error, "Metadata must be a JSON object")}
     end
   end
 
@@ -782,7 +885,9 @@ defmodule GamendWeb.AdminLive.Users do
             page,
             page_size,
             socket.assigns[:search_query] || "",
-            socket.assigns[:filters] || []
+            socket.assigns[:filters] || [],
+            socket.assigns.sort_field,
+            socket.assigns.sort_dir
           )
 
         # ensure current page is within range (if we deleted the last item on last page)
@@ -794,7 +899,9 @@ defmodule GamendWeb.AdminLive.Users do
               page2,
               page_size,
               socket.assigns[:search_query] || "",
-              socket.assigns[:filters] || []
+              socket.assigns[:filters] || [],
+              socket.assigns.sort_field,
+              socket.assigns.sort_dir
             )
           else
             {users, total_count, total_pages}
@@ -824,7 +931,9 @@ defmodule GamendWeb.AdminLive.Users do
         page,
         page_size,
         socket.assigns[:search_query] || "",
-        socket.assigns[:filters] || []
+        socket.assigns[:filters] || [],
+        socket.assigns.sort_field,
+        socket.assigns.sort_dir
       )
 
     {:noreply,
@@ -845,7 +954,9 @@ defmodule GamendWeb.AdminLive.Users do
         page,
         page_size,
         socket.assigns[:search_query] || "",
-        socket.assigns[:filters] || []
+        socket.assigns[:filters] || [],
+        socket.assigns.sort_field,
+        socket.assigns.sort_dir
       )
 
     {:noreply,
@@ -858,14 +969,16 @@ defmodule GamendWeb.AdminLive.Users do
   end
 
   def handle_event("admin_users_page_size", %{"size" => size}, socket) do
-    page_size = String.to_integer(size)
+    page_size = Gamend.Limits.clamp_page_size(size, socket.assigns[:users_page_size] || 25)
 
     {users, total_count, total_pages} =
       load_users(
         1,
         page_size,
         socket.assigns[:search_query] || "",
-        socket.assigns[:filters] || []
+        socket.assigns[:filters] || [],
+        socket.assigns.sort_field,
+        socket.assigns.sort_dir
       )
 
     {:noreply,
@@ -931,13 +1044,16 @@ defmodule GamendWeb.AdminLive.Users do
     page_size = socket.assigns[:users_page_size] || 25
     q = socket.assigns[:search_query] || ""
     filters = socket.assigns[:filters] || []
+    %{sort_field: sort_field, sort_dir: sort_dir} = socket.assigns
 
-    {users, total_count, total_pages} = load_users(page, page_size, q, filters)
+    {users, total_count, total_pages} =
+      load_users(page, page_size, q, filters, sort_field, sort_dir)
+
     page2 = max(1, min(page, total_pages))
 
     {users, total_count, total_pages} =
       if page2 != page do
-        load_users(page2, page_size, q, filters)
+        load_users(page2, page_size, q, filters, sort_field, sort_dir)
       else
         {users, total_count, total_pages}
       end
@@ -947,7 +1063,11 @@ defmodule GamendWeb.AdminLive.Users do
     socket =
       cond do
         failed == 0 ->
-          put_flash(socket, :info, "Deleted #{deleted} users")
+          put_flash(
+            socket,
+            :info,
+            ngettext("Deleted %{count} user", "Deleted %{count} users", deleted)
+          )
 
         deleted == 0 ->
           put_flash(socket, :error, "Failed to delete selected users")
@@ -956,7 +1076,12 @@ defmodule GamendWeb.AdminLive.Users do
           put_flash(
             socket,
             :error,
-            "Deleted #{deleted} users; failed #{failed}"
+            ngettext(
+              "Deleted %{count} user; %{failed} failed",
+              "Deleted %{count} users; %{failed} failed",
+              deleted,
+              failed: failed
+            )
           )
       end
 
@@ -969,23 +1094,90 @@ defmodule GamendWeb.AdminLive.Users do
      |> sync_selected_ids(user_ids(users))}
   end
 
+  defp decode_metadata(nil), do: {:ok, %{}}
+
+  defp decode_metadata(json) when is_binary(json) do
+    case String.trim(json) do
+      "" ->
+        {:ok, %{}}
+
+      trimmed ->
+        case Jason.decode(trimmed) do
+          {:ok, map} when is_map(map) -> {:ok, map}
+          _ -> :error
+        end
+    end
+  end
+
+  defp save_user(socket, user_params) do
+    user = socket.assigns.selected_user
+
+    attrs =
+      user_params
+      |> Map.put(
+        "confirmed_at",
+        if(user_params["confirmed"] == "on", do: DateTime.utc_now(:second), else: nil)
+      )
+      |> Map.put("is_admin", user_params["is_admin"] == "on")
+      |> Map.put("is_activated", user_params["is_activated"] == "on")
+
+    case Accounts.update_user(user, attrs) do
+      {:ok, updated_user} ->
+        # Send activation email if the user was just activated
+        if not user.is_activated and updated_user.is_activated do
+          Async.run(fn ->
+            Accounts.UserNotifier.deliver_account_activated(updated_user)
+          end)
+        end
+
+        # re-fetch current page of users, keeping search, filters and sort
+        page = socket.assigns[:users_page] || 1
+        page_size = socket.assigns[:users_page_size] || 25
+
+        {users, total_count, total_pages} =
+          load_users(
+            page,
+            page_size,
+            socket.assigns[:search_query] || "",
+            socket.assigns[:filters] || [],
+            socket.assigns.sort_field,
+            socket.assigns.sort_dir
+          )
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "User updated successfully")
+         |> assign(:recent_users, users)
+         |> assign(:users_count, total_count)
+         |> assign(:users_total_pages, total_pages)
+         |> assign(:selected_user, nil)
+         |> assign(:form, nil)
+         |> sync_selected_ids(user_ids(users))}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, :form, to_form(changeset, as: "user"))}
+    end
+  end
+
+  defp session_count(tokens), do: Enum.count(tokens, &(&1.context == "session"))
+
+  defp login_locked?(%User{email: email}) when is_binary(email),
+    do: LoginLockouts.check(email) != :ok
+
+  defp login_locked?(_user), do: false
+
   # Delegates to Accounts.list_all_users/2 (the reusable, admin-scoped context
   # query) so search/filter/sort logic lives in one place, shared with anything
-  # else that needs an admin user listing.
-  defp load_users(
-         page,
-         page_size,
-         search,
-         filters,
-         sort_field \\ "inserted_at",
-         sort_dir \\ "desc"
-       ) do
+  # else that needs an admin user listing. The sort is passed on every call:
+  # a default here re-sorted by Created while the button still showed the
+  # admin's chosen column and arrow.
+  defp load_users(page, page_size, search, filters, sort_field, sort_dir) do
     query_filters = %{search: search || "", facets: filters}
     opts = [page: page, page_size: page_size, sort_field: sort_field, sort_dir: sort_dir]
 
     users = Accounts.list_all_users(query_filters, opts)
     total_count = Accounts.count_list_all_users(query_filters)
-    total_pages = if page_size > 0, do: div(total_count + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(total_count, page_size)
 
     {users, total_count, total_pages}
   end

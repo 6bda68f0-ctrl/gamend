@@ -16,11 +16,18 @@
         <ol class="list-decimal ps-6 space-y-2">
           <li>
             <strong>Via the Application:</strong>
-            Log in to your account and go to Settings → Account → Delete Account
+            Log in to your account and go to Account → Delete account
           </li>
           <li>
             <strong>Contact Support:</strong>
-            Send an email to our support team requesting data deletion
+            <span :if={@contact_email}>
+              Send an email to
+              <a href={"mailto:" <> @contact_email} class="link link-primary">{@contact_email}</a>
+              from the address on your account, requesting data deletion
+            </span>
+            <span :if={!@contact_email}>
+              Send an email to our support team requesting data deletion
+            </span>
           </li>
           <li>
             <strong>API Request:</strong>
@@ -54,21 +61,28 @@
     <section>
       <h2 class="text-xl font-semibold mb-4">Processing Time</h2>
       <p class="text-base-content/80">
-        Data deletion requests are typically processed within 30 days. You will receive
-        confirmation once the deletion is complete.
+        Deleting your account in the app or through the API takes effect immediately. Requests sent
+        to support are typically processed within 30 days, and we reply once the deletion is
+        complete.
       </p>
     </section>
 
     <section>
       <h2 class="text-xl font-semibold mb-4">Contact Information</h2>
-      <p class="text-base-content/80">
+      <p :if={@contact_email} class="text-base-content/80">
+        If you have questions about the data deletion process or need assistance, email us at <a
+          href={"mailto:" <> @contact_email}
+          class="link link-primary"
+        >{@contact_email}</a>.
+      </p>
+      <p :if={!@contact_email} class="text-base-content/80">
         If you have questions about the data deletion process or need assistance, please contact
         us through the project's support channels.
       </p>
     </section>
 
     <div class="text-center pt-8 border-t border-base-300">
-      <small class="text-xs text-base-content/60">Last updated: July 2026</small>
+      <small class="text-xs text-base-content/60">Last updated: September 2026</small>
     </div>
   </div>
 </Layouts.app>

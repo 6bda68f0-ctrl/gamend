@@ -1,47 +1,88 @@
 defmodule GamendWeb.BlogLive do
-  @moduledoc false
+  @moduledoc """
+  `/blog` and `/blog/:slug`, rendered from the registered `:blog` directory.
+
+  This used to be a shim that looked for `GamendWeb.HostBlogLive` by name and
+  rendered "unavailable in standalone web mode" when it found nothing — so
+  every host wrote the page itself, and the two that did wrote it twice, each
+  with a private copy of `Gamend.Content.blog_posts_grouped/0`. See
+  `GamendWeb.ChangelogLive` for the same story one page earlier. The page is
+  `GamendWeb.ContentPages.blog_index/1` and `blog_post/1` now; a host that
+  wants something else routes its own module, which the route macro already
+  allows.
+  """
 
   use GamendWeb, :live_view
 
+  alias Gamend.Content
+
   @impl true
-  def mount(params, session, socket) do
-    if host_live_available?(:mount, 3) do
-      host_live().mount(params, session, socket)
-    else
-      {:ok, assign(socket, :page_title, "Blog")}
+  def mount(_params, _session, socket) do
+    {:ok,
+     socket
+     |> assign(:page_title, gettext("Blog"))
+     |> assign(:blog_available?, Content.path(:blog) != nil)
+     |> assign(:changelog_available?, Content.path(:changelog) != nil)
+     |> assign(:roadmap_available?, Content.path(:roadmap) != nil)}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
+  end
+
+  defp apply_action(socket, :index, _params) do
+    socket
+    |> assign(:page_title, gettext("Blog"))
+    |> assign(:grouped_posts, Content.blog_posts_grouped())
+    |> assign(:post, nil)
+  end
+
+  defp apply_action(socket, :show, %{"slug" => slug}) do
+    case Content.get_blog_post(slug) do
+      nil ->
+        socket
+        |> put_flash(:error, gettext("No results."))
+        |> push_navigate(to: ~p"/blog")
+
+      post ->
+        {prev, next} = Content.blog_neighbours(slug)
+
+        socket
+        |> assign(:page_title, post.title)
+        |> assign(:post, post)
+        |> assign(:post_html, Content.blog_post_html(slug))
+        |> assign(:prev_post, prev)
+        |> assign(:next_post, next)
     end
   end
 
   @impl true
-  def handle_params(params, uri, socket) do
-    if host_live_available?(:handle_params, 3) do
-      host_live().handle_params(params, uri, socket)
-    else
-      {:noreply, socket}
-    end
+  def render(%{post: %{} = _post} = assigns) do
+    ~H"""
+    <GamendWeb.ContentPages.blog_post
+      flash={@flash}
+      current_scope={@current_scope}
+      current_path={assigns[:current_path]}
+      post={@post}
+      html={@post_html}
+      prev={@prev_post}
+      next={@next_post}
+    />
+    """
   end
 
-  @impl true
   def render(assigns) do
-    if host_live_available?(:render, 1) do
-      host_live().render(assigns)
-    else
-      ~H"""
-      <Layouts.app flash={@flash} current_scope={@current_scope}>
-        <section id="standalone-blog" class="space-y-4">
-          <h1 class="text-4xl font-black text-base-content/95">Blog</h1>
-          <p class="text-base-content/70">
-            Host blog content is unavailable in standalone web mode.
-          </p>
-        </section>
-      </Layouts.app>
-      """
-    end
-  end
-
-  defp host_live, do: Module.concat(GamendWeb, HostBlogLive)
-
-  defp host_live_available?(function_name, arity) do
-    Code.ensure_loaded?(host_live()) and function_exported?(host_live(), function_name, arity)
+    ~H"""
+    <GamendWeb.ContentPages.blog_index
+      flash={@flash}
+      current_scope={@current_scope}
+      current_path={assigns[:current_path]}
+      blog_available?={@blog_available?}
+      grouped_posts={assigns[:grouped_posts] || []}
+      changelog_available?={@changelog_available?}
+      roadmap_available?={@roadmap_available?}
+    />
+    """
   end
 end

@@ -69,7 +69,7 @@ defmodule GamendWeb.AuthControllerApiTest do
 
       assert conn.status == 200
 
-      body = json_response(conn, 200)
+      body = json_response(conn, 200)["data"]
 
       assert is_binary(body["authorization_url"]) and
                String.contains?(body["authorization_url"], "steamcommunity.com/openid/login")
@@ -87,7 +87,7 @@ defmodule GamendWeb.AuthControllerApiTest do
       # Create an API OAuth session (pending)
       resp = get(conn, ~p"/api/v1/auth/discord")
       assert resp.status == 200
-      body = json_response(resp, 200)
+      body = json_response(resp, 200)["data"]
       session_id = body["session_id"]
 
       # install a mock exchanger module that returns a successful discord payload
@@ -111,15 +111,15 @@ defmodule GamendWeb.AuthControllerApiTest do
       # session should be completed now and include user_id in data
       status_conn = get(conn, ~p"/api/v1/auth/session/#{session_id}")
       assert status_conn.status == 200
-      status_body = json_response(status_conn, 200)
+      status_body = json_response(status_conn, 200)["data"]
 
       assert status_body["status"] == "completed"
 
-      assert is_map(status_body["data"]) and is_binary(status_body["data"]["user_id"]) and
-               status_body["data"]["user_id"] != ""
+      # The whole Session, as email and device login answer it.
+      assert %{"user_id" => user_id, "access_token" => "" <> _, "username" => "" <> _} =
+               status_body["session"]
 
-      # ensure user exists in DB
-      assert Gamend.Repo.get(Gamend.Accounts.User, status_body["data"]["user_id"]) != nil
+      assert Gamend.Repo.get(Gamend.Accounts.User, user_id) != nil
     end
 
     test "POST /api/v1/auth/:provider/callback exchanges code and returns tokens (discord)", %{
@@ -185,15 +185,6 @@ defmodule GamendWeb.AuthControllerApiTest do
             exchange_steam_ticket("valid_ticket")
           end
         end
-
-        def get_player_profile("99999"),
-          do:
-            {:ok,
-             %{
-               "id" => "99999",
-               "display_name" => "SteamUser",
-               "profile_url" => "https://steam/profile/99999"
-             }}
       end
 
       Application.put_env(:gamend_web, :oauth_exchanger, MockExchangerSteamTicketOk)
@@ -522,6 +513,41 @@ defmodule GamendWeb.AuthControllerApiTest do
       assert_received {:apple_ios_client_id, "com.example.ios"}
     end
 
+    test "POST /api/v1/auth/apple/ios/callback fills the display name from given/family name", %{
+      conn: conn
+    } do
+      SettingsHelpers.put(
+        :gamend_core,
+        Gamend.OAuth.Providers,
+        :apple_ios_client_id,
+        "com.ex.ios"
+      )
+
+      on_exit(fn ->
+        SettingsHelpers.delete(:gamend_core, Gamend.OAuth.Providers, :apple_ios_client_id)
+      end)
+
+      defmodule MockExchangerAppleIosName do
+        def exchange_apple_code("valid_ticket", _cid, _secret, _redirect),
+          do: {:ok, %{"sub" => "a_ios_named"}}
+
+        def exchange_apple_code("valid_ticket", _cid, _secret, _redirect, _opts),
+          do: {:ok, %{"sub" => "a_ios_named"}}
+      end
+
+      Application.put_env(:gamend_web, :oauth_exchanger, MockExchangerAppleIosName)
+
+      conn =
+        post(conn, "/api/v1/auth/apple/ios/callback", %{
+          code: "valid_ticket",
+          given_name: "Grace",
+          family_name: "Hopper"
+        })
+
+      assert conn.status == 200
+      assert Gamend.Accounts.get_user_by_apple_id("a_ios_named").display_name == "Grace Hopper"
+    end
+
     test "POST /api/v1/auth/steam/callback skips profile lookup when user already has profile", %{
       conn: conn
     } do
@@ -542,15 +568,6 @@ defmodule GamendWeb.AuthControllerApiTest do
              "profile_url" => "https://steam/profile/99999"
            }}
         end
-
-        def get_player_profile(_steamid),
-          do:
-            {:ok,
-             %{
-               "id" => "99999",
-               "display_name" => "SteamUser",
-               "profile_url" => "https://steam/profile/99999"
-             }}
       end
 
       Application.put_env(:gamend_web, :oauth_exchanger, MockExchangerSteamIdOnlyNoProfile)
@@ -574,15 +591,6 @@ defmodule GamendWeb.AuthControllerApiTest do
 
       defmodule MockExchangerSteamIdOnlyWithProfile do
         def exchange_steam_ticket("valid_ticket", _opts) do
-          {:ok,
-           %{
-             "id" => "99999",
-             "display_name" => "FetchedName",
-             "profile_url" => "https://steam/profile/99999"
-           }}
-        end
-
-        def get_player_profile("99999") do
           {:ok,
            %{
              "id" => "99999",
@@ -661,6 +669,46 @@ defmodule GamendWeb.AuthControllerApiTest do
       user = Gamend.Repo.get(Gamend.Accounts.User, body["data"]["user_id"])
       assert user != nil
       assert user.google_id == "gsub_1"
+    end
+
+    test "refuses an account scheduled for deletion", %{conn: conn} do
+      defmodule MockGoogleTokeninfoScheduled do
+        def get(_url, _opts) do
+          {:ok,
+           %{
+             status: 200,
+             body: %{
+               "sub" => "gsub_scheduled",
+               "aud" => "webcid",
+               "iss" => "https://accounts.google.com",
+               "email" => "scheduled@example.com",
+               "expires_in" => "3600"
+             }
+           }}
+        end
+      end
+
+      Application.put_env(:gamend_core, :google_tokeninfo_client, MockGoogleTokeninfoScheduled)
+      SettingsHelpers.put(:gamend_core, Gamend.OAuth.Providers, :google_web_client_id, "webcid")
+      SettingsHelpers.put(:gamend_core, Gamend.Accounts, :deletion_grace_days, 30)
+
+      on_exit(fn ->
+        SettingsHelpers.delete(:gamend_core, Gamend.OAuth.Providers, :google_web_client_id)
+        SettingsHelpers.delete(:gamend_core, Gamend.Accounts, :deletion_grace_days)
+      end)
+
+      {:ok, user} =
+        Gamend.Accounts.find_or_create_from_google(%{
+          google_id: "gsub_scheduled",
+          email: "scheduled@example.com"
+        })
+
+      {:ok, {:scheduled, _, _}} = Gamend.Accounts.request_deletion(user)
+
+      conn = post(conn, "/api/v1/auth/google/id_token", %{id_token: "any"})
+
+      assert %{"error" => "deletion_scheduled"} = json_response(conn, 403)
+      assert Gamend.Accounts.deletion_scheduled?(Gamend.Accounts.get_user!(user.id))
     end
 
     test "returns 400 when aud does not match", %{conn: conn} do

@@ -42,7 +42,7 @@ defmodule GamendWeb.Api.V1.ClientLogControllerTest do
 
   describe "GET /api/v1/client_logs/policy" do
     test "tells an unauthenticated client what to collect", %{conn: conn} do
-      body = conn |> get("/api/v1/client_logs/policy") |> json_response(200)
+      body = conn |> get("/api/v1/client_logs/policy") |> json_response(200) |> Map.fetch!("data")
 
       assert body["enabled"] == true
       assert body["level"] == "info"
@@ -53,7 +53,10 @@ defmodule GamendWeb.Api.V1.ClientLogControllerTest do
     test "reports disabled so a client collects nothing", %{conn: conn} do
       SettingsHelpers.delete(:gamend_core, ClientLogs, :enabled)
 
-      assert conn |> get("/api/v1/client_logs/policy") |> json_response(200) |> Map.get("enabled") ==
+      assert conn
+             |> get("/api/v1/client_logs/policy")
+             |> json_response(200)
+             |> get_in(["data", "enabled"]) ==
                false
     end
   end
@@ -63,7 +66,7 @@ defmodule GamendWeb.Api.V1.ClientLogControllerTest do
       # The whole point of optional auth: a client that cannot log in still
       # needs to be able to report why.
       sid = session_id()
-      body = conn |> post_batch(batch(sid)) |> json_response(202)
+      body = conn |> post_batch(batch(sid)) |> json_response(202) |> Map.fetch!("data")
 
       assert body["accepted"] == 1
       assert body["client_session_id"] == sid

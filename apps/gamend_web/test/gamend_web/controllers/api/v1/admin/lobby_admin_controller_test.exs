@@ -47,4 +47,23 @@ defmodule GamendWeb.Api.V1.Admin.LobbyAdminControllerTest do
     assert %{"data" => data} = json_response(conn, 200)
     assert data["is_locked"] == true
   end
+
+  test "GET /admin/lobbies pages every lobby, hidden ones included", %{admin_conn: admin_conn} do
+    {:ok, hidden} =
+      Lobbies.create_lobby(%{title: "hidden-admin-room", hostless: true, is_hidden: true})
+
+    body = admin_conn |> get("/api/v1/admin/lobbies", %{is_hidden: true}) |> json_response(200)
+    assert Enum.any?(body["data"], &(&1["id"] == hidden.id))
+    assert body["meta"]["total_count"] >= 1
+  end
+
+  test "DELETE /admin/lobbies/:id", %{admin_conn: admin_conn} do
+    {:ok, lobby} = Lobbies.create_lobby(%{title: "doomed-admin-room", hostless: true})
+
+    assert admin_conn |> delete("/api/v1/admin/lobbies/#{lobby.id}") |> json_response(200) ==
+             %{"ok" => true}
+
+    resp = admin_conn |> delete("/api/v1/admin/lobbies/#{lobby.id}") |> json_response(404)
+    assert resp["error"] == "not_found"
+  end
 end

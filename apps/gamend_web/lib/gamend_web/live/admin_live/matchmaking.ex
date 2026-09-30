@@ -8,6 +8,8 @@ defmodule GamendWeb.AdminLive.Matchmaking do
   alias Gamend.Matchmaking
   alias Gamend.Matchmaking.Worker
   alias Gamend.ReadyChecks
+  alias GamendWeb.AdminLive.Shared
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -27,28 +29,18 @@ defmodule GamendWeb.AdminLive.Matchmaking do
   def handle_event("filter", params, socket) do
     {:noreply,
      socket
-     |> assign(:status_filter, Map.get(params, "status", "all"))
-     |> assign(:user_filter, String.trim(Map.get(params, "user_id", "")))
-     |> assign(:page, 1)
+     |> Shared.put_filters(params, status_filter: {"status", "all"}, user_filter: "user_id")
      |> reload()}
   end
 
-  def handle_event("prev_page", _params, socket) do
-    {:noreply, socket |> assign(:page, max(socket.assigns.page - 1, 1)) |> reload()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload()}
 
-  def handle_event("next_page", _params, socket) do
-    page = min(socket.assigns.page + 1, max(socket.assigns.total_pages, 1))
-    {:noreply, socket |> assign(:page, page) |> reload()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload()}
 
-  def handle_event("page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:page_size, String.to_integer(size))
-     |> assign(:page, 1)
-     |> reload()}
-  end
+  def handle_event("page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload()}
 
   def handle_event("cancel_ticket", %{"id" => id}, socket) do
     socket =
@@ -84,12 +76,7 @@ defmodule GamendWeb.AdminLive.Matchmaking do
   # ── data ──────────────────────────────────────────────────────────────────
 
   defp reload(socket) do
-    filters = [
-      status: status_filter(socket.assigns.status_filter),
-      user_id: presence(socket.assigns.user_filter),
-      page: socket.assigns.page,
-      page_size: socket.assigns.page_size
-    ]
+    filters = Shared.list_opts(socket.assigns, status: :status_filter, user_id: :user_filter)
 
     tickets = Matchmaking.list_tickets(filters)
     total = Matchmaking.count_tickets(filters)
@@ -97,32 +84,19 @@ defmodule GamendWeb.AdminLive.Matchmaking do
     socket
     |> assign(:tickets, tickets)
     |> assign(:count, total)
-    |> assign(:total_pages, ceil_div(total, socket.assigns.page_size))
+    |> assign(:total_pages, LiveHelpers.total_pages(total, socket.assigns.page_size))
     |> assign(:stats, Matchmaking.stats())
     |> assign(:ready_stats, ReadyChecks.stats())
     |> assign(:ready_checks, ReadyChecks.list_checks(page: 1, page_size: 10))
   end
 
-  defp status_filter("all"), do: nil
-  defp status_filter(status), do: status
-
-  defp presence(""), do: nil
-  defp presence(value), do: value
-
-  defp ceil_div(_num, 0), do: 0
-  defp ceil_div(num, den), do: div(num + den - 1, den)
-
   defp user_label(%{user: %{} = user}), do: user_name(user)
   defp user_label(%{user_id: user_id}), do: user_id
 
-  defp user_name(user) do
-    cond do
-      is_binary(user.display_name) and user.display_name != "" -> user.display_name
-      is_binary(user.username) and user.username != "" -> user.username
-      is_binary(user.email) and user.email != "" -> user.email
-      true -> user.id
-    end
-  end
+  # `display_label/1` rather than a local chain: it ends at the username, which
+  # every account has, instead of falling through to the email (leaking it into
+  # a list that does not otherwise show it) and then the raw id.
+  defp user_name(user), do: Gamend.Accounts.display_label(user)
 
   defp status_class("queued"), do: "badge-info"
   defp status_class("matched"), do: "badge-success"
@@ -203,7 +177,9 @@ defmodule GamendWeb.AdminLive.Matchmaking do
         <div class="card-body">
           <h2 class="card-title">
             {gettext("Ready checks")}
-            <span class="text-sm font-normal text-base-content/70">{gettext("last 24h")}</span>
+            <span class="text-sm font-normal text-base-content/70">
+              {gettext("counts: last 24h · list: 10 most recent")}
+            </span>
           </h2>
           <div class="flex flex-wrap gap-4 text-sm">
             <span>{gettext("Passed")}: <b>{Map.get(@ready_stats, "passed", 0)}</b></span>
@@ -230,7 +206,7 @@ defmodule GamendWeb.AdminLive.Matchmaking do
                   <td><span class={"badge #{status_class(check.status)}"}>{check.status}</span></td>
                   <td class="font-mono text-xs">{check_reason(check)}</td>
                   <td class="text-right font-mono">{ready_counts(check)}</td>
-                  <td class="text-xs">{check.inserted_at}</td>
+                  <td class="text-xs"><.timestamp at={check.inserted_at} format="full" /></td>
                   <td class="text-right">
                     <button
                       :if={check.status == "pending"}
@@ -276,9 +252,9 @@ defmodule GamendWeb.AdminLive.Matchmaking do
               type="text"
               name="user_id"
               value={@user_filter}
-              placeholder="Filter by user id"
+              placeholder="User (id or name)"
               phx-debounce="300"
-              class="input input-sm w-72 font-mono"
+              class="input input-sm w-72"
             />
           </form>
 
@@ -308,9 +284,9 @@ defmodule GamendWeb.AdminLive.Matchmaking do
                   <td class="text-xs"><.timestamp at={ticket.queued_at} format="full" /></td>
                   <td class="font-mono text-xs">
                     <%= if ticket.match_id do %>
-                      <.link navigate={~p"/admin/lobbies"} class="link link-primary">
-                        {String.slice(ticket.match_id, 0, 8)}…
-                      </.link>
+                      <%!-- Not a link: /admin/lobbies takes no id filter, so it
+                            only ever opened the whole list. --%>
+                      <span title={ticket.match_id}>{String.slice(ticket.match_id, 0, 8)}…</span>
                     <% else %>
                       —
                     <% end %>

@@ -164,6 +164,7 @@ defmodule GamendWeb.Api.V1.Admin.NotificationControllerTest do
         metadata: %{"priority" => "high"}
       })
       |> json_response(201)
+      |> Map.fetch!("data")
 
     assert resp["title"] == "Admin created"
     assert resp["content"] == "System message"
@@ -198,7 +199,8 @@ defmodule GamendWeb.Api.V1.Admin.NotificationControllerTest do
       |> post("/api/v1/admin/notifications", %{title: "No recipient"})
       |> json_response(400)
 
-    assert resp["error"] =~ "sender_id"
+    assert resp["error"] == "missing_param"
+    assert resp["message"] =~ "sender_id"
   end
 
   test "POST /api/v1/admin/notifications upserts duplicate title for same sender and recipient",
@@ -219,6 +221,7 @@ defmodule GamendWeb.Api.V1.Admin.NotificationControllerTest do
         content: "v1"
       })
       |> json_response(201)
+      |> Map.fetch!("data")
 
     second =
       conn
@@ -230,6 +233,7 @@ defmodule GamendWeb.Api.V1.Admin.NotificationControllerTest do
         content: "v2"
       })
       |> json_response(201)
+      |> Map.fetch!("data")
 
     # Upsert: same notification is updated in place
     assert second["title"] == "Invited to play"

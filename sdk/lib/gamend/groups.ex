@@ -52,7 +52,10 @@ defmodule Gamend.Groups do
   """
 
   @doc ~S"""
-    Accept a pending group invite by invite id (recipient only).
+    Accept a pending group invite by **invite_id**.
+    The user must be the recipient of the invite.
+    Works for all group types (public, private, hidden).
+    
   """
   @spec accept_invite(Ecto.UUID.t(), Ecto.UUID.t()) ::
           {:ok, Gamend.Groups.GroupMember.t()} | {:error, atom()}
@@ -160,7 +163,9 @@ defmodule Gamend.Groups do
   end
 
   @doc ~S"""
-    Cancel a group invitation the current user sent.
+    Cancel (delete) a group invitation that the current user sent.
+    Only the sender can cancel their own invitation.
+    
   """
   @spec cancel_invite(Ecto.UUID.t(), Ecto.UUID.t()) :: :ok | {:error, atom()}
   def cancel_invite(_user_id, _invite_id) do
@@ -303,9 +308,7 @@ defmodule Gamend.Groups do
     end
   end
 
-  @doc ~S"""
-    Count pending join requests for a group.
-  """
+  @doc false
   @spec count_join_requests(Ecto.UUID.t()) :: non_neg_integer()
   def count_join_requests(_group_id) do
     case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
@@ -390,7 +393,10 @@ defmodule Gamend.Groups do
   end
 
   @doc ~S"""
-    Decline a pending group invite by invite id (recipient only).
+    Decline a pending group invite by **invite_id**.
+    Only the recipient can decline. The invite is marked as `"declined"`
+    (not deleted) so the sender can see the outcome.
+    
   """
   @spec decline_invite(Ecto.UUID.t(), Ecto.UUID.t()) :: :ok | {:error, atom()}
   def decline_invite(_user_id, _invite_id) do
@@ -612,7 +618,22 @@ defmodule Gamend.Groups do
   end
 
   @doc ~S"""
-    Invite a user to a group (see `Gamend.Groups.Invites.invite_to_group/3`).
+    Invite a user to a group. Creates a `GroupInvite` record and sends
+    an informational notification. The invite record is independent of the
+    notification — deleting notifications does not affect pending invites.
+    
+    If the target user already has a pending join request for this group,
+    the request is automatically approved instead of creating an invite.
+    In that case, returns `{:ok, :request_approved}`.
+    
+    The admin must already be connected to the target — a friendship, or a group
+    they are both already in. Without that an admin could put any user id at all
+    into a group with them, which made a group invite a weaker control than a
+    party invite, where `Parties.check_leader_connected_to_target/2` has always
+    required a connection. On a service children can reach, being addable to a
+    stranger's group is the contact path that matters, so the two now agree.
+    Returns `{:error, :not_connected}`.
+    
   """
   @spec invite_to_group(Ecto.UUID.t(), Ecto.UUID.t(), Ecto.UUID.t()) ::
           {:ok, Gamend.Groups.GroupInvite.t()} | {:ok, :request_approved} | {:error, atom()}
@@ -723,6 +744,7 @@ defmodule Gamend.Groups do
 
   @doc ~S"""
     List pending group invitations for a user.
+    
   """
   @spec list_invitations(
           Ecto.UUID.t(),
@@ -755,6 +777,7 @@ defmodule Gamend.Groups do
 
   @doc ~S"""
     List group invitations sent by a user.
+    
   """
   @spec list_sent_invitations(
           Ecto.UUID.t(),
@@ -841,7 +864,7 @@ defmodule Gamend.Groups do
     trusted, so it skips both the friends-only check and the per-recipient
     notification cap that `Notifications.send_notification/2` enforces.
     
-    The `group_id` / `group_name` are stored in metadata so the client can
+    The `group_id` / `group_title` are stored in metadata so the client can
     recognise and route it.
     
     ## Options
@@ -902,6 +925,7 @@ defmodule Gamend.Groups do
 
   @doc ~S"""
     Request to join a private group. Creates a pending join request.
+    
   """
   @spec request_join(Ecto.UUID.t(), Ecto.UUID.t()) ::
           {:ok, Gamend.Groups.GroupJoinRequest.t()} | {:error, atom()}

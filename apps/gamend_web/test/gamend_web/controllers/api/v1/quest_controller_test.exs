@@ -100,21 +100,97 @@ defmodule GamendWeb.Api.V1.QuestControllerTest do
       conn |> auth_conn(user) |> post("/api/v1/me/quests/repeatable/claim") |> json_response(200)
 
       # Re-armed to active, so there is nothing completed to claim.
-      assert conn
-             |> auth_conn(user)
-             |> post("/api/v1/me/quests/repeatable/claim")
-             |> json_response(409)
+      resp =
+        conn
+        |> auth_conn(user)
+        |> post("/api/v1/me/quests/repeatable/claim")
+        |> json_response(403)
+
+      assert resp["error"] == "not_completed"
 
       assert Gamend.Economy.balance(user.id, "coins") == 50
     end
 
     test "claiming a quest that was never completed is refused", %{conn: conn, user: user} do
-      assert conn
-             |> auth_conn(user)
-             |> post("/api/v1/me/quests/repeatable/claim")
-             |> json_response(409)
+      resp =
+        conn
+        |> auth_conn(user)
+        |> post("/api/v1/me/quests/repeatable/claim")
+        |> json_response(403)
+
+      assert resp["error"] == "not_completed"
 
       assert Gamend.Economy.balance(user.id, "coins") == 0
+    end
+  end
+
+  describe "public quest endpoints" do
+    setup do
+      quest =
+        create_quest(%{
+          key: "public_once",
+          category: "achievement",
+          objectives: [%{event: "won", target: 1}],
+          rewards: [%{type: "currency", code: "coins", amount: 5}]
+        })
+
+      %{quest: quest, user: AccountsFixtures.user_fixture()}
+    end
+
+    test "the catalog is a page with no progress when signed out", %{conn: conn} do
+      body = conn |> get("/api/v1/quests", %{page_size: 1}) |> json_response(200)
+
+      assert [%{"progress" => nil, "claimable" => false}] = body["data"]
+      assert body["meta"]["page_size"] == 1
+      assert body["meta"]["total_count"] >= 1
+    end
+
+    test "stats are counters under data", %{conn: conn} do
+      body = conn |> get("/api/v1/quests/stats") |> json_response(200)
+      assert %{"quests_total" => _, "completed" => _, "claimed" => _} = body["data"]
+    end
+
+    test "a user's completions list what they finished", %{conn: conn, user: user} do
+      {:ok, _} = Quests.report_event(user.id, "won")
+
+      body = conn |> get("/api/v1/quests/user/#{user.id}") |> json_response(200)
+
+      assert [%{"key" => "public_once", "progress" => %{"status" => "completed"}}] =
+               body["data"]
+
+      assert body["meta"]["total_count"] == 1
+
+      resp = conn |> get("/api/v1/quests/user/not-a-uuid") |> json_response(400)
+      assert resp["error"] == "invalid_id"
+    end
+
+    test "a claim answers not_found, then already_claimed", %{conn: conn, user: user} do
+      resp =
+        conn |> auth_conn(user) |> post("/api/v1/me/quests/no_such/claim") |> json_response(404)
+
+      assert resp["error"] == "not_found"
+
+      {:ok, _} = Quests.report_event(user.id, "won")
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> post("/api/v1/me/quests/public_once/claim")
+        |> json_response(200)
+
+      assert body["data"]["rewards"] == [
+               %{"type" => "currency", "code" => "coins", "amount" => 5}
+             ]
+
+      assert body["data"]["progress"]["status"] == "claimed"
+
+      resp =
+        conn
+        |> auth_conn(user)
+        |> post("/api/v1/me/quests/public_once/claim")
+        |> json_response(409)
+
+      assert resp["error"] == "already_claimed"
     end
   end
 

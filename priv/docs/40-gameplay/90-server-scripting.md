@@ -8,7 +8,7 @@ icon: hero-command-line
 
 The application exposes a lightweight server-side scripting surface via the `Gamend.Hooks` behaviour. Hooks let you run custom code on lifecycle events (eg. user register/login, lobby create/update) and optionally expose RPC functions.
 
-Hooks can be written in **Elixir** (this guide), in **GDScript** (see [GDScript hooks](95-gdscript-hooks.md)), or in any other BEAM language; see [Other BEAM languages](#other-beam-languages-gleam-lfe-erlang) below.
+Hooks can be written in **Elixir** (this guide), in **GDScript** (see [GDScript hooks](/docs/gdscript-hooks)), or in any other BEAM language; see [Other BEAM languages](#other-beam-languages-gleam-lfe-erlang) below.
 
 ## Add a lifecycle callback
 
@@ -39,11 +39,29 @@ end
 
 Hooks are loaded from OTP plugin applications under `modules/plugins/*`. You can override the plugins directory using:
 
-```elixir
+```bash
 GAMEND_CONTENT_PLUGINS_DIR=modules/plugins
 ```
 
 Each plugin is an OTP app directory with an `ebin` folder containing a `.app` file and compiled `.beam` modules. The plugin's `.app` env must include a `hooks_module` entry pointing at the module name.
+
+### Building a plugin
+
+The server loads `ebin/`, not your source, so rebuild after every change:
+
+| Where | How |
+|---|---|
+| Anywhere with Elixir | `mix deps.get && mix plugin.bundle` in the plugin (`mix bundle` for a GDScript plugin) |
+| The admin **Config** page | **Build bundle** on the plugin, then **Reload plugins** |
+
+The **Build bundle** button runs Mix when the server itself runs under Mix (development, the Docker `full` image). The [downloadable engine](/docs/standalone) and the `release` image have no Mix; there the button, and `gamend plugin.bundle` from the command line, compile the plugin with the compiler inside the release, Elixir and GDScript alike, with no Elixir install needed (a `mix` on the PATH is ignored: it belongs to another Elixir install). A plugin that is loaded is stopped for that build and started again afterwards, on the new bundle, or on the old one when the build fails (the old `ebin/` is only replaced by a build that succeeded).
+
+Without Mix the build has limits:
+
+- **Dependencies**: only what the engine already ships (Phoenix, Jason, Req, Ecto, Protobuf, Telemetry, …) or what the plugin carries prebuilt in `deps/<dep>/ebin` (which `mix plugin.bundle` leaves behind). `gamend_sdk` and `gamend_plugin_tools` are ignored. Any other dependency fails the build, named; there is no Hex to fetch it from.
+- **`mix.exs` is read, not run**: only literal values count (`app`, `version`, `elixirc_paths`, `extra_applications`, `mod`, `env`), including module attributes and `deps()`-style helpers that return a literal. Without a literal `hooks_module`, the one module with `use Gamend.Hooks` is picked (for GDScript, the script named after the plugin). `config/config.exs` is not loaded.
+- **No Erlang sources, no Gleam**: build those with their own toolchain and drop the bundle in.
+- **Protocols are consolidated**: a `defimpl` of an engine protocol (`Jason.Encoder`, `String.Chars`) compiles but has no effect, and the compiler says so. Convert with a function of your own instead.
 
 ### Gating resource creation with before hooks
 
@@ -62,7 +80,7 @@ def before_group_create(user, attrs) do
 end
 ```
 
-Other "before" hooks follow the same pattern: `before_lobby_create/1`, `before_lobby_join/3`, `before_group_join/3`, `before_user_update/2`. Return {:ok, attrs} (or the appropriate tuple) to allow, {:error, reason} to reject. At registration time, before_user_register/2 receives the tentative user and the registration attrs (including the generated username) on every signup path (email, device, and OAuth) and may adjust the attrs or abort. Tournaments have their own hook family (before/after_tournament_register, before_tournament_leave, tournament_match_ready, tournament_match_expired, before_tournament_result, after_tournament_match_resolved, after_tournament_finished); see the Tournaments guide for the match resolution contract. Matchmaking has its own family too (before_matchmaking_join, after_matchmaking_join, after_matchmaking_cancel, matchmaking_form_matches, after_matchmaking_matched); see the Matchmaking guide. matchmaking_form_matches/2 is the one hook that replaces built-in logic rather than gating it: it hands you a whole queue bucket and lets you group it yourself.
+Other "before" hooks follow the same pattern: `before_lobby_create/1`, `before_lobby_join/3`, `before_group_join/3`, `before_user_update/2`. Return {:ok, attrs} (or the appropriate tuple) to allow, {:error, reason} to reject. At registration time, before_user_register/2 receives the tentative user and the registration attrs (including the generated username) on every signup path (email, device, and OAuth) and may adjust the attrs or abort. Tournaments have their own hook family (before/after_tournament_register, before_tournament_leave, tournament_match_ready, tournament_match_expired, before_tournament_result, after_tournament_match_resolved, after_tournament_finished); see the Tournaments guide for the match resolution contract. Matchmaking has its own family too (before_matchmaking_join, after_matchmaking_join, after_matchmaking_cancel, matchmaking_form_matches, after_matchmaking_matched); see the Matchmaking guide. Two hooks replace built-in logic rather than gating it: matchmaking_form_matches/2 hands you a whole queue bucket and lets you group it yourself, and validate_username/1 answers `:ok`, `{:error, message}` or `:default` for a normalized handle in place of core's character rules (length, uniqueness and invisible characters stay with core; see the Authentication guide).
 
 ### Declaring what your plugin contributes
 
@@ -70,7 +88,7 @@ Three optional callbacks tell the server what your game adds, so it shows up in 
 
 ```elixir
 def notification_types do
-  %{"quest_completed" => "Player finished a quest"}
+  %{"rival_online" => "A rival the player follows came online"}
 end
 
 def realtime_events do
@@ -129,7 +147,23 @@ end
 before_push_send/2 runs once per recipient before any delivery job is enqueued. It receives the user id and the message as a string-keyed map; return {:ok, message} to allow (optionally rewritten, and the result is re-validated against the push limits) or {:error, reason} to drop the push for that user. It is where per-user opt-out, quiet hours, or moderation belong. after_push_sent/3 observes each device's final outcome: "delivered", "invalid" (token disabled), or "failed". Send a push from any hook with Gamend.Push.send_to_user/2. Delivery is queued, retried, and never blocks the caller:
 
 ```elixir
-@impl true def before_push_send(user_id, message) do # Example: respect a per-user mute stored in KV case Gamend.KV.get("push_muted", user_id: user_id) do {:ok, %{value: %{"muted" => true}}} -> {:error, :muted} _ -> {:ok, message} end end # From any hook: ping an offline player def on_turn_ready(user_id, match_id) do Gamend.Push.send_to_user(user_id, %{ "title" => "Your move!", "body" => "It is your turn.", "data" => %{"match_id" => match_id}, "collapse_key" => "turn-#{match_id})
+@impl true
+def before_push_send(user_id, message) do
+  # Example: respect a per-user mute stored in KV
+  case Gamend.KV.get("push_muted", user_id: user_id) do
+    {:ok, %{value: %{"muted" => true}}} -> {:error, :muted}
+    _ -> {:ok, message}
+  end
+end
+
+# From any hook: ping an offline player
+def on_turn_ready(user_id, match_id) do
+  Gamend.Push.send_to_user(user_id, %{
+    "title" => "Your move!",
+    "body" => "It is your turn.",
+    "data" => %{"match_id" => match_id},
+    "collapse_key" => "turn-#{match_id}"
+  })
 end
 ```
 
@@ -171,7 +205,7 @@ end
 
 ### Ready check hooks
 
-before_ready_check_open/2 can veto a check before it opens (veto-only: it never rewrites its args). after_ready_check_passed/1 is the "everyone answered ready" callback, the natural place to start the match. after_ready_check_failed/3 receives (check, reason, not_ready) where reason is "declined\
+before_ready_check_open/2 can veto a check before it opens (veto-only: it never rewrites its args). after_ready_check_passed/1 is the "everyone answered ready" callback, the natural place to start the match. after_ready_check_failed/3 receives (check, reason, not_ready) where reason is "declined" (a matchmaking accept check only; a "no" on a ready check leaves it pending), "timeout" or "cancelled". Core deliberately does nothing on failure: it kicks nobody, deletes no lobby and moves no lobby state, so whether a slow player is removed is your decision. Note that ready state gates nothing by itself. Wire it to your own start in before_lobby_state_change:
 
 ```elixir
 @impl true
@@ -205,7 +239,7 @@ defmodule MyApp.HooksImpl do
 end
 ```
 
-You can now call this function via the API (or better yet from the client SDK's), eg:
+You can now call this function via the API (or better yet from a client SDK), e.g.:
 
 ```bash
 curl -X POST https://your-gamend.com/api/v1/hooks/call \
@@ -214,12 +248,15 @@ curl -X POST https://your-gamend.com/api/v1/hooks/call \
   -d '{"plugin":"my_game_hook","fn":"hello_world","args":["Alice"]}'
 ```
 
+The answer is `{"data": <whatever the function returned>}`. An `{:error, reason}` from the function answers 400 with `reason` as the `error` code when it is a snake_case atom (so a game can switch on `not_enough_gold`), and `hook_error` with the detail in `message` otherwise. An unknown plugin or function is 404 (`plugin_not_found`, `not_implemented`), a hook that times out 504. `GET /api/v1/hooks` pages through what a client may call, each entry naming its `plugin` and `fn` exactly as the call takes them.
+
 ### Server-only privileges
 
 A few domain functions accept options that the HTTP and channel surfaces never pass, so they are reachable only from server-side code. The main one is seating a player in a locked lobby:
 
 ```elixir
-# Join succeeds even though the lobby is locked Gamend.Lobbies.join_lobby(user, lobby_id, %{bypass_lock: true})
+# Join succeeds even though the lobby is locked
+Gamend.Lobbies.join_lobby(user, lobby_id, %{bypass_lock: true})
 ```
 
 Useful for reconnects, admin tooling, or seating a late player into a match already in progress. Capacity and blacklist checks still apply: bypass_lock only skips the lock, so it cannot be used to overfill a lobby or to put two players who blocked each other together.
@@ -229,13 +266,24 @@ Useful for reconnects, admin tooling, or seating a late player into a match alre
 For work that must survive a restart, retry on failure, or run later, enqueue a hook as a durable background job instead of doing it inline. Args are stored as JSON, so callbacks receive a string-keyed map:
 
 ```elixir
-# Run now, retried with backoff on failure Gamend.Jobs.enqueue_hook(:on_welcome_email, %{"user_id" => user.id}) # Run in 24 hours Gamend.Jobs.enqueue_in(24 * 60 * 60, :on_trial_reminder, %{"user_id" => user.id}) def on_welcome_email(%{"user_id" => user_id}), do: :ok
+# Run now, retried with backoff on failure
+Gamend.Jobs.enqueue_hook(:on_welcome_email, %{"user_id" => user.id})
+
+# Run in 24 hours
+Gamend.Jobs.enqueue_in(24 * 60 * 60, :on_trial_reminder, %{"user_id" => user.id})
+
+def on_welcome_email(%{"user_id" => user_id}), do: :ok
 ```
 
 For recurring work, register cron-like schedules from your after_startup hook. These are durable and distributed-safe, and exactly one instance runs each job per period:
 
 ```elixir
-def after_startup do Gamend.Schedule.hourly(:on_hourly) Gamend.Schedule.daily(:on_morning_report, hour: 9) Gamend.Schedule.cron(:sweep, "*/15 * * * *", :on_every_15m) :ok end
+def after_startup do
+  Gamend.Schedule.hourly(:on_hourly)
+  Gamend.Schedule.daily(:on_morning_report, hour: 9)
+  Gamend.Schedule.cron(:sweep, "*/15 * * * *", :on_every_15m)
+  :ok
+end
 ```
 
 ### Virtual economy (wallets)
@@ -243,7 +291,13 @@ def after_startup do Gamend.Schedule.hourly(:on_hourly) Gamend.Schedule.daily(:o
 Grant and spend virtual currency from hooks. Currencies are free-form codes; every change is atomic and recorded in a ledger, so two concurrent spends can never overspend:
 
 ```elixir
-# On match win, reward the player Gamend.Economy.grant(user_id, "gold", 100, reason: "match_reward") # Charge for a store item — refuses to go negative case Gamend.Economy.spend(user_id, "gold", 30, reason: "store_purchase") do {:ok, balance} -> {:ok, %{"gold" => balance}} {:error, :insufficient_funds} -> {:error, "not enough gold
+# On match win, reward the player
+Gamend.Economy.grant(user_id, "gold", 100, reason: "match_reward")
+
+# Charge for a store item; refuses to go negative
+case Gamend.Economy.spend(user_id, "gold", 30, reason: "store_purchase") do
+  {:ok, balance} -> {:ok, %{"gold" => balance}}
+  {:error, :insufficient_funds} -> {:error, "not enough gold"}
 end
 
 Gamend.Economy.balances(user_id)   # => %{"gold" => 70}

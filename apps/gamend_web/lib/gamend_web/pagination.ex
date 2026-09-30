@@ -39,11 +39,23 @@ defmodule GamendWeb.Pagination do
     }
   end
 
+  @doc """
+  How many pages `total_count` entries fill at `page_size` each: `0` for no
+  entries or a non-positive size. Forty-odd LiveViews and components computed
+  this inline, a dozen through their own private `ceil_div/2`.
+  """
+  @spec total_pages(integer(), integer()) :: non_neg_integer()
+  def total_pages(total_count, page_size)
+      when is_integer(total_count) and is_integer(page_size) and page_size > 0 and total_count > 0,
+      do: div(total_count + page_size - 1, page_size)
+
+  def total_pages(_total_count, _page_size), do: 0
+
   @doc "Pagination meta for one page of `count` entries out of `total_count`."
   @spec meta(integer(), integer(), integer(), integer()) :: map()
   def meta(page, page_size, count, total_count)
       when is_integer(page) and is_integer(page_size) do
-    total_pages = if page_size > 0, do: div(total_count + page_size - 1, page_size), else: 0
+    total_pages = total_pages(total_count, page_size)
 
     %{
       page: page,

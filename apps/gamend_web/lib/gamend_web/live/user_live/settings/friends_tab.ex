@@ -56,7 +56,7 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
                 class="p-2 border rounded mt-2"
               >
                 <div class="text-sm">
-                  {LiveHelpers.public_user_name(req.requester || req.requester_id)}
+                  <.player_name name={LiveHelpers.public_user_name(req.requester || req.requester_id)} />
                   <span class="text-xs text-base-content/60 ms-2">
                     {LiveHelpers.public_user_handle(req.requester)}
                   </span>
@@ -103,7 +103,7 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
                 class="p-2 border rounded mt-2"
               >
                 <div class="text-sm">
-                  {LiveHelpers.public_user_name(req.target || req.target_id)}
+                  <.player_name name={LiveHelpers.public_user_name(req.target || req.target_id)} />
                   <span class="text-xs text-base-content/60 ms-2">
                     {LiveHelpers.public_user_handle(req.target)}
                   </span>
@@ -141,9 +141,9 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
                         "inline-block w-2 h-2 rounded-full shrink-0",
                         if(u.is_online, do: "bg-green-500", else: "bg-gray-400")
                       ]}
-                      title={if(u.is_online, do: "Online", else: "Offline")}
+                      title={if(u.is_online, do: gettext("Online"), else: gettext("Offline"))}
                     />
-                    {LiveHelpers.public_user_name(u)}
+                    <.player_name name={LiveHelpers.public_user_name(u)} />
                     <span class="text-xs text-base-content/60">
                       {LiveHelpers.public_user_handle(u)}
                     </span>
@@ -184,7 +184,7 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
                 class="p-2 border rounded mt-2 flex items-center justify-between"
               >
                 <div class="text-sm">
-                  {LiveHelpers.public_user_name(b.requester || b.requester_id)}
+                  <.player_name name={LiveHelpers.public_user_name(b.requester || b.requester_id)} />
                   <span class="text-xs text-base-content/60 ms-2">
                     {LiveHelpers.public_user_handle(b.requester)}
                   </span>
@@ -237,7 +237,7 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
               <div :for={{dom_id, s} <- @streams.search_results} id={dom_id}>
                 <div class="p-2 border rounded bg-base-100 flex items-center justify-between">
                   <div class="text-sm">
-                    {LiveHelpers.public_user_name(s)}
+                    <.player_name name={LiveHelpers.public_user_name(s)} />
                     <span class="text-xs text-base-content/60 ms-2">
                       {LiveHelpers.public_user_handle(s)}
                     </span>
@@ -278,7 +278,7 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
     page_size = socket.assigns.search_page_size || @page_size
     results = Accounts.search_users(q, page: page, page_size: page_size)
     total = if q == "", do: 0, else: Accounts.count_search_users(q)
-    total_pages = if page_size > 0, do: div(total + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(total, page_size)
 
     {:noreply,
      socket
@@ -303,11 +303,9 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
          |> put_flash(:info, gettext("Success."))
          |> refresh_friend_lists(user)}
 
-      {:error, %Ecto.Changeset{} = cs} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed") <> ": " <> inspect(cs.errors))}
-
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed") <> ": " <> inspect(reason))}
+        {:noreply,
+         put_flash(socket, :error, LiveHelpers.failure_message(gettext("Failed"), reason))}
     end
   end
 
@@ -320,7 +318,8 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
         {:noreply, refresh_friend_lists(socket, user)}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed") <> ": " <> inspect(reason))}
+        {:noreply,
+         put_flash(socket, :error, LiveHelpers.failure_message(gettext("Failed"), reason))}
     end
   end
 
@@ -333,7 +332,8 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
         {:noreply, refresh_friend_lists(socket, user)}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed") <> ": " <> inspect(reason))}
+        {:noreply,
+         put_flash(socket, :error, LiveHelpers.failure_message(gettext("Failed"), reason))}
     end
   end
 
@@ -346,7 +346,8 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
         {:noreply, refresh_friend_lists(socket, user)}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed") <> ": " <> inspect(reason))}
+        {:noreply,
+         put_flash(socket, :error, LiveHelpers.failure_message(gettext("Failed"), reason))}
     end
   end
 
@@ -359,7 +360,8 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
         {:noreply, refresh_friend_lists(socket, user)}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed") <> ": " <> inspect(reason))}
+        {:noreply,
+         put_flash(socket, :error, LiveHelpers.failure_message(gettext("Failed"), reason))}
     end
   end
 
@@ -372,7 +374,8 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
         {:noreply, refresh_friend_lists(socket, user)}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed") <> ": " <> inspect(reason))}
+        {:noreply,
+         put_flash(socket, :error, LiveHelpers.failure_message(gettext("Failed"), reason))}
     end
   end
 
@@ -385,7 +388,8 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
         {:noreply, refresh_friend_lists(socket, user)}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, gettext("Failed") <> ": " <> inspect(reason))}
+        {:noreply,
+         put_flash(socket, :error, LiveHelpers.failure_message(gettext("Failed"), reason))}
     end
   end
 
@@ -417,7 +421,7 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
     page_size = socket.assigns.search_page_size || @page_size
     results = Accounts.search_users(q, page: page, page_size: page_size)
     total = if q == "", do: 0, else: Accounts.count_search_users(q)
-    total_pages = if page_size > 0, do: div(total + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(total, page_size)
 
     socket
     |> stream(:search_results, results, reset: true, dom_id: &"search-#{&1.id}")
@@ -470,14 +474,11 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
       outgoing_total: outgoing_total,
       friends_total: friends_total,
       blocked_total: blocked_total,
-      incoming_total_pages: total_pages(incoming_total, incoming_page_size),
-      outgoing_total_pages: total_pages(outgoing_total, outgoing_page_size),
-      friends_total_pages: total_pages(friends_total, friends_page_size),
-      blocked_total_pages: total_pages(blocked_total, blocked_page_size),
+      incoming_total_pages: LiveHelpers.total_pages(incoming_total, incoming_page_size),
+      outgoing_total_pages: LiveHelpers.total_pages(outgoing_total, outgoing_page_size),
+      friends_total_pages: LiveHelpers.total_pages(friends_total, friends_page_size),
+      blocked_total_pages: LiveHelpers.total_pages(blocked_total, blocked_page_size),
       friend_unread_counts: %{}
     )
   end
-
-  defp total_pages(_total, page_size) when page_size <= 0, do: 0
-  defp total_pages(total, page_size), do: div(total + page_size - 1, page_size)
 end

@@ -3,6 +3,7 @@ defmodule GamendWeb.AdminLive.Quests do
 
   alias Gamend.Quests
   alias Gamend.Quests.Quest
+  alias GamendWeb.LiveHelpers
 
   @resets Quest.resets()
   @statuses ~w(active completed claimed)
@@ -75,7 +76,6 @@ defmodule GamendWeb.AdminLive.Quests do
                     <th>Rewards</th>
                     <th>Active</th>
                     <th>Funnel (act/comp/claim)</th>
-                    <th>i18n</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -218,7 +218,7 @@ defmodule GamendWeb.AdminLive.Quests do
                           phx-value-key={p.quest_key}
                           class="btn btn-xs btn-outline btn-success"
                         >
-                          Complete
+                          Force complete
                         </button>
                         <button
                           :if={p.status == "completed"}
@@ -358,7 +358,7 @@ defmodule GamendWeb.AdminLive.Quests do
               <.input
                 field={@form[:hidden]}
                 type="checkbox"
-                label="Hidden (only shown after completion)"
+                label="Hidden (listed as ??? until completed)"
               />
               <.input
                 field={@form[:auto_claim]}
@@ -424,27 +424,14 @@ defmodule GamendWeb.AdminLive.Quests do
      |> reload_quests()}
   end
 
-  def handle_event("prev_page", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:page, max(1, socket.assigns.page - 1))
-     |> reload_quests()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload_quests()}
 
-  def handle_event("next_page", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:page, socket.assigns.page + 1)
-     |> reload_quests()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload_quests()}
 
-  def handle_event("page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:page_size, String.to_integer(size))
-     |> assign(:page, 1)
-     |> reload_quests()}
-  end
+  def handle_event("page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload_quests()}
 
   def handle_event("new_quest", _, socket) do
     changeset = Quests.change_quest(%Quest{})
@@ -583,27 +570,18 @@ defmodule GamendWeb.AdminLive.Quests do
      |> reload_progress()}
   end
 
-  def handle_event("progress_prev_page", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:progress_page, max(1, socket.assigns.progress_page - 1))
-     |> reload_progress()}
-  end
+  def handle_event("progress_prev_page", _, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page(:progress_page) |> reload_progress()}
 
-  def handle_event("progress_next_page", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:progress_page, socket.assigns.progress_page + 1)
-     |> reload_progress()}
-  end
+  def handle_event("progress_next_page", _, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page(:progress_page) |> reload_progress()}
 
-  def handle_event("progress_page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:progress_page_size, String.to_integer(size))
-     |> assign(:progress_page, 1)
-     |> reload_progress()}
-  end
+  def handle_event("progress_page_size", %{"size" => size}, socket),
+    do:
+      {:noreply,
+       socket
+       |> LiveHelpers.put_page_size(size, size_key: :progress_page_size, page_key: :progress_page)
+       |> reload_progress()}
 
   def handle_event("force_complete", %{"user" => user_id, "key" => key}, socket) do
     case Quests.admin_complete(user_id, key) do
@@ -683,7 +661,7 @@ defmodule GamendWeb.AdminLive.Quests do
 
     quests = Quests.list_quests(page: page, page_size: page_size, category: category)
     count = Quests.count_quests(category: category)
-    total_pages = if page_size > 0, do: div(count + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(count, page_size)
     funnels = Map.new(quests, fn q -> {q.key, Quests.funnel(q.key)} end)
 
     socket
@@ -703,24 +681,20 @@ defmodule GamendWeb.AdminLive.Quests do
     opts = [
       page: page,
       page_size: page_size,
-      user_id: blank_to_nil(filters["user_id"]),
-      quest_key: blank_to_nil(filters["quest_key"]),
-      status: blank_to_nil(filters["status"])
+      user_id: Gamend.Parse.blank_to_nil(filters["user_id"]),
+      quest_key: Gamend.Parse.blank_to_nil(filters["quest_key"]),
+      status: Gamend.Parse.blank_to_nil(filters["status"])
     ]
 
     rows = Quests.list_progress(opts)
     count = Quests.count_progress(opts)
-    total_pages = if page_size > 0, do: div(count + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(count, page_size)
 
     socket
     |> assign(:progress_rows, rows)
     |> assign(:progress_count, count)
     |> assign(:progress_total_pages, max(total_pages, 1))
   end
-
-  defp blank_to_nil(nil), do: nil
-  defp blank_to_nil(""), do: nil
-  defp blank_to_nil(value), do: value
 
   defp progress_user_name(progress) do
     case progress.user do

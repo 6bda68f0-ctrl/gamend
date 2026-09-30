@@ -21,6 +21,7 @@ defmodule GamendWeb.AuthControllerTest do
     put_provider_setting(:discord_client_id, "test-discord-id")
     put_provider_setting(:google_client_id, "test-google-id")
     put_provider_setting(:facebook_client_id, "test-facebook-id")
+    put_provider_setting(:github_client_id, "test-github-id")
     put_provider_setting(:steam_api_key, "test-steam-key")
     :ok
   end
@@ -48,6 +49,16 @@ defmodule GamendWeb.AuthControllerTest do
     conn = get(conn, "/auth/facebook")
     assert redirected_to(conn) =~ "facebook.com"
     assert redirected_to(conn) =~ "client_id=fb-123"
+  end
+
+  # No scope: a GitHub App ignores it, its permissions live on the App.
+  test "request redirects to provider (github)", %{conn: conn} do
+    put_provider_setting(:github_client_id, "gh-123")
+
+    conn = get(conn, "/auth/github")
+    assert redirected_to(conn) =~ "github.com/login/oauth/authorize"
+    assert redirected_to(conn) =~ "client_id=gh-123"
+    refute redirected_to(conn) =~ "scope="
   end
 
   test "request redirects to provider (apple)", %{conn: conn} do
@@ -144,6 +155,61 @@ defmodule GamendWeb.AuthControllerTest do
 
     session = OAuthSessions.get_session(session_id)
     assert session.status == "completed"
+  end
+
+  describe "an account scheduled for deletion" do
+    defmodule TestExchanger.ScheduledDiscord do
+      def exchange_discord_code(_code, _client_id, _secret, _redirect) do
+        {:ok, %{"id" => "d-scheduled", "email" => "leaving@example.com", "username" => "leaving"}}
+      end
+    end
+
+    setup do
+      orig = Application.get_env(:gamend_web, :oauth_exchanger)
+      Application.put_env(:gamend_web, :oauth_exchanger, TestExchanger.ScheduledDiscord)
+      SettingsHelpers.put(:gamend_core, Accounts, :deletion_grace_days, 30)
+
+      on_exit(fn ->
+        Application.put_env(:gamend_web, :oauth_exchanger, orig)
+        SettingsHelpers.delete(:gamend_core, Accounts, :deletion_grace_days)
+      end)
+
+      {:ok, user} =
+        Accounts.find_or_create_from_discord(%{
+          discord_id: "d-scheduled",
+          email: "leaving@example.com"
+        })
+
+      {:ok, {:scheduled, user, _}} = Accounts.request_deletion(user)
+      %{user: user}
+    end
+
+    test "the polling flow answers deletion_scheduled and issues no tokens",
+         %{conn: conn, user: user} do
+      session_id = "sid-#{System.unique_integer([:positive])}"
+      OAuthSessions.create_session(session_id, %{provider: "discord", status: "pending"})
+
+      _conn = get(conn, "/auth/discord/callback?code=abc&state=#{session_id}")
+
+      session = OAuthSessions.get_session(session_id)
+      assert session.status == "error"
+      assert session.data["error"] == "deletion_scheduled"
+      refute Map.has_key?(session.data, "access_token")
+      assert Accounts.deletion_scheduled?(Accounts.get_user!(user.id))
+    end
+
+    test "signing in with the provider on the website keeps the account",
+         %{conn: conn, user: user} do
+      # A browser flow's state, as the request step issues it.
+      state = "browser:#{System.unique_integer([:positive])}"
+      OAuthSessions.create_session(state, %{provider: "discord", status: "pending"})
+
+      conn = get(conn, "/auth/discord/callback?code=abc&state=#{state}")
+
+      assert get_session(conn, :user_token)
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "will not be deleted"
+      refute Accounts.deletion_scheduled?(Accounts.get_user!(user.id))
+    end
   end
 
   test "callback (google) success browser and api flows", %{conn: conn} do
@@ -260,6 +326,75 @@ defmodule GamendWeb.AuthControllerTest do
     assert session.status == "error"
   end
 
+  test "callback (github) success browser and api flows", %{conn: conn} do
+    orig = Application.get_env(:gamend_web, :oauth_exchanger)
+
+    defmodule TestExchanger.SuccessGithub do
+      def exchange_github_code(_code, _client_id, _secret, _redirect) do
+        {:ok,
+         %{
+           "id" => 583_231,
+           "login" => "octocat",
+           "name" => "The Octocat",
+           "avatar_url" => "https://avatars.githubusercontent.com/u/583231",
+           "email" => "octocat@example.com",
+           "email_verified" => true
+         }}
+      end
+    end
+
+    Application.put_env(:gamend_web, :oauth_exchanger, TestExchanger.SuccessGithub)
+
+    on_exit(fn -> Application.put_env(:gamend_web, :oauth_exchanger, orig) end)
+
+    # browser flow, with the state /auth/github issued
+    auth_conn = get(conn, "/auth/github")
+    state = oauth_state_from_redirect(auth_conn)
+
+    conn1 = get(build_conn(), "/auth/github/callback?code=yyy&state=#{state}")
+    assert redirected_to(conn1) == "/"
+    assert Phoenix.Flash.get(conn1.assigns.flash, :error) == nil
+
+    # GitHub's integer id is stored as a string
+    user = Accounts.get_user_by_github_id("583231")
+    assert user.email == "octocat@example.com"
+    assert user.display_name == "The Octocat"
+    assert user.profile_url == "https://avatars.githubusercontent.com/u/583231"
+
+    # api flow with state
+    session_id = "sid-#{System.unique_integer([:positive])}"
+
+    OAuthSessions.create_session(session_id, %{provider: "github", status: "pending"})
+
+    _conn2 = get(conn, "/auth/github/callback?code=yyy&state=#{session_id}")
+
+    session = OAuthSessions.get_session(session_id)
+    assert session.status == "completed"
+  end
+
+  test "callback (github) error creates session with error status", %{conn: conn} do
+    orig = Application.get_env(:gamend_web, :oauth_exchanger)
+
+    defmodule TestExchanger.ErrorGithub do
+      def exchange_github_code(_code, _client_id, _secret, _redirect), do: {:error, :failed}
+    end
+
+    Application.put_env(:gamend_web, :oauth_exchanger, TestExchanger.ErrorGithub)
+
+    on_exit(fn -> Application.put_env(:gamend_web, :oauth_exchanger, orig) end)
+
+    session_id = "sid-#{System.unique_integer([:positive])}"
+
+    OAuthSessions.create_session(session_id, %{provider: "github", status: "pending"})
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      _conn = get(conn, "/auth/github/callback?code=yyy&state=#{session_id}")
+    end)
+
+    session = OAuthSessions.get_session(session_id)
+    assert session.status == "error"
+  end
+
   test "callback (apple) success browser and api flows", %{conn: conn} do
     orig = Application.get_env(:gamend_web, :oauth_exchanger)
 
@@ -319,6 +454,52 @@ defmodule GamendWeb.AuthControllerTest do
 
     session = OAuthSessions.get_session(session_id)
     assert session.status == "completed"
+  end
+
+  # Apple sends the name once, as a `user` form field beside the code, and
+  # never in the ID token: a callback that ignores it leaves the account
+  # nameless for good.
+  test "callback (apple) takes the display name from the one-time user field", %{conn: conn} do
+    orig = Application.get_env(:gamend_web, :oauth_exchanger)
+    oauth_orig = Application.get_env(:ueberauth, Ueberauth.Strategy.Apple.OAuth)
+
+    Gamend.SettingsHelpers.put(
+      :gamend_core,
+      Gamend.OAuth.Providers,
+      :apple_client_id,
+      "com.example.web"
+    )
+
+    Application.put_env(:ueberauth, Ueberauth.Strategy.Apple.OAuth,
+      client_id: "com.example.web",
+      client_secret: "dummy-secret"
+    )
+
+    defmodule TestExchanger.AppleWithName do
+      def exchange_apple_code(_code, _client_id, _secret, _redirect) do
+        {:ok, %{"sub" => "apple-with-name", "email" => "apple-with-name@example.com"}}
+      end
+    end
+
+    Application.put_env(:gamend_web, :oauth_exchanger, TestExchanger.AppleWithName)
+
+    on_exit(fn ->
+      Application.put_env(:gamend_web, :oauth_exchanger, orig)
+      Application.put_env(:ueberauth, Ueberauth.Strategy.Apple.OAuth, oauth_orig)
+    end)
+
+    state = oauth_state_from_redirect(get(conn, "/auth/apple"))
+    user = ~s({"name":{"firstName":" Ada ","lastName":"Lovelace"},"email":"x@y.z"})
+
+    conn =
+      post(build_conn(), "/auth/apple/callback", %{
+        "code" => "xxx",
+        "state" => state,
+        "user" => user
+      })
+
+    assert redirected_to(conn) == "/"
+    assert Accounts.get_user_by_apple_id("apple-with-name").display_name == "Ada Lovelace"
   end
 
   test "callback (apple) browser form_post works without callback session cookie", %{conn: conn} do
@@ -630,36 +811,81 @@ defmodule GamendWeb.AuthControllerTest do
     assert OAuthSessions.get_session(session_id) == nil
   end
 
-  test "GET /api/v1/auth/session/:session_id returns status, message, data at top level", %{
-    conn: conn
-  } do
+  test "GET /api/v1/auth/session/:session_id hands the session over once", %{conn: conn} do
+    user = Gamend.AccountsFixtures.user_fixture()
     session_id = "sid-#{System.unique_integer([:positive])}"
 
     OAuthSessions.create_session(session_id, %{provider: "google", status: "completed"})
-    OAuthSessions.update_session(session_id, %{data: %{access_token: "tok", message: "done"}})
 
-    conn = get(conn, "/api/v1/auth/session/#{session_id}")
-    body = json_response(conn, 200)
+    OAuthSessions.update_session(session_id, %{
+      data: %{
+        access_token: "tok",
+        refresh_token: "ref",
+        expires_in: 900,
+        user_id: user.id,
+        username: user.username,
+        display_name: "",
+        message: "done"
+      }
+    })
 
-    assert body["status"] == "completed"
-    assert body["message"] == "done"
-    assert is_map(body["data"])
-    assert body["data"]["access_token"] == "tok"
-    refute Map.has_key?(body["data"], "message")
+    body = conn |> get("/api/v1/auth/session/#{session_id}") |> json_response(200)
+    data = body["data"]
+
+    assert data["status"] == "completed"
+    assert data["message"] == "done"
+    assert data["error"] == ""
+    assert data["session"]["access_token"] == "tok"
+    assert data["session"]["user_id"] == user.id
+    assert data["session"]["username"] == user.username
+
+    again = conn |> get("/api/v1/auth/session/#{session_id}") |> json_response(200)
+    assert again["data"]["status"] == "completed"
+    assert again["data"]["session"] == nil
   end
 
-  test "GET /api/v1/auth/session/:session_id returns empty message and {} data when session has no data",
-       %{conn: conn} do
+  test "GET /api/v1/auth/session/:session_id is pending with no session yet", %{conn: conn} do
     session_id = "sid-#{System.unique_integer([:positive])}"
 
     OAuthSessions.create_session(session_id, %{provider: "google", status: "pending"})
 
-    conn = get(conn, "/api/v1/auth/session/#{session_id}")
-    body = json_response(conn, 200)
+    body = conn |> get("/api/v1/auth/session/#{session_id}") |> json_response(200)
 
-    assert body["status"] == "pending"
-    assert body["message"] == ""
-    assert body["data"] == %{}
+    assert body["data"] == %{
+             "status" => "pending",
+             "error" => "",
+             "message" => "",
+             "session" => nil
+           }
+  end
+
+  test "GET /api/v1/auth/session/:session_id reports a failed sign-in by code", %{conn: conn} do
+    session_id = "sid-#{System.unique_integer([:positive])}"
+
+    OAuthSessions.create_session(session_id, %{
+      provider: "google",
+      status: "error",
+      data: %{error: "account_not_activated", message: "Pending activation"}
+    })
+
+    body = conn |> get("/api/v1/auth/session/#{session_id}") |> json_response(200)
+
+    assert %{"status" => "error", "error" => "account_not_activated", "session" => nil} =
+             body["data"]
+  end
+
+  test "GET /api/v1/auth/session/:session_id does not show a link session", %{conn: conn} do
+    user = Gamend.AccountsFixtures.user_fixture()
+    session_id = "sid-#{System.unique_integer([:positive])}"
+
+    OAuthSessions.create_session(session_id, %{
+      provider: "google",
+      status: "completed",
+      data: %{link_user_id: user.id, provider: "google"}
+    })
+
+    body = conn |> get("/api/v1/auth/session/#{session_id}") |> json_response(404)
+    assert body["error"] == "session_not_found"
   end
 
   test "GET /api/v1/auth/session/:session_id returns 404 error object when missing", %{conn: conn} do

@@ -8,7 +8,7 @@ Lobby snapshots are a durable record of how a [lobby's](/docs/lobbies) state evo
 
 ## Turning it on
 
-```elixir
+```bash
 GAMEND_LOBBY_SNAPSHOTS_ENABLED=true
 ```
 
@@ -49,7 +49,7 @@ The same reads are available to plugins: `timeline/1`, `state_at/1`, `diff/2`, a
 
 ## Retention
 
-`GAMEND_RETENTION_LOBBY_SNAPSHOTS_DAYS` defaults to **30** (unlike most retention vars, which default to keep-forever) because retention is what actually bounds the privacy exposure of captured metadata and KV. Runs flagged anomalous keep `GAMEND_RETENTION_LOBBY_SNAPSHOTS_FLAGGED_DAYS` instead (default 90, never shorter than the normal window). Snapshots and events expire together, per run: a flagged run keeps its events too.
+`GAMEND_RETENTION_LOBBY_SNAPSHOTS_DAYS` defaults to **30** (unlike the chat, ledger, notification and other history windows, which default to keep-forever) because retention is what actually bounds the privacy exposure of captured metadata and KV. Runs flagged anomalous keep `GAMEND_RETENTION_LOBBY_SNAPSHOTS_FLAGGED_DAYS` instead (default 90, never shorter than the normal window). Snapshots and events are pruned by age, row by row; which window applies is decided per run, so a flagged run keeps its events as well as its snapshots. A stored section is deleted once nothing has referenced it for the longer of the two windows.
 
 ## What it costs
 

@@ -24,6 +24,13 @@ defmodule GamendWeb.Api.V1.MatchmakingControllerTest do
       assert data["max_players"] == 4
     end
 
+    test "a second join answers already_queued", %{conn: conn} do
+      post(conn, "/api/v1/matchmaking/tickets", %{})
+
+      conn = post(conn, "/api/v1/matchmaking/tickets", %{})
+      assert json_response(conn, 409) == %{"error" => "already_queued"}
+    end
+
     test "defaults min/max when omitted", %{conn: conn} do
       conn = post(conn, "/api/v1/matchmaking/tickets", %{})
       assert %{"data" => %{"min_players" => 2, "max_players" => 5}} = json_response(conn, 201)
@@ -33,7 +40,7 @@ defmodule GamendWeb.Api.V1.MatchmakingControllerTest do
       body = %{"min_players" => 5, "max_players" => 2}
       conn = post(conn, "/api/v1/matchmaking/tickets", body)
 
-      assert %{"error" => "invalid_data", "errors" => %{"max_players" => _}} =
+      assert %{"error" => "validation_failed", "errors" => %{"max_players" => _}} =
                json_response(conn, 422)
     end
 
@@ -67,9 +74,9 @@ defmodule GamendWeb.Api.V1.MatchmakingControllerTest do
       assert id == ticket.id
     end
 
-    test "returns null when not in the queue", %{conn: conn} do
+    test "answers not_queued when not in the queue", %{conn: conn} do
       conn = get(conn, "/api/v1/matchmaking/tickets/me")
-      assert %{"data" => nil} = json_response(conn, 200)
+      assert %{"error" => "not_queued"} = json_response(conn, 404)
     end
   end
 

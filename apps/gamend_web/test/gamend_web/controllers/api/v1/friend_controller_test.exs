@@ -57,6 +57,33 @@ defmodule GamendWeb.Api.V1.FriendControllerTest do
     assert del.status == 200
   end
 
+  test "the target can reject a request, which removes it", %{conn: conn} do
+    a = AccountsFixtures.user_fixture()
+    b = AccountsFixtures.user_fixture()
+    {:ok, _} = Friends.create_request(a.id, b.id)
+
+    f =
+      Repo.one(
+        from fr in Gamend.Friends.Friendship,
+          where: fr.requester_id == ^a.id and fr.target_id == ^b.id
+      )
+
+    {:ok, token_b, _} = Guardian.encode_and_sign(b)
+    conn_b = conn |> put_req_header("authorization", "Bearer " <> token_b)
+
+    assert conn_b |> post("/api/v1/friends/#{f.id}/reject") |> json_response(200) == %{
+             "ok" => true
+           }
+
+    incoming =
+      conn_b
+      |> get("/api/v1/me/friend_requests")
+      |> json_response(200)
+      |> get_in(["data", "incoming"])
+
+    refute Enum.any?(incoming, &(&1["id"] == f.id))
+  end
+
   test "requests endpoint returns incoming and outgoing", %{conn: conn} do
     a = AccountsFixtures.user_fixture()
     b = AccountsFixtures.user_fixture()

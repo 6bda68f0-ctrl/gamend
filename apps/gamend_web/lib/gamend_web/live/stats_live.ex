@@ -85,18 +85,19 @@ defmodule GamendWeb.StatsLive do
           </div>
           <div class="stats stats-vertical sm:stats-horizontal shadow bg-base-200 w-full mt-3">
             <.stat title={gettext("Active today")} value={@activity.dau} desc={gettext("UTC")} />
+            <%!-- Rolling windows ending today, not calendar weeks or months. --%>
             <.stat
-              title={gettext("Active this week")}
+              title={gettext("Active")}
               value={@activity.wau}
               desc={gettext("last 7 days")}
             />
             <.stat
-              title={gettext("Active this month")}
+              title={gettext("Active")}
               value={@activity.mau}
               desc={gettext("last 30 days")}
             />
             <.stat
-              title={gettext("New this week")}
+              title={gettext("New players")}
               value={@activity.new_users_7d}
               desc={gettext("last 7 days")}
             />

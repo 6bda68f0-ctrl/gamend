@@ -134,11 +134,11 @@ defmodule GamendWeb.AuthSuccessLive do
                         </div>
                         <div class="ms-3">
                           <h3 class="text-sm font-medium text-yellow-800">
-                            {gettext("Failed")}
+                            {gettext("Something went wrong")}
                           </h3>
                           <div class="mt-2 text-sm text-yellow-700">
                             <p>
-                              {gettext("Failed")}
+                              {gettext("This sign-in is already linked to another account")}
                             </p>
                           </div>
                         </div>
@@ -158,17 +158,10 @@ defmodule GamendWeb.AuthSuccessLive do
                         </div>
                         <div class="ms-3">
                           <h3 class="text-sm font-medium text-red-800">
-                            {gettext("Failed")}
+                            {gettext("Something went wrong")}
                           </h3>
                           <div class="mt-2 text-sm text-red-700">
-                            <p>{gettext("Failed")}</p>
-                            <% details =
-                              Map.get(@session_data, "details") || Map.get(@session_data, :details) %>
-                            <%= if details do %>
-                              <p class="mt-1">
-                                <strong>{gettext("Description")}:</strong> {inspect(details)}
-                              </p>
-                            <% end %>
+                            <p>{error_text(@session_data)}</p>
                           </div>
                         </div>
                       </div>
@@ -215,5 +208,31 @@ defmodule GamendWeb.AuthSuccessLive do
       </div>
     </Layouts.app>
     """
+  end
+
+  # `GamendWeb.AuthController` records an `error` code (and an English
+  # `message`) or a bare `details` code; the stored map comes back with string
+  # keys. Show the reader what happened in their language, never the raw value.
+  defp error_text(session_data) do
+    code =
+      Map.get(session_data, "error") || Map.get(session_data, :error) ||
+        Map.get(session_data, "details") || Map.get(session_data, :details)
+
+    case code do
+      "provider_already_linked" ->
+        gettext("This sign-in is already linked to another account")
+
+      "account_not_activated" ->
+        gettext("Your account is waiting for an administrator to activate it.")
+
+      "user_not_found" ->
+        gettext("Player not found.")
+
+      "authentication_failed" ->
+        gettext("The sign-in was cancelled or did not complete. Please try again.")
+
+      _other ->
+        gettext("Please try again.")
+    end
   end
 end

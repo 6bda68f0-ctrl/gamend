@@ -4,26 +4,11 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
 
   alias Gamend.Leaderboards
   alias Gamend.Leaderboards.Record
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{AdminLeaderboardRecordResponse, OkResponse}
   alias OpenApiSpex.Schema
 
   tags(["Admin – Leaderboards"])
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
-
-  @record_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      leaderboard_id: %Schema{type: :string, format: :uuid},
-      user_id: %Schema{type: :string, format: :uuid, nullable: true},
-      label: %Schema{type: :string},
-      score: %Schema{type: :integer},
-      rank: %Schema{type: :integer, nullable: true},
-      metadata: %Schema{type: :object},
-      inserted_at: %Schema{type: :string, format: "date-time"},
-      updated_at: %Schema{type: :string, format: "date-time"}
-    }
-  }
 
   operation(:create,
     operation_id: "admin_submit_leaderboard_score",
@@ -54,73 +39,59 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
       }
     },
     responses: [
-      ok:
-        {"Record", "application/json",
-         %Schema{type: :object, properties: %{data: @record_schema}}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", %Schema{type: :object}},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Record", "application/json", AdminLeaderboardRecordResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      unprocessable_entity: Schemas.error("Validation failed"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
   def create(conn, %{"id" => leaderboard_id, "label" => label, "score" => score} = params)
       when is_binary(label) and label != "" do
-    leaderboard_id = to_string(leaderboard_id)
-
-    score =
-      case score do
-        s when is_integer(s) -> s
-        s when is_binary(s) -> String.to_integer(s)
-      end
-
-    metadata = Map.get(params, "metadata") || %{}
-
-    case Leaderboards.submit_label_score(leaderboard_id, label, score, metadata) do
-      {:ok, %Record{} = record} ->
-        json(conn, %{data: record})
-
-      {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
-
-      {:error, %Ecto.Changeset{} = cs} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: "validation_failed", errors: Ecto.Changeset.traverse_errors(cs, & &1)})
-
-      {:error, reason} ->
-        conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
-    end
+    with_score(conn, score, fn score ->
+      leaderboard_id
+      |> to_string()
+      |> Leaderboards.submit_label_score(label, score, metadata(params))
+      |> respond(conn)
+    end)
   end
 
   def create(conn, %{"id" => leaderboard_id, "user_id" => user_id, "score" => score} = params) do
-    leaderboard_id = to_string(leaderboard_id)
-    user_id = to_string(user_id)
+    with_score(conn, score, fn score ->
+      leaderboard_id
+      |> to_string()
+      |> Leaderboards.submit_score(to_string(user_id), score, metadata(params))
+      |> respond(conn)
+    end)
+  end
 
-    score =
-      case score do
-        s when is_integer(s) -> s
-        s when is_binary(s) -> String.to_integer(s)
-      end
-
-    metadata = Map.get(params, "metadata") || %{}
-
-    case Leaderboards.submit_score(leaderboard_id, user_id, score, metadata) do
-      {:ok, %Record{} = record} ->
-        json(conn, %{data: record})
-
-      {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
-
-      {:error, %Ecto.Changeset{} = cs} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: "validation_failed", errors: Ecto.Changeset.traverse_errors(cs, & &1)})
-
-      {:error, reason} ->
-        conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
+  # A score arrives as a JSON number or a form string. It was parsed with
+  # `String.to_integer/1`, which raises on anything non-numeric — `"abc"`,
+  # `"12abc"` — and a float matched no clause at all, so each answered 500.
+  # Strict, so a partial number is rejected rather than stored as its prefix.
+  defp with_score(conn, raw, fun) do
+    case Gamend.Parse.integer(raw) do
+      nil -> reply_error(conn, :bad_request, "invalid_score")
+      score -> fun.(score)
     end
   end
+
+  defp metadata(params), do: Map.get(params, "metadata") || %{}
+
+  # `submit_score/4` reports a missing board as `:leaderboard_not_found`, which
+  # the old clauses did not match — so it fell through to the catch-all and
+  # answered 400 instead of 404.
+  defp respond({:ok, %Record{} = record}, conn), do: reply_data(conn, serialize(record))
+
+  defp respond({:error, reason}, conn)
+       when reason in [:not_found, :leaderboard_not_found, :user_not_found],
+       do: reply_error(conn, :not_found, reason)
+
+  defp respond({:error, %Ecto.Changeset{} = cs}, conn), do: unprocessable(conn, cs)
+
+  defp respond({:error, reason}, conn) when is_atom(reason),
+    do: reply_error(conn, :bad_request, reason)
 
   operation(:update,
     operation_id: "admin_update_leaderboard_record",
@@ -142,13 +113,11 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
       }
     },
     responses: [
-      ok:
-        {"Record", "application/json",
-         %Schema{type: :object, properties: %{data: @record_schema}}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", %Schema{type: :object}}
+      ok: {"Record", "application/json", AdminLeaderboardRecordResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      not_found: Schemas.error("Not found"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
@@ -157,22 +126,17 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
 
     case get_record(record_id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       record ->
         attrs = Map.drop(params, ["id", "record_id"])
 
         case Leaderboards.update_record(record, attrs) do
           {:ok, updated} ->
-            json(conn, %{data: updated})
+            reply_data(conn, serialize(updated))
 
           {:error, %Ecto.Changeset{} = cs} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: "validation_failed",
-              errors: Ecto.Changeset.traverse_errors(cs, & &1)
-            })
+            unprocessable(conn, cs)
         end
     end
   end
@@ -186,10 +150,10 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
       record_id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -198,20 +162,15 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
 
     case get_record(record_id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       record ->
         case Leaderboards.delete_record(record) do
           {:ok, _} ->
-            json(conn, %{})
+            reply_ok(conn)
 
           {:error, %Ecto.Changeset{} = cs} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: "validation_failed",
-              errors: Ecto.Changeset.traverse_errors(cs, & &1)
-            })
+            unprocessable(conn, cs)
         end
     end
   end
@@ -225,9 +184,9 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
       user_id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required")
     ]
   )
 
@@ -236,7 +195,21 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
     user_id = to_string(user_id)
 
     _ = Leaderboards.delete_user_record(leaderboard_id, user_id)
-    json(conn, %{})
+    reply_ok(conn)
+  end
+
+  defp serialize(%Record{} = record) do
+    %{
+      id: record.id,
+      leaderboard_id: record.leaderboard_id,
+      user_id: record.user_id || "",
+      label: record.label || "",
+      score: record.score,
+      rank: record.rank,
+      metadata: record.metadata || %{},
+      inserted_at: record.inserted_at,
+      updated_at: record.updated_at
+    }
   end
 
   defp get_record(id) do

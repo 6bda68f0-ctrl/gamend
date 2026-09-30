@@ -9,6 +9,7 @@ defmodule GamendWeb.Api.V1.SignalingController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.Signaling
+  alias GamendWeb.Schemas.SignalingStatsResponse
 
   tags(["Signaling"])
 
@@ -18,14 +19,9 @@ defmodule GamendWeb.Api.V1.SignalingController do
     description:
       "Rooms configured, rooms with someone connected, and total peers. Public, and cached — treat the numbers as up to a minute old.",
     responses: [
-      ok:
-        GamendWeb.ApiStatsSchema.response("Signaling stats", [
-          :rooms_enabled,
-          :rooms_active,
-          :peers_connected
-        ])
+      ok: {"Signaling stats", "application/json", SignalingStatsResponse}
     ]
   )
 
-  def stats(conn, _params), do: json(conn, %{data: Signaling.stats()})
+  def stats(conn, _params), do: reply_data(conn, Signaling.stats())
 end

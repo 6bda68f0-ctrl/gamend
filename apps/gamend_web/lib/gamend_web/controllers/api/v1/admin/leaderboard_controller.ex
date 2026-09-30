@@ -3,30 +3,13 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.Leaderboards
+  alias GamendWeb.Schemas
+  alias GamendWeb.Schemas.{LeaderboardResponse, OkResponse, UploadTicketResponse}
+  alias GamendWeb.Serializers
   alias GamendWeb.Uploads
   alias OpenApiSpex.Schema
 
   tags(["Admin – Leaderboards"])
-
-  @error_schema %Schema{type: :object, properties: %{error: %Schema{type: :string}}}
-
-  @leaderboard_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid},
-      slug: %Schema{type: :string},
-      title: %Schema{type: :string},
-      description: %Schema{type: :string},
-      icon_url: %Schema{type: :string, description: "Empty when unset"},
-      sort_order: %Schema{type: :string, enum: ["desc", "asc"]},
-      operator: %Schema{type: :string, enum: ["set", "best", "incr", "decr"]},
-      starts_at: %Schema{type: :string, format: "date-time", nullable: true},
-      ends_at: %Schema{type: :string, format: "date-time", nullable: true},
-      metadata: %Schema{type: :object},
-      inserted_at: %Schema{type: :string, format: "date-time"},
-      updated_at: %Schema{type: :string, format: "date-time"}
-    }
-  }
 
   operation(:create,
     operation_id: "admin_create_leaderboard",
@@ -52,24 +35,20 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardController do
       }
     },
     responses: [
-      ok:
-        {"Leaderboard", "application/json",
-         %Schema{type: :object, properties: %{data: @leaderboard_schema}}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", %Schema{type: :object}}
+      created: {"Leaderboard", "application/json", LeaderboardResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
   def create(conn, params) do
     case Leaderboards.create_leaderboard(params) do
       {:ok, lb} ->
-        json(conn, %{data: lb})
+        reply_data(conn, :created, serialize(lb))
 
       {:error, %Ecto.Changeset{} = cs} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: "validation_failed", errors: Ecto.Changeset.traverse_errors(cs, & &1)})
+        unprocessable(conn, cs)
     end
   end
 
@@ -96,20 +75,18 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardController do
       }
     },
     responses: [
-      ok:
-        {"Leaderboard", "application/json",
-         %Schema{type: :object, properties: %{data: @leaderboard_schema}}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", %Schema{type: :object}}
+      ok: {"Leaderboard", "application/json", LeaderboardResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      not_found: Schemas.error("Not found"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
   def update(conn, %{"id" => id} = params) do
     with_leaderboard(conn, id, fn leaderboard ->
       case Leaderboards.update_leaderboard(leaderboard, Map.delete(params, "id")) do
-        {:ok, lb} -> json(conn, %{data: lb})
+        {:ok, lb} -> reply_data(conn, serialize(lb))
         {:error, %Ecto.Changeset{} = cs} -> changeset_error(conn, cs)
       end
     end)
@@ -123,13 +100,11 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok:
-        {"Leaderboard", "application/json",
-         %Schema{type: :object, properties: %{data: @leaderboard_schema}}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema},
-      unprocessable_entity: {"Validation failed", "application/json", %Schema{type: :object}}
+      ok: {"Leaderboard", "application/json", LeaderboardResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      not_found: Schemas.error("Not found"),
+      unprocessable_entity: Schemas.error("Validation failed")
     ]
   )
 
@@ -138,15 +113,13 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardController do
 
     case Leaderboards.end_leaderboard(id) do
       {:ok, lb} ->
-        json(conn, %{data: lb})
+        reply_data(conn, serialize(lb))
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       {:error, %Ecto.Changeset{} = cs} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: "validation_failed", errors: Ecto.Changeset.traverse_errors(cs, & &1)})
+        unprocessable(conn, cs)
     end
   end
 
@@ -168,9 +141,9 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardController do
          required: [:content_type]
        }},
     responses: [
-      ok: {"Upload ticket", "application/json", %Schema{type: :object}},
-      bad_request: {"Unsupported content type", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Upload ticket", "application/json", UploadTicketResponse},
+      bad_request: Schemas.error("Unsupported content type"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -196,10 +169,10 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardController do
       {"Uploaded object key", "application/json",
        %Schema{type: :object, properties: %{key: %Schema{type: :string}}, required: [:key]}},
     responses: [
-      ok: {"Updated leaderboard", "application/json", %Schema{type: :object}},
-      bad_request: {"Object not found", "application/json", @error_schema},
-      forbidden: {"Key not owned by this leaderboard", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Updated leaderboard", "application/json", LeaderboardResponse},
+      bad_request: Schemas.error("Object not found"),
+      forbidden: Schemas.error("Key not owned by this leaderboard"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -207,7 +180,7 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardController do
     with_leaderboard(conn, id, fn leaderboard ->
       Uploads.confirm(conn, "icons/leaderboards", leaderboard.id, params["key"], fn url ->
         case Leaderboards.update_leaderboard(leaderboard, %{"icon_url" => url}) do
-          {:ok, updated} -> json(conn, %{data: updated})
+          {:ok, updated} -> reply_data(conn, serialize(updated))
           {:error, %Ecto.Changeset{} = cs} -> changeset_error(conn, cs)
         end
       end)
@@ -222,10 +195,10 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardController do
       id: [in: :path, schema: %Schema{type: :string, format: :uuid}, required: true]
     ],
     responses: [
-      ok: {"Deleted", "application/json", %Schema{type: :object}},
-      unauthorized: {"Not authenticated", "application/json", @error_schema},
-      forbidden: {"Admin required", "application/json", @error_schema},
-      not_found: {"Not found", "application/json", @error_schema}
+      ok: {"Deleted", "application/json", OkResponse},
+      unauthorized: Schemas.error("Not authenticated"),
+      forbidden: Schemas.error("Admin required"),
+      not_found: Schemas.error("Not found")
     ]
   )
 
@@ -234,37 +207,27 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardController do
 
     case Leaderboards.get_leaderboard(id) do
       nil ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+        reply_error(conn, :not_found, "not_found")
 
       leaderboard ->
         case Leaderboards.delete_leaderboard(leaderboard) do
           {:ok, _lb} ->
-            json(conn, %{})
+            reply_ok(conn)
 
           {:error, %Ecto.Changeset{} = cs} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: "validation_failed",
-              errors: Ecto.Changeset.traverse_errors(cs, & &1)
-            })
+            unprocessable(conn, cs)
         end
     end
   end
 
   defp with_leaderboard(conn, id, fun) do
     case Leaderboards.get_leaderboard(to_string(id)) do
-      nil -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
+      nil -> reply_error(conn, :not_found, "not_found")
       leaderboard -> fun.(leaderboard)
     end
   end
 
-  defp changeset_error(conn, changeset) do
-    conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{
-      error: "validation_failed",
-      errors: Ecto.Changeset.traverse_errors(changeset, & &1)
-    })
-  end
+  defp changeset_error(conn, changeset), do: unprocessable(conn, changeset)
+
+  defp serialize(leaderboard), do: Serializers.serialize_leaderboard(leaderboard)
 end

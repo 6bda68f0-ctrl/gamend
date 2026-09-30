@@ -133,6 +133,7 @@ var TIME_TO_WAIT_RECONNECT = 5000
 const PROVIDER_DISCORD = "discord"
 const PROVIDER_APPLE = "apple"
 const PROVIDER_FACEBOOK = "facebook"
+const PROVIDER_GITHUB = "github"
 const PROVIDER_GOOGLE = "google"
 const PROVIDER_STEAM = "steam"
 const LOG_REDACTED := "[redacted]"
@@ -483,8 +484,16 @@ func _schedule_token_refresh() -> void:
 			_refresh_timer.start()
 
 func _verify_login_result(method_name: String, data):
-	if data && method_name in ["oauth_session_status", "oauth_api_callback", "login", "device_login", "refresh_token", "oauth_callback_api_apple_ios"]:
-		data = data.bzz_normalize().get("data").bzz_normalize()
+	# Not "register": registering answers the new account, never a session.
+	if data && method_name in ["oauth_session_status", "oauth_api_callback", "login", "device_login", "refresh_token", "oauth_callback_api_apple_ios", "oauth_google_id_token"]:
+		# Every answer is {data: ...}; a polled OAuth sign-in carries its tokens
+		# one level further in, under data.session (null until it completes).
+		var inner = data.bzz_normalize().get("data")
+		if method_name == "oauth_session_status" and inner != null:
+			inner = inner.bzz_normalize().get("session")
+		if inner == null:
+			return
+		data = inner.bzz_normalize() if inner is Object else inner
 		if data.get("access_token"):
 			_access_token = data["access_token"]
 		if data.get("refresh_token"):
@@ -917,7 +926,7 @@ func time_get_server_time() -> GamendResult:
 ### HOOKS
 
 ## Invoke a hook function via HTTP
-func hooks_call_hook(hook_request: CallHookRequest) -> GamendResult:
+func hooks_call_hook(hook_request: GamendCallHookRequest) -> GamendResult:
 	return await _call_api(HooksApi.new(_config), "call_hook", [hook_request])
 
 ## Invoke a hook function via WebSocket push. Fire-and-forget.
@@ -928,8 +937,8 @@ func hooks_call_hook_ws(plugin: String, fn_name: String, args: Array = [], topic
 	return _realtime.call_hook(plugin, fn_name, args, topic)
 
 ## List available hook functions
-func hooks_list_hooks() -> GamendResult:
-	return await _call_api(HooksApi.new(_config), "list_hooks", [])
+func hooks_list_hooks(page = 1, pageSize = 25) -> GamendResult:
+	return await _call_api(HooksApi.new(_config), "list_hooks", [page, pageSize])
 
 ### USERS
 
@@ -943,14 +952,16 @@ func users_get_current_user() -> GamendResult:
 
 ## Update current user's display name
 func user_update_current_user_display_name(display_name: String) -> GamendResult:
-	var request := UpdateCurrentUserDisplayNameRequest.new()
+	var request := GamendUpdateCurrentUserDisplayNameRequest.new()
 	request.display_name = display_name
 	return await _call_api(UsersApi.new(_config), "update_current_user_display_name", [request])
 
-## Update current user's unique username handle (lowercased on save; 3-32 chars
-## of a-z, 0-9 and non-consecutive . _ - separators). Fails when taken/invalid.
+## Update current user's unique username handle (lowercased on save; 3-32
+## letters or digits, with non-consecutive . _ - separators; letters keep to
+## one script, except Latin mixes with Chinese, Japanese or Korean).
+## Fails when taken/invalid.
 func user_update_current_user_username(username: String) -> GamendResult:
-	var request := UpdateCurrentUserUsernameRequest.new()
+	var request := GamendUpdateCurrentUserUsernameRequest.new()
 	request.username = username
 	return await _call_api(UsersApi.new(_config), "update_current_user_username", [request])
 
@@ -978,20 +989,20 @@ func authenticate_oauth_request(provider: String) -> GamendResult:
 	return await _call_api(AuthenticationApi.new(_config), "oauth_request", [provider])
 
 ## API Callback / Code Exchange
-func authenticate_oauth_api_callback(provider: String, callback_request: OauthApiCallbackRequest) -> GamendResult:
+func authenticate_oauth_api_callback(provider: String, callback_request: GamendOauthApiCallbackRequest) -> GamendResult:
 	return await _call_api(AuthenticationApi.new(_config), "oauth_api_callback", [provider, callback_request])
 
 ## Apple Callback (native iOS)
-func authenticate_oauth_callback_api_apple_ios(ios_request: OauthCallbackApiAppleIosRequest) -> GamendResult:
+func authenticate_oauth_callback_api_apple_ios(ios_request: GamendOauthCallbackApiAppleIosRequest) -> GamendResult:
 	return await _call_api(AuthenticationApi.new(_config), "oauth_callback_api_apple_ios", [ios_request])
 
 ## Login
-func authenticate_login(login_request: LoginRequest) -> GamendResult:
+func authenticate_login(login_request: GamendLoginRequest) -> GamendResult:
 	return await _call_api(AuthenticationApi.new(_config), "login", [login_request])
 
 ## Device login
 func authenticate_device_login(device_id: String) -> GamendResult:
-	var device_login := DeviceLoginRequest.new()
+	var device_login := GamendDeviceLoginRequest.new()
 	device_login.device_id = device_id
 	return await _call_api(AuthenticationApi.new(_config), "device_login", [device_login])
 
@@ -1003,26 +1014,72 @@ func authenticate_logout() -> GamendResult:
 func authenticate_unlink_provider(provider: String) -> GamendResult:
 	return await _call_api(AuthenticationApi.new(_config), "unlink_provider", [provider])
 
+## Link a provider to the signed-in account with a code (for Steam, a session
+## ticket). Signing in with one is authenticate_oauth_api_callback.
+func authenticate_link_provider(provider: String, code: String) -> GamendResult:
+	var link_request := GamendLinkProviderRequest.new()
+	link_request.code = code
+	return await _call_api(AuthenticationApi.new(_config), "link_provider", [provider, link_request])
+
+## Link Google to the signed-in account with a Google ID token
+func authenticate_link_google_id_token(id_token: String) -> GamendResult:
+	var link_request := GamendLinkGoogleIdTokenRequest.new()
+	link_request.id_token = id_token
+	return await _call_api(AuthenticationApi.new(_config), "link_google_id_token", [link_request])
+
+## Link Apple to the signed-in account with a native Sign in with Apple code.
+## given_name/family_name come from the credential (Apple sends them only on
+## the first authorization) and fill a blank display name.
+func authenticate_link_apple_ios(code: String, given_name := "", family_name := "") -> GamendResult:
+	var link_request := GamendLinkAppleIosRequest.new()
+	link_request.code = code
+	link_request.given_name = given_name
+	link_request.family_name = family_name
+	return await _call_api(AuthenticationApi.new(_config), "link_apple_ios", [link_request])
+
+## Start linking a provider through its page: answers the URL to open and a
+## session to poll with authenticate_link_session_status
+func authenticate_link_provider_request(provider: String) -> GamendResult:
+	return await _call_api(AuthenticationApi.new(_config), "link_provider_request", [provider])
+
+## Poll a provider link started with authenticate_link_provider_request
+func authenticate_link_session_status(session_id: String) -> GamendResult:
+	return await _call_api(AuthenticationApi.new(_config), "link_session_status", [session_id])
+
 ## Unlink device
 func authenticate_unlink_device() -> GamendResult:
 	return await _call_api(AuthenticationApi.new(_config), "unlink_device", [])
 
 ## Link device
 func authenticate_link_device(device_id: String) -> GamendResult:
-	var linkDeviceRequest:= LinkDeviceRequest.new()
+	var linkDeviceRequest:= GamendLinkDeviceRequest.new()
 	linkDeviceRequest.device_id = device_id
 	return await _call_api(AuthenticationApi.new(_config), "link_device", [linkDeviceRequest])
 
 ## Refresh access token
 func authenticate_refresh_token(refresh_token: String) -> GamendResult:
-	var refresh_param:= RefreshTokenRequest.new()
+	var refresh_param:= GamendRefreshTokenRequest.new()
 	refresh_param.refresh_token = refresh_token
 	return await _call_api(AuthenticationApi.new(_config), "refresh_token", [refresh_param])
+
+## Register: a new account with an email and a password. Not a sign-in, as
+## device login is: the answer is the account (`GamendRegistration`, with
+## `email_confirmed`), and no session is kept. Its password signs in with
+## `authenticate_login` once the player opens the emailed link; until then that
+## answers the error `email_not_confirmed`. The server generates a username when
+## none is given.
+func authenticate_register(email: String, password: String, username := "") -> GamendResult:
+	var register_request := GamendRegisterRequest.new()
+	register_request.email = email
+	register_request.password = password
+	if username != "":
+		register_request.username = username
+	return await _call_api(AuthenticationApi.new(_config), "register", [register_request])
 
 ### FRIENDS
 
 ## Send a friend request
-func friends_create_friend_request(friend_request: CreateFriendRequestRequest) -> GamendResult:
+func friends_create_friend_request(friend_request: GamendCreateFriendRequestRequest) -> GamendResult:
 	return await _call_api(FriendsApi.new(_config), "create_friend_request", [friend_request])
 
 ## Remove/cancel a friendship or request
@@ -1074,15 +1131,15 @@ func lobbies_list_lobbies(
 	return await _call_api(LobbiesApi.new(_config), "list_lobbies", [title, isPassworded, isLocked, minUsers, maxUsers, page, pageSize, metadataKey, metadataValue])
 
 ## Update lobby (host only)
-func lobbies_update_lobby(update_request: UpdateLobbyRequest) -> GamendResult:
+func lobbies_update_lobby(update_request: GamendUpdateLobbyRequest) -> GamendResult:
 	return await _call_api(LobbiesApi.new(_config), "update_lobby", [update_request])
 
 ## Create a lobby
-func lobbies_create_lobby(create_request: CreateLobbyRequest) -> GamendResult:
+func lobbies_create_lobby(create_request: GamendCreateLobbyRequest) -> GamendResult:
 	return await _call_api(LobbiesApi.new(_config), "create_lobby", [create_request])
 
 ## Kick a user from the lobby (host only)
-func lobbies_kick_user(kick_request: KickPartyMemberRequest) -> GamendResult:
+func lobbies_kick_user(kick_request: GamendKickUserRequest) -> GamendResult:
 	return await _call_api(LobbiesApi.new(_config), "kick_user", [kick_request])
 
 ## Leave the current lobby
@@ -1099,15 +1156,15 @@ func lobbies_disband_lobby() -> GamendResult:
 ## Host of a host-managed lobby, or the lobby's pinned WebRTC host; a hostless
 ## matchmaking lobby with no pinned host belongs to the server, so nobody may
 ## move it. Targets the caller's own lobby unless the request names another.
-func lobbies_set_lobby_state(state_request: SetLobbyStateRequest) -> GamendResult:
+func lobbies_set_lobby_state(state_request: GamendSetLobbyStateRequest) -> GamendResult:
 	return await _call_api(LobbiesApi.new(_config), "set_lobby_state", [state_request])
 
 ## Quick-join or create a lobby
-func lobbies_quick_join(quick_request: QuickJoinRequest) -> GamendResult:
+func lobbies_quick_join(quick_request: GamendQuickJoinRequest) -> GamendResult:
 	return await _call_api(LobbiesApi.new(_config), "quick_join", [quick_request])
 
 ## Join a lobby
-func lobbies_join_lobby(id: String, join_request: PartyJoinLobbyRequest = null) -> GamendResult:
+func lobbies_join_lobby(id: String, join_request: GamendJoinLobbyRequest = null) -> GamendResult:
 	return await _call_api(LobbiesApi.new(_config), "join_lobby", [id, join_request])
 
 ## Get a lobby by ID
@@ -1139,7 +1196,7 @@ func leaderboards_get_leaderboard(id: String) -> GamendResult:
 ## Resolve multiple slugs to their active leaderboards
 ## Returns a map of slug -> leaderboard for each slug that has an active leaderboard
 func leaderboards_resolve_slugs(slugs: Array) -> GamendResult:
-	var request = ResolveLeaderboardSlugsRequest.new()
+	var request = GamendResolveLeaderboardSlugsRequest.new()
 	request.slugs = slugs
 	return await _call_api(LeaderboardsApi.new(_config), "resolve_leaderboard_slugs", [request])
 
@@ -1236,12 +1293,12 @@ func chat_get_chat_message(id: String) -> GamendResult:
 	return await _call_api(ChatApi.new(_config), "get_chat_message", [id])
 
 ## Send a message to a lobby, group, party, or friend conversation
-func chat_send_chat_message(sendChatMessageRequest: SendChatMessageRequest) -> GamendResult:
+func chat_send_chat_message(sendChatMessageRequest: GamendSendChatMessageRequest) -> GamendResult:
 	return await _call_api(ChatApi.new(_config), "send_chat_message", [sendChatMessageRequest])
 
 ## Update (edit) a chat message by ID
 func chat_update_chat_message(id: String, content: String, metadata: Dictionary = {}) -> GamendResult:
-	var request = UpdateChatMessageRequest.new()
+	var request = GamendUpdateChatMessageRequest.new()
 	request.content = content
 	if not metadata.is_empty():
 		request.metadata = metadata
@@ -1252,7 +1309,7 @@ func chat_delete_chat_message(id: String) -> GamendResult:
 	return await _call_api(ChatApi.new(_config), "delete_chat_message", [id])
 
 ## Mark a chat conversation as read up to a given message ID
-func chat_mark_chat_read(markChatReadRequest: MarkChatReadRequest) -> GamendResult:
+func chat_mark_chat_read(markChatReadRequest: GamendMarkChatReadRequest) -> GamendResult:
 	return await _call_api(ChatApi.new(_config), "mark_chat_read", [markChatReadRequest])
 
 ## Get unread message count for a chat conversation
@@ -1262,7 +1319,7 @@ func chat_chat_unread_count(chat_type: String, chat_ref_id: String) -> GamendRes
 ## NOTIFICATIONS
 
 ## Delete notifications by IDs
-func notifications_delete_notifications(deleteNotificationsRequest: DeleteNotificationsRequest) -> GamendResult:
+func notifications_delete_notifications(deleteNotificationsRequest: GamendDeleteNotificationsRequest) -> GamendResult:
 	return await _call_api(NotificationsApi.new(_config), "delete_notifications", [deleteNotificationsRequest])
 
 ## List own notifications
@@ -1276,7 +1333,7 @@ func notifications_list_notifications(
 	return await _call_api(NotificationsApi.new(_config), "list_notifications", [page, pageSize])
 
 ## Send a notification to a friend
-func notifications_send_notification(sendNotificationRequest: SendNotificationRequest) -> GamendResult:
+func notifications_send_notification(sendNotificationRequest: GamendSendNotificationRequest) -> GamendResult:
 	return await _call_api(NotificationsApi.new(_config), "send_notification", [sendNotificationRequest])
 
 ## GROUPS
@@ -1314,7 +1371,7 @@ func groups_cancel_join_request(
 	return await _call_api(GroupsApi.new(_config), "cancel_join_request", [id, requestId])
 
 ## Create a group
-func groups_create_group(createGroupRequest: CreateGroupRequest):
+func groups_create_group(createGroupRequest: GamendCreateGroupRequest):
 	return await _call_api(GroupsApi.new(_config), "create_group", [createGroupRequest])
 
 ## Demote admin to member
@@ -1322,9 +1379,9 @@ func groups_demote_group_member(
 	# id: int   Eg: 56
 	# Group ID
 	id: String,
-	# demoteGroupMemberRequest: DemoteGroupMemberRequest
+	# demoteGroupMemberRequest: GamendDemoteGroupMemberRequest
 	# Demote parameters
-	demoteGroupMemberRequest: DemoteGroupMemberRequest,):
+	demoteGroupMemberRequest: GamendDemoteGroupMemberRequest,):
 	return await _call_api(GroupsApi.new(_config), "demote_group_member", [id, demoteGroupMemberRequest])
 
 ## Get group details
@@ -1339,7 +1396,7 @@ func groups_invite_to_group(
 	# id: int   Eg: 56
 	# Group ID
 	id: String,
-	inviteToGroupRequest: InviteToGroupRequest):
+	inviteToGroupRequest: GamendInviteToGroupRequest):
 	return await _call_api(GroupsApi.new(_config), "invite_to_group", [id, inviteToGroupRequest])
 
 ## Join a group
@@ -1354,7 +1411,7 @@ func groups_kick_group_member(
 	# id: int   Eg: 56
 	# Group ID
 	id: String,
-	kickGroupMemberRequest: KickGroupMemberRequest):
+	kickGroupMemberRequest: GamendKickGroupMemberRequest):
 	return await _call_api(GroupsApi.new(_config), "kick_group_member", [id, kickGroupMemberRequest])
 
 ## Leave a group
@@ -1453,7 +1510,7 @@ func groups_promote_group_member(
 	# id: int   Eg: 56
 	# Group ID
 	id: String,
-	promoteGroupMemberRequest: PromoteGroupMemberRequest):
+	promoteGroupMemberRequest: GamendPromoteGroupMemberRequest):
 	return await _call_api(GroupsApi.new(_config), "promote_group_member", [id, promoteGroupMemberRequest])
 
 ## Reject a join request (admin only)
@@ -1471,7 +1528,7 @@ func groups_update_group(
 	# id: int   Eg: 56
 	# Group ID
 	id: String,
-	updateGroupRequest: UpdateGroupRequest):
+	updateGroupRequest: GamendUpdateGroupRequest):
 	return await _call_api(GroupsApi.new(_config), "update_group", [id, updateGroupRequest])
 
 ## READY CHECKS
@@ -1482,13 +1539,13 @@ func ready_checks_get_mine() -> GamendResult:
 
 ## Answer the open check in one lane ("lobby" also answers a matchmaking accept)
 func ready_checks_respond(ready: bool, scope: String = "lobby") -> GamendResult:
-	var request := RespondReadyCheckRequest.new()
+	var request := GamendRespondReadyCheckRequest.new()
 	request.ready = ready
 	request.scope = scope
 	return await _call_api(ReadyChecksApi.new(_config), "respond_ready_check", [request])
 
 ## Open (or reset) the lobby board — host only; pass timeout_ms to force ready
-func ready_checks_open_lobby(request: OpenLobbyReadyCheckRequest = null) -> GamendResult:
+func ready_checks_open_lobby(request: GamendOpenLobbyReadyCheckRequest = null) -> GamendResult:
 	return await _call_api(ReadyChecksApi.new(_config), "open_lobby_ready_check", [request])
 
 ## Call off the lobby board — host only
@@ -1497,7 +1554,7 @@ func ready_checks_cancel_lobby() -> GamendResult:
 
 ## Open (or reset) the party board — leader only; pass timeout_ms to force ready
 ## (the request schema is shared with the lobby variant)
-func ready_checks_open_party(request: OpenLobbyReadyCheckRequest = null) -> GamendResult:
+func ready_checks_open_party(request: GamendOpenPartyReadyCheckRequest = null) -> GamendResult:
 	return await _call_api(ReadyChecksApi.new(_config), "open_party_ready_check", [request])
 
 ## Call off the party board — leader only
@@ -1507,23 +1564,23 @@ func ready_checks_cancel_party() -> GamendResult:
 ## PARTIES
 
 ## Create a party
-func parties_create_party(createPartyRequest: CreatePartyRequest) -> GamendResult:
+func parties_create_party(createPartyRequest: GamendCreatePartyRequest) -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "create_party", [createPartyRequest])
 
 ## Invite a user to the party (leader only)
-func parties_invite_to_party(inviteToPartyRequest: InviteToPartyRequest) -> GamendResult:
+func parties_invite_to_party(inviteToPartyRequest: GamendInviteToPartyRequest) -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "invite_to_party", [inviteToPartyRequest])
 
 ## Cancel a pending party invite (leader only)
-func parties_cancel_party_invite(cancelPartyInviteRequest: CancelPartyInviteRequest) -> GamendResult:
+func parties_cancel_party_invite(cancelPartyInviteRequest: GamendCancelPartyInviteRequest) -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "cancel_party_invite", [cancelPartyInviteRequest])
 
 ## Accept a party invite
-func parties_accept_party_invite(acceptPartyInviteRequest: AcceptPartyInviteRequest) -> GamendResult:
+func parties_accept_party_invite(acceptPartyInviteRequest: GamendAcceptPartyInviteRequest) -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "accept_party_invite", [acceptPartyInviteRequest])
 
 ## Decline a party invite
-func parties_decline_party_invite(declinePartyInviteRequest: DeclinePartyInviteRequest) -> GamendResult:
+func parties_decline_party_invite(declinePartyInviteRequest: GamendDeclinePartyInviteRequest) -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "decline_party_invite", [declinePartyInviteRequest])
 
 ## List pending party invites for the current user
@@ -1535,8 +1592,8 @@ func parties_list_sent_party_invitations() -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "list_sent_party_invitations", [])
 
 ## Kick a member from the party (leader only)
-func parties_kick_party_member(kickUserRequest: KickPartyMemberRequest) -> GamendResult:
-	return await _call_api(PartiesApi.new(_config), "kick_party_member", [kickUserRequest])
+func parties_kick_party_member(kickPartyMemberRequest: GamendKickPartyMemberRequest) -> GamendResult:
+	return await _call_api(PartiesApi.new(_config), "kick_party_member", [kickPartyMemberRequest])
 
 ## Leave the current party
 func parties_leave_party() -> GamendResult:
@@ -1548,7 +1605,7 @@ func parties_disband_party() -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "disband_party", [])
 
 ## Create a lobby with the party (leader only)
-func parties_party_create_lobby(partyCreateLobbyRequest: PartyCreateLobbyRequest) -> GamendResult:
+func parties_party_create_lobby(partyCreateLobbyRequest: GamendPartyCreateLobbyRequest) -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "party_create_lobby", [partyCreateLobbyRequest])
 
 ## Join a lobby with the party (leader only)
@@ -1556,7 +1613,7 @@ func parties_party_join_lobby(
 	# id: int   Eg: 56
 	# Lobby ID
 	id: String,
-	partyJoinLobbyRequest: PartyJoinLobbyRequest,) -> GamendResult:
+	partyJoinLobbyRequest: GamendPartyJoinLobbyRequest,) -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "party_join_lobby", [id, partyJoinLobbyRequest])
 
 ## Get current party
@@ -1564,7 +1621,7 @@ func parties_show_party() -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "show_party", [])
 
 ## Update party settings (leader only)
-func parties_update_party(updatePartyRequest: UpdatePartyRequest) -> GamendResult:
+func parties_update_party(updatePartyRequest: GamendUpdatePartyRequest) -> GamendResult:
 	return await _call_api(PartiesApi.new(_config), "update_party", [updatePartyRequest])
 
 ## ADMIN SESSIONS
@@ -1588,7 +1645,7 @@ func admin_users_admin_delete_user(id: String) -> GamendResult:
 	return await _call_api(AdminUsersApi.new(_config), "admin_delete_user", [id])
 	
 # Update user (admin)
-func admin_users_admin_update_user(id: String, admin_update_user_request: AdminUpdateUserRequest) -> GamendResult:
+func admin_users_admin_update_user(id: String, admin_update_user_request: GamendAdminUpdateUserRequest) -> GamendResult:
 	return await _call_api(AdminUsersApi.new(_config), "admin_update_user", [id, admin_update_user_request])
 
 ## ADMIN LOBBIES
@@ -1602,7 +1659,7 @@ func admin_lobbies_admin_delete_lobby(id: String) -> GamendResult:
 	return await _call_api(AdminLobbiesApi.new(_config), "admin_delete_lobby", [id])
 
 # Update lobby (admin)
-func admin_lobbies_admin_update_lobby(id: String, adminUpdateLobbyRequest: AdminUpdateLobbyRequest) -> GamendResult:
+func admin_lobbies_admin_update_lobby(id: String, adminUpdateLobbyRequest: GamendAdminUpdateLobbyRequest) -> GamendResult:
 	return await _call_api(AdminLobbiesApi.new(_config), "admin_update_lobby", [id, adminUpdateLobbyRequest])
 
 ## ADMIN LEADERBOARDS
@@ -1612,7 +1669,7 @@ func admin_leaderboards_admin_end_leaderboard(id: String) -> GamendResult:
 	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_end_leaderboard", [id])
 
 ## Submit score (admin)
-func admin_leaderboards_admin_submit_leaderboard_score(id: String, adminSubmitLeaderboardScoreRequest: AdminSubmitLeaderboardScoreRequest) -> GamendResult:
+func admin_leaderboards_admin_submit_leaderboard_score(id: String, adminSubmitLeaderboardScoreRequest: GamendAdminSubmitLeaderboardScoreRequest) -> GamendResult:
 	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_submit_leaderboard_score", [id, adminSubmitLeaderboardScoreRequest])
 
 ## Delete leaderboard record (admin)
@@ -1620,11 +1677,11 @@ func admin_leaderboards_admin_delete_leaderboard_record(id: String, recordId: St
 	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_delete_leaderboard_record", [id, recordId])
 
 ## Update leaderboard record (admin)
-func admin_leaderboards_admin_update_leaderboard_record(id: String, recordId: String, adminUpdateLeaderboardRecordRequest: AdminUpdateLeaderboardRecordRequest) -> GamendResult:
+func admin_leaderboards_admin_update_leaderboard_record(id: String, recordId: String, adminUpdateLeaderboardRecordRequest: GamendAdminUpdateLeaderboardRecordRequest) -> GamendResult:
 	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_update_leaderboard_record", [id, recordId, adminUpdateLeaderboardRecordRequest])
 
 ## Create leaderboard (admin)
-func admin_leaderboards_admin_create_leaderboard(adminCreateLeaderboardRequest: AdminCreateLeaderboardRequest) -> GamendResult:
+func admin_leaderboards_admin_create_leaderboard(adminCreateLeaderboardRequest: GamendAdminCreateLeaderboardRequest) -> GamendResult:
 	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_create_leaderboard", [adminCreateLeaderboardRequest])
 
 ## Delete a user's record (admin)
@@ -1636,7 +1693,7 @@ func admin_leaderboards_admin_delete_leaderboard(id: String) -> GamendResult:
 	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_delete_leaderboard", [id])
 
 ## Update leaderboard (admin)
-func admin_leaderboards_admin_update_leaderboard(id: String, adminUpdateLeaderboardRequest: AdminUpdateLeaderboardRequest) -> GamendResult:
+func admin_leaderboards_admin_update_leaderboard(id: String, adminUpdateLeaderboardRequest: GamendAdminUpdateLeaderboardRequest) -> GamendResult:
 	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_update_leaderboard", [id, adminUpdateLeaderboardRequest])
 
 ## ADMIN KV
@@ -1646,7 +1703,7 @@ func admin_kv_admin_list_kv_entries(page = 1, pageSize = 25, key = "", userId = 
 	return await _call_api(AdminKVApi.new(_config), "admin_list_kv_entries", [page, pageSize, key, userId, lobbyId, globalOnly])
 
 ## Create KV entry (admin)
-func admin_kv_admin_create_kv_entry(adminCreateKvEntryRequest: AdminUpsertKvRequest) -> GamendResult:
+func admin_kv_admin_create_kv_entry(adminCreateKvEntryRequest: GamendAdminCreateKvEntryRequest) -> GamendResult:
 	return await _call_api(AdminKVApi.new(_config), "admin_create_kv_entry", [adminCreateKvEntryRequest])
 
 ## Delete KV entry by id (admin)
@@ -1654,7 +1711,7 @@ func admin_kv_admin_delete_kv_entry(id: String) -> GamendResult:
 	return await _call_api(AdminKVApi.new(_config), "admin_delete_kv_entry", [id])
 
 ## Update KV entry by id (admin)
-func admin_kv_admin_update_kv_entry(id: String, adminUpdateKvEntryRequest: AdminUpdateKvEntryRequest) -> GamendResult:
+func admin_kv_admin_update_kv_entry(id: String, adminUpdateKvEntryRequest: GamendAdminUpdateKvEntryRequest) -> GamendResult:
 	return await _call_api(AdminKVApi.new(_config), "admin_update_kv_entry", [id, adminUpdateKvEntryRequest])
 
 ## Delete KV by key (admin)
@@ -1662,13 +1719,13 @@ func admin_kv_admin_delete_kv(key: String, user_id = null, lobby_id = null) -> G
 	return await _call_api(AdminKVApi.new(_config), "admin_delete_kv", [key, user_id, lobby_id])
 
 ## Upsert KV by key (admin)
-func admin_kv_admin_upsert_kv(adminCreateKvEntryRequest: AdminUpsertKvRequest) -> GamendResult:
-	return await _call_api(AdminKVApi.new(_config), "admin_upsert_kv", [adminCreateKvEntryRequest])
+func admin_kv_admin_upsert_kv(adminUpsertKvRequest: GamendAdminUpsertKvRequest) -> GamendResult:
+	return await _call_api(AdminKVApi.new(_config), "admin_upsert_kv", [adminUpsertKvRequest])
 
 ## ADMIN NOTIFICATIONS
 
 ## Create a notification (admin)
-func admin_notifications_admin_create_notification(adminCreateNotificationRequest: AdminCreateNotificationRequest) -> GamendResult:
+func admin_notifications_admin_create_notification(adminCreateNotificationRequest: GamendAdminCreateNotificationRequest) -> GamendResult:
 	return await _call_api(AdminNotificationsApi.new(_config), "admin_create_notification", [adminCreateNotificationRequest])
 
 ## Delete a notification (admin)
@@ -1701,7 +1758,7 @@ func admin_groups_admin_delete_group(id: String) -> GamendResult:
 	return await _call_api(AdminGroupsApi.new(_config), "admin_delete_group", [id])
 
 ## Update a group (admin)
-func admin_groups_admin_update_group(id: String, adminUpdateGroupRequest: AdminUpdateGroupRequest) -> GamendResult:
+func admin_groups_admin_update_group(id: String, adminUpdateGroupRequest: GamendAdminUpdateGroupRequest) -> GamendResult:
 	return await _call_api(AdminGroupsApi.new(_config), "admin_update_group", [id, adminUpdateGroupRequest])
 
 ## List all groups (admin)
@@ -1743,11 +1800,11 @@ func admin_quests_admin_list_quests(page = 1, pageSize = 25) -> GamendResult:
 	return await _call_api(AdminQuestsApi.new(_config), "admin_list_quests", [page, pageSize])
 
 ## Create a quest (admin)
-func admin_quests_admin_create_quest(request: AdminCreateQuestRequest) -> GamendResult:
+func admin_quests_admin_create_quest(request: GamendAdminCreateQuestRequest) -> GamendResult:
 	return await _call_api(AdminQuestsApi.new(_config), "admin_create_quest", [request])
 
 ## Update a quest (admin)
-func admin_quests_admin_update_quest(id: String, request: AdminCreateQuestRequest) -> GamendResult:
+func admin_quests_admin_update_quest(id: String, request: GamendAdminUpdateQuestRequest) -> GamendResult:
 	return await _call_api(AdminQuestsApi.new(_config), "admin_update_quest", [id, request])
 
 ## Delete a quest and all user progress (admin)
@@ -1759,15 +1816,15 @@ func admin_quests_admin_list_quest_progress(page = 1, pageSize = 25) -> GamendRe
 	return await _call_api(AdminQuestsApi.new(_config), "admin_list_quest_progress", [page, pageSize])
 
 ## Force-complete a quest for a user (admin)
-func admin_quests_admin_grant_quest(request: AdminResetQuestRequest) -> GamendResult:
+func admin_quests_admin_grant_quest(request: GamendAdminGrantQuestRequest) -> GamendResult:
 	return await _call_api(AdminQuestsApi.new(_config), "admin_grant_quest", [request])
 
 ## Reset a user's current-period quest progress (admin)
-func admin_quests_admin_reset_quest(request: AdminResetQuestRequest) -> GamendResult:
+func admin_quests_admin_reset_quest(request: GamendAdminResetQuestRequest) -> GamendResult:
 	return await _call_api(AdminQuestsApi.new(_config), "admin_reset_quest", [request])
 
 ## Claim a completed quest on a user's behalf (admin)
-func admin_quests_admin_claim_quest(request: AdminResetQuestRequest) -> GamendResult:
+func admin_quests_admin_claim_quest(request: GamendAdminClaimQuestRequest) -> GamendResult:
 	return await _call_api(AdminQuestsApi.new(_config), "admin_claim_quest", [request])
 
 ## Per-status progress counts for one quest (admin)
@@ -1784,7 +1841,7 @@ func admin_quests_admin_quest_funnel(key: String) -> GamendResult:
 ## users that go offline are cancelled by the sweep.
 ## The match itself arrives as a `match_found` event on the user channel.
 func matchmaking_join(match_params: Dictionary = {}, min_players = null, max_players = null) -> GamendResult:
-	var request = MatchmakingJoinRequest.new()
+	var request = GamendMatchmakingJoinRequest.new()
 	request.match_params = match_params
 	if min_players != null:
 		request.min_players = min_players
@@ -1865,6 +1922,37 @@ static func parse_last_seen(last_seen_str: String) -> float:
 # ─────────────────────────────────────────────────────────────────────────
 
 
+### ADMIN ANALYTICS
+## DAU / WAU / MAU, D1 / D7 / D30 and payer conversion (admin)
+## Operation adminGetAnalyticsSummary → GET /api/v1/admin/analytics
+func admin_analytics_admin_get_analytics_summary() -> GamendResult:
+	return await _call_api(AdminAnalyticsApi.new(_config), "admin_get_analytics_summary")
+
+
+## Per-day active / new users and cohort retention (admin)
+## Operation adminGetAnalyticsDaily → GET /api/v1/admin/analytics/daily
+func admin_analytics_admin_get_analytics_daily(days = 30) -> GamendResult:
+	return await _call_api(AdminAnalyticsApi.new(_config), "admin_get_analytics_daily", [days])
+
+
+## Currency granted / spent per day per ledger reason (admin)
+## Operation adminGetAnalyticsEconomy → GET /api/v1/admin/analytics/economy
+func admin_analytics_admin_get_analytics_economy(days = 7, currency = "") -> GamendResult:
+	return await _call_api(AdminAnalyticsApi.new(_config), "admin_get_analytics_economy", [days, currency])
+
+
+## Daily counters by key or prefix (admin)
+## Operation adminGetAnalyticsCounts → GET /api/v1/admin/analytics/counts
+func admin_analytics_admin_get_analytics_counts(key = "*", days = 7) -> GamendResult:
+	return await _call_api(AdminAnalyticsApi.new(_config), "admin_get_analytics_counts", [key, days])
+
+
+## Live counters: players, lobbies, parties, quests, matchmaking, tournaments (admin)
+## Operation adminGetAnalyticsSnapshot → GET /api/v1/admin/analytics/snapshot
+func admin_analytics_admin_get_analytics_snapshot() -> GamendResult:
+	return await _call_api(AdminAnalyticsApi.new(_config), "admin_get_analytics_snapshot")
+
+
 ### ADMIN CHAT
 ## Add a blocklist word (admin)
 ## Operation adminCreateChatFilterWord → POST /api/v1/admin/chat/filter_words
@@ -1912,6 +2000,12 @@ func admin_chat_admin_import_chat_filter_words(adminImportChatFilterWordsRequest
 ## Operation adminListChatFilterWords → GET /api/v1/admin/chat/filter_words
 func admin_chat_admin_list_chat_filter_words(word = "", severity = "", lang = "", page = 1, pageSize = 25) -> GamendResult:
 	return await _call_api(AdminChatApi.new(_config), "admin_list_chat_filter_words", [word, severity, lang, page, pageSize])
+
+
+## Languages with a bundled word list (admin)
+## Operation adminListChatFilterLanguages → GET /api/v1/admin/chat/filter_words/languages
+func admin_chat_admin_list_chat_filter_languages() -> GamendResult:
+	return await _call_api(AdminChatApi.new(_config), "admin_list_chat_filter_languages")
 
 
 ## List chat mutes (admin)
@@ -1990,14 +2084,14 @@ func admin_economy_admin_spend_currency(adminSpendCurrencyRequest = null) -> Gam
 ### ADMIN LEADERBOARDS
 ## Request an upload ticket for a leaderboard icon (admin)
 ## Operation adminLeaderboardIconUploadUrl → POST /api/v1/admin/leaderboards/{id}/icon/upload_url
-func admin_leaderboards_admin_leaderboard_icon_upload_url(id: String, adminTournamentIconUploadUrlRequest = null) -> GamendResult:
-	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_leaderboard_icon_upload_url", [id, adminTournamentIconUploadUrlRequest])
+func admin_leaderboards_admin_leaderboard_icon_upload_url(id: String, request = null) -> GamendResult:
+	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_leaderboard_icon_upload_url", [id, request])
 
 
 ## Confirm an uploaded leaderboard icon (admin)
 ## Operation adminSetLeaderboardIcon → POST /api/v1/admin/leaderboards/{id}/icon
-func admin_leaderboards_admin_set_leaderboard_icon(id: String, adminSetQuestIconRequest = null) -> GamendResult:
-	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_set_leaderboard_icon", [id, adminSetQuestIconRequest])
+func admin_leaderboards_admin_set_leaderboard_icon(id: String, request = null) -> GamendResult:
+	return await _call_api(AdminLeaderboardsApi.new(_config), "admin_set_leaderboard_icon", [id, request])
 
 
 ### ADMIN PUSH
@@ -2022,14 +2116,14 @@ func admin_push_admin_send_push(adminSendPushRequest = null) -> GamendResult:
 ### ADMIN QUESTS
 ## Request an upload ticket for a quest icon (admin)
 ## Operation adminQuestIconUploadUrl → POST /api/v1/admin/quests/{id}/icon/upload_url
-func admin_quests_admin_quest_icon_upload_url(id: String, adminTournamentIconUploadUrlRequest = null) -> GamendResult:
-	return await _call_api(AdminQuestsApi.new(_config), "admin_quest_icon_upload_url", [id, adminTournamentIconUploadUrlRequest])
+func admin_quests_admin_quest_icon_upload_url(id: String, request = null) -> GamendResult:
+	return await _call_api(AdminQuestsApi.new(_config), "admin_quest_icon_upload_url", [id, request])
 
 
 ## Confirm an uploaded quest icon (admin)
 ## Operation adminSetQuestIcon → POST /api/v1/admin/quests/{id}/icon
-func admin_quests_admin_set_quest_icon(id: String, adminSetQuestIconRequest = null) -> GamendResult:
-	return await _call_api(AdminQuestsApi.new(_config), "admin_set_quest_icon", [id, adminSetQuestIconRequest])
+func admin_quests_admin_set_quest_icon(id: String, request = null) -> GamendResult:
+	return await _call_api(AdminQuestsApi.new(_config), "admin_set_quest_icon", [id, request])
 
 
 ### ADMIN READY CHECKS
@@ -2083,6 +2177,12 @@ func admin_storage_admin_list_storage_objects(prefix = "", page = 1, pageSize = 
 	return await _call_api(AdminStorageApi.new(_config), "admin_list_storage_objects", [prefix, page, pageSize])
 
 
+## Objects and bytes stored under a prefix (admin)
+## Operation adminStorageUsage → GET /api/v1/admin/storage/usage
+func admin_storage_admin_storage_usage(prefix = "") -> GamendResult:
+	return await _call_api(AdminStorageApi.new(_config), "admin_storage_usage", [prefix])
+
+
 ## Upload or overwrite an object at any key (admin)
 ## Operation adminUploadStorageObject → PUT /api/v1/admin/storage/object
 func admin_storage_admin_upload_storage_object(key: String, body = null) -> GamendResult:
@@ -2134,14 +2234,14 @@ func admin_tournaments_admin_resolve_tournament_match(id: String, matchId: Strin
 
 ## Confirm an uploaded tournament icon (admin)
 ## Operation adminSetTournamentIcon → POST /api/v1/admin/tournaments/{id}/icon
-func admin_tournaments_admin_set_tournament_icon(id: String, adminSetQuestIconRequest = null) -> GamendResult:
-	return await _call_api(AdminTournamentsApi.new(_config), "admin_set_tournament_icon", [id, adminSetQuestIconRequest])
+func admin_tournaments_admin_set_tournament_icon(id: String, request = null) -> GamendResult:
+	return await _call_api(AdminTournamentsApi.new(_config), "admin_set_tournament_icon", [id, request])
 
 
 ## Request an upload ticket for a tournament icon (admin)
 ## Operation adminTournamentIconUploadUrl → POST /api/v1/admin/tournaments/{id}/icon/upload_url
-func admin_tournaments_admin_tournament_icon_upload_url(id: String, adminTournamentIconUploadUrlRequest = null) -> GamendResult:
-	return await _call_api(AdminTournamentsApi.new(_config), "admin_tournament_icon_upload_url", [id, adminTournamentIconUploadUrlRequest])
+func admin_tournaments_admin_tournament_icon_upload_url(id: String, request = null) -> GamendResult:
+	return await _call_api(AdminTournamentsApi.new(_config), "admin_tournament_icon_upload_url", [id, request])
 
 
 ## Update tournament (admin)
@@ -2265,14 +2365,14 @@ func friends_unblock_user(userId: String) -> GamendResult:
 ### GROUPS
 ## Request a group icon upload ticket (admin only)
 ## Operation createGroupIconUploadUrl → POST /api/v1/groups/{id}/icon/upload_url
-func groups_create_group_icon_upload_url(id: String, adminTournamentIconUploadUrlRequest = null) -> GamendResult:
-	return await _call_api(GroupsApi.new(_config), "create_group_icon_upload_url", [id, adminTournamentIconUploadUrlRequest])
+func groups_create_group_icon_upload_url(id: String, request = null) -> GamendResult:
+	return await _call_api(GroupsApi.new(_config), "create_group_icon_upload_url", [id, request])
 
 
 ## Confirm an uploaded group icon (admin only)
 ## Operation setGroupIcon → POST /api/v1/groups/{id}/icon
-func groups_set_group_icon(id: String, adminSetQuestIconRequest = null) -> GamendResult:
-	return await _call_api(GroupsApi.new(_config), "set_group_icon", [id, adminSetQuestIconRequest])
+func groups_set_group_icon(id: String, request = null) -> GamendResult:
+	return await _call_api(GroupsApi.new(_config), "set_group_icon", [id, request])
 
 
 ### LOBBIES
@@ -2316,14 +2416,14 @@ func payments_stripe_webhook(body = null) -> GamendResult:
 
 ## List active payment catalog entries
 ## Operation paymentsCatalog → GET /api/v1/payments/catalog
-func payments_catalog(provider = "") -> GamendResult:
-	return await _call_api(PaymentsApi.new(_config), "payments_catalog", [provider])
+func payments_catalog(provider = "", page = 1, pageSize = 25) -> GamendResult:
+	return await _call_api(PaymentsApi.new(_config), "payments_catalog", [provider, page, pageSize])
 
 
 ## List current user's active entitlements
 ## Operation paymentsEntitlements → GET /api/v1/payments/entitlements
-func payments_entitlements() -> GamendResult:
-	return await _call_api(PaymentsApi.new(_config), "payments_entitlements")
+func payments_entitlements(page = 1, pageSize = 25) -> GamendResult:
+	return await _call_api(PaymentsApi.new(_config), "payments_entitlements", [page, pageSize])
 
 
 ## Create a Steam MicroTxn transaction
@@ -2374,6 +2474,26 @@ func push_register_push_token(registerPushTokenRequest = null) -> GamendResult:
 ## Operation questStats → GET /api/v1/quests/stats
 func quests_quest_stats() -> GamendResult:
 	return await _call_api(QuestsApi.new(_config), "quest_stats")
+
+
+### CLIENT LOGS
+## Client log capture policy
+## Operation getClientLogPolicy → GET /api/v1/client_logs/policy
+func client_logs_get_client_log_policy() -> GamendResult:
+	return await _call_api(ClientLogsApi.new(_config), "get_client_log_policy")
+
+
+## Upload a batch of client log entries
+## Operation uploadClientLogs → POST /api/v1/client_logs
+func client_logs_upload_client_logs(client_log_batch: GamendClientLogBatch) -> GamendResult:
+	return await _call_api(ClientLogsApi.new(_config), "upload_client_logs", [client_log_batch])
+
+
+### STATS
+## All public server counters in one call
+## Operation getStats → GET /api/v1/stats
+func stats_get_stats() -> GamendResult:
+	return await _call_api(StatsApi.new(_config), "get_stats", [])
 
 
 ### SIGNALING
@@ -2441,8 +2561,8 @@ func user_create_current_user_avatar_upload_url(createCurrentUserAvatarUploadUrl
 
 ## Confirm an uploaded avatar
 ## Operation setCurrentUserAvatar → POST /api/v1/me/avatar
-func user_set_current_user_avatar(adminSetQuestIconRequest = null) -> GamendResult:
-	return await _call_api(UsersApi.new(_config), "set_current_user_avatar", [adminSetQuestIconRequest])
+func user_set_current_user_avatar(request = null) -> GamendResult:
+	return await _call_api(UsersApi.new(_config), "set_current_user_avatar", [request])
 
 
 ## Player counts

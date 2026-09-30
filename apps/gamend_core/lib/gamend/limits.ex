@@ -8,13 +8,14 @@ defmodule Gamend.Limits do
 
   ## Environment variables
 
-  Each limit can be set via an environment variable. The env var name maps to
-  the limit key with an uppercase `LIMIT_` prefix, e.g.:
+  Each limit is a `Gamend.Settings.Provider` setting, so its env var name is
+  derived from the key with the `GAMEND_LIMITS_` prefix, e.g.:
 
-      LIMIT_MAX_METADATA_SIZE=32768   -> :max_metadata_size
-      LIMIT_MAX_PAGE_SIZE=100         -> :max_page_size
+      GAMEND_LIMITS_MAX_METADATA_SIZE=32768   -> :max_metadata_size
+      GAMEND_LIMITS_MAX_PAGE_SIZE=100         -> :max_page_size
 
-  Env vars are read once at boot in `config/runtime.exs`.
+  Env vars are read once at boot by `Gamend.Settings.from_env/0`, which the
+  host's `config/runtime.exs` runs through `GamendWeb.HostRuntime.config/2`.
 
   ## Usage in schemas
 
@@ -29,9 +30,7 @@ defmodule Gamend.Limits do
       page_size = Gamend.Limits.clamp_page_size(params["page_size"])
   """
 
-  # Every limit is an optional integer with a compiled default; the `LIMIT_`
-  # env prefix predates the naming convention and is pinned here so the
-  # documented names keep working.
+  # Every limit is an optional integer with a compiled default.
   use Gamend.Settings.Provider,
     app: :gamend_core,
     group: :limits,
@@ -54,9 +53,22 @@ defmodule Gamend.Limits do
   )
 
   # ── User ────────────────────────────────────────────────
-  setting(:max_display_name, :integer, default: 80)
+  setting(:max_display_name, :integer,
+    default: 255,
+    doc:
+      "Max display-name length in codepoints. 255 is the users.display_name " <>
+        "column's own limit on Postgres (varchar(255)); higher fails the insert there."
+  )
+
   setting(:min_username, :integer, default: 3)
   setting(:max_username, :integer, default: 32)
+
+  setting(:username_ascii_only, :boolean,
+    default: false,
+    doc:
+      "Keep username handles to a-z, 0-9 and . _ - (the GitHub and Discord model). " <>
+        "Input is still normalized first, so WANG in fullwidth becomes wang; display names stay Unicode."
+  )
 
   setting(:max_sockets_per_user, :integer,
     default: 20,
@@ -123,6 +135,12 @@ defmodule Gamend.Limits do
     doc: "Live (non-disabled) device tokens per user."
   )
 
+  # ── API tokens ──────────────────────────────────────────
+  setting(:max_api_tokens_per_user, :integer,
+    default: 10,
+    doc: "Personal API tokens one user may hold, revoked ones not counted."
+  )
+
   # Byte caps (not characters): FCM and APNs limit the wire payload to 4096
   # bytes, so only byte caps can guarantee deliverability.
   setting(:max_push_title, :integer, default: 255)
@@ -186,6 +204,16 @@ defmodule Gamend.Limits do
   setting(:max_matchmaking_players, :integer,
     default: 64,
     doc: "Hard cap on a ticket's own max_players setting."
+  )
+
+  setting(:matchmaking_default_min_players, :integer,
+    default: 2,
+    doc: "Smallest match a ticket forms when it does not say."
+  )
+
+  setting(:matchmaking_default_max_players, :integer,
+    default: 5,
+    doc: "Largest match a ticket forms when it does not say. At most max_matchmaking_players."
   )
 
   setting(:max_matchmaking_params_size, :integer,

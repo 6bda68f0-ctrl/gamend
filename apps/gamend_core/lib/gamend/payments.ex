@@ -12,33 +12,26 @@ defmodule Gamend.Payments do
   use Nebulex.Caching, cache: Gamend.Cache
 
   alias Gamend.Accounts.User
+  alias Gamend.Payments.Admin
   alias Gamend.Payments.Entitlement
+  alias Gamend.Payments.Params
   alias Gamend.Payments.Product
   alias Gamend.Payments.ProviderConfig
   alias Gamend.Payments.ProviderEvent
   alias Gamend.Payments.ProviderProduct
+  alias Gamend.Payments.Providers
   alias Gamend.Payments.Purchase
-  alias Gamend.Payments.ReconciliationCursor
+  alias Gamend.Payments.StoreEvents
+  alias Gamend.Payments.StripeEvents
   alias Gamend.Repo
   alias Gamend.Repo.AdvisoryLock
 
-  @pubsub Gamend.PubSub
   @store_validation_providers ~w(apple google steam)
-  @apple_reversal_notifications ~w(REFUND REVOKE EXPIRED)
-  @apple_activation_notifications ~w(
-    SUBSCRIBED
-    DID_RENEW
-    DID_RECOVER
-    INTERACTIVE_RENEWAL
-    DID_CHANGE_RENEWAL_PREF
-    DID_CHANGE_RENEWAL_STATUS
-  )
 
   # Cached catalog/ledger reads keyed by per-entity version counters bumped on
   # every write to that table via tap_bump/2. Products/provider-products change
   # rarely (kept warm through frequent purchases); purchases have their own
   # version so a buy doesn't evict the catalog.
-  @payments_cache_ttl_ms 60_000
   defp product_version, do: Gamend.Cache.get!({:payments, :product_version}) || 1
 
   defp provider_product_version,
@@ -46,12 +39,13 @@ defmodule Gamend.Payments do
 
   defp purchase_version, do: Gamend.Cache.get!({:payments, :purchase_version}) || 1
 
-  defp tap_bump({:ok, _} = result, version_key) do
+  @doc false
+  def tap_bump({:ok, _} = result, version_key) do
     _ = Gamend.Cache.bump_version(version_key)
     result
   end
 
-  defp tap_bump(other, _version_key), do: other
+  def tap_bump(other, _version_key), do: other
 
   # ---------------------------------------------------------------------------
   # Catalog
@@ -60,7 +54,7 @@ defmodule Gamend.Payments do
   @spec create_product(map()) :: {:ok, Product.t()} | {:error, Ecto.Changeset.t()}
   def create_product(attrs) when is_map(attrs) do
     %Product{}
-    |> Product.changeset(normalize_params(attrs))
+    |> Product.changeset(Params.normalize(attrs))
     |> Repo.insert()
     |> tap_bump({:payments, :product_version})
   end
@@ -68,7 +62,7 @@ defmodule Gamend.Payments do
   @spec update_product(Product.t(), map()) :: {:ok, Product.t()} | {:error, Ecto.Changeset.t()}
   def update_product(%Product{} = product, attrs) when is_map(attrs) do
     product
-    |> Product.changeset(normalize_params(attrs))
+    |> Product.changeset(Params.normalize(attrs))
     |> Repo.update()
     |> tap_bump({:payments, :product_version})
   end
@@ -77,7 +71,7 @@ defmodule Gamend.Payments do
   @decorate cacheable(
               key: {:payments, :product, product_version(), id},
               match: &(&1 != nil),
-              opts: [ttl: @payments_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def get_product(id), do: Repo.get_uuid(Product, id)
 
@@ -98,7 +92,7 @@ defmodule Gamend.Payments do
           {:ok, ProviderProduct.t()} | {:error, Ecto.Changeset.t()}
   def create_provider_product(attrs) when is_map(attrs) do
     %ProviderProduct{}
-    |> ProviderProduct.changeset(normalize_params(attrs))
+    |> ProviderProduct.changeset(Params.normalize(attrs))
     |> Repo.insert()
     |> tap_bump({:payments, :provider_product_version})
   end
@@ -108,7 +102,7 @@ defmodule Gamend.Payments do
   def update_provider_product(%ProviderProduct{} = provider_product, attrs)
       when is_map(attrs) do
     provider_product
-    |> ProviderProduct.changeset(normalize_params(attrs))
+    |> ProviderProduct.changeset(Params.normalize(attrs))
     |> Repo.update()
     |> tap_bump({:payments, :provider_product_version})
   end
@@ -117,7 +111,7 @@ defmodule Gamend.Payments do
   @decorate cacheable(
               key: {:payments, :provider_product, provider_product_version(), id},
               match: &(&1 != nil),
-              opts: [ttl: @payments_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def get_provider_product(id) do
     ProviderProduct
@@ -133,23 +127,42 @@ defmodule Gamend.Payments do
     |> preload_product()
   end
 
-  @spec list_catalog(String.t() | nil) :: [ProviderProduct.t()]
-  def list_catalog(provider \\ nil) do
+  @doc """
+  Active catalog entries, optionally for one provider. Pass `:page` and
+  `:page_size` for one page; without them, every entry.
+  """
+  @spec list_catalog(String.t() | nil, keyword()) :: [ProviderProduct.t()]
+  def list_catalog(provider \\ nil, opts \\ []) do
+    provider
+    |> catalog_query()
+    |> order_by([pp, p], asc: pp.provider, asc: p.sku)
+    |> preload([pp, p], product: p)
+    |> maybe_page(opts)
+    |> Repo.all()
+  end
+
+  @doc "Counts `list_catalog/2`'s entries."
+  @spec count_catalog(String.t() | nil) :: non_neg_integer()
+  def count_catalog(provider \\ nil) do
+    provider |> catalog_query() |> Repo.aggregate(:count)
+  end
+
+  defp catalog_query(provider) do
     query =
       from pp in ProviderProduct,
         join: p in assoc(pp, :product),
-        where: pp.active == true and p.active == true,
-        preload: [product: p],
-        order_by: [asc: pp.provider, asc: p.sku]
+        where: pp.active == true and p.active == true
 
-    query =
-      if is_binary(provider) and provider != "" do
-        from pp in query, where: pp.provider == ^provider
-      else
-        query
-      end
+    if is_binary(provider) and provider != "" do
+      from pp in query, where: pp.provider == ^provider
+    else
+      query
+    end
+  end
 
-    Repo.all(query)
+  # Paging is opt-in: the store page and downloads want every row.
+  defp maybe_page(query, opts) do
+    if Keyword.has_key?(opts, :page), do: Gamend.Query.page(query, opts), else: query
   end
 
   # ---------------------------------------------------------------------------
@@ -171,7 +184,8 @@ defmodule Gamend.Payments do
     success_url cancel_url steam_id language usersession ipaddress metadata
   )
 
-  defp client_checkout_attrs(attrs) when is_map(attrs),
+  @doc false
+  def client_checkout_attrs(attrs) when is_map(attrs),
     do: Map.take(attrs, @client_checkout_fields)
 
   @spec create_purchase(User.t(), ProviderProduct.t(), map()) ::
@@ -179,8 +193,8 @@ defmodule Gamend.Payments do
   def create_purchase(user, %ProviderProduct{} = provider_product, attrs \\ %{}) do
     user_id = user.id
     provider_product = Repo.preload(provider_product, :product)
-    attrs = normalize_params(attrs)
-    quantity = parse_positive_int(attrs["quantity"], 1)
+    attrs = Params.normalize(attrs)
+    quantity = Params.parse_positive_int(attrs["quantity"], 1)
     unit_amount = provider_product.unit_amount
 
     # NOTE: `attrs` here is trusted. The receipt-validation path
@@ -200,7 +214,7 @@ defmodule Gamend.Payments do
         "quantity" => quantity,
         "currency" => attrs["currency"] || provider_product.currency,
         "amount" => attrs["amount"] || total_amount(unit_amount, quantity),
-        "environment" => attrs["environment"] || default_environment()
+        "environment" => attrs["environment"] || ProviderConfig.environment()
       })
 
     %Purchase{}
@@ -213,7 +227,7 @@ defmodule Gamend.Payments do
   @decorate cacheable(
               key: {:payments, :purchase, purchase_version(), id},
               match: &(&1 != nil),
-              opts: [ttl: @payments_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def get_purchase(id), do: Repo.get_uuid(Purchase, id) |> preload_purchase()
 
@@ -302,7 +316,7 @@ defmodule Gamend.Payments do
   @spec revoke_purchase(Purchase.t(), map()) :: {:ok, Purchase.t()} | {:error, term()}
   def revoke_purchase(%Purchase{} = purchase, attrs \\ %{}) when is_map(attrs) do
     now = DateTime.utc_now(:second)
-    attrs = normalize_params(attrs)
+    attrs = Params.normalize(attrs)
 
     # A revocation removes entitlements the player paid for; losing it to a
     # crash leaves them holding goods a refund already took back.
@@ -320,7 +334,7 @@ defmodule Gamend.Payments do
           status: status,
           revoked_at: now,
           raw_provider_payload:
-            merge_payload(purchase.raw_provider_payload, attrs["payload"] || %{})
+            Params.merge_payload(purchase.raw_provider_payload, attrs["payload"] || %{})
         })
         |> Repo.update()
         |> tap_bump({:payments, :purchase_version})
@@ -348,9 +362,9 @@ defmodule Gamend.Payments do
   def validate_store_purchase(%User{} = user, provider, attrs)
       when provider in @store_validation_providers and is_map(attrs) do
     with {:ok, validation} <- provider_adapter(provider).validate_purchase(user, attrs),
-         validation <- normalize_params(validation),
-         {:ok, external_id} <- required_value(validation, "product_id"),
-         {:ok, transaction_id} <- required_value(validation, "transaction_id"),
+         validation <- Params.normalize(validation),
+         {:ok, external_id} <- Params.required_value(validation, "product_id"),
+         {:ok, transaction_id} <- Params.required_value(validation, "transaction_id"),
          %ProviderProduct{} = provider_product <- get_provider_product(provider, external_id) do
       case get_purchase_by_provider_transaction(provider, transaction_id) do
         %Purchase{user_id: existing_user_id} = purchase when existing_user_id == user.id ->
@@ -383,115 +397,23 @@ defmodule Gamend.Payments do
   # Stripe
   # ---------------------------------------------------------------------------
 
-  @spec create_stripe_checkout(User.t(), map()) ::
-          {:ok,
-           %{purchase: Purchase.t(), checkout_url: String.t(), provider_session_id: String.t()}}
-          | {:error, term()}
-  def create_stripe_checkout(%User{} = user, attrs) when is_map(attrs) do
-    attrs = attrs |> normalize_params() |> client_checkout_attrs()
+  @doc delegate_to: {StripeEvents, :create_stripe_checkout, 2}
+  defdelegate create_stripe_checkout(user, attrs), to: StripeEvents
 
-    with {:ok, provider_product} <- resolve_provider_product("stripe", attrs),
-         :ok <- ensure_checkout_allowed(user, provider_product, attrs),
-         {:ok, purchase} <- create_purchase(user, provider_product, attrs) do
-      case stripe_adapter().create_checkout_session(purchase, provider_product, attrs) do
-        {:ok, session} ->
-          with {:ok, updated_purchase} <- mark_purchase_requires_action(purchase, session) do
-            {:ok,
-             %{
-               purchase: updated_purchase,
-               checkout_url: session["url"],
-               provider_session_id: session["id"]
-             }}
-          end
+  @doc delegate_to: {StripeEvents, :handle_stripe_webhook, 2}
+  defdelegate handle_stripe_webhook(raw_body, signature), to: StripeEvents
 
-        {:error, reason} ->
-          mark_purchase_failed(purchase, "stripe_checkout_session_failed", reason)
-          {:error, reason}
-      end
-    else
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  @doc delegate_to: {StripeEvents, :reconcile_stripe_purchase, 1}
+  defdelegate reconcile_stripe_purchase(purchase), to: StripeEvents
 
-  @spec handle_stripe_webhook(binary(), binary() | nil) :: {:ok, atom()} | {:error, term()}
-  def handle_stripe_webhook(raw_body, signature) when is_binary(raw_body) do
-    with {:ok, event} <- stripe_adapter().verify_webhook(raw_body, signature),
-         event <- normalize_params(event),
-         {:ok, event_id} <- required_value(event, "id"),
-         event_type when is_binary(event_type) <- event["type"] do
-      claim_provider_event("stripe", event_id, event_type, event, fn ->
-        process_stripe_event(event)
-      end)
-    else
-      nil -> {:error, :missing_event_type}
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  @doc delegate_to: {StripeEvents, :cancel_stripe_subscription_at_period_end, 2}
+  defdelegate cancel_stripe_subscription_at_period_end(user, entitlement_id), to: StripeEvents
 
-  @spec reconcile_stripe_purchase(Purchase.t()) ::
-          {:ok, %{purchase: Purchase.t(), result: atom(), stripe_session: map()}}
-          | {:error, term()}
-  def reconcile_stripe_purchase(
-        %Purchase{
-          provider: "stripe",
-          provider_transaction_id: "cs_" <> _rest = session_id
-        } = purchase
-      ) do
-    with {:ok, session} <- stripe_adapter().retrieve_checkout_session(session_id),
-         session <- normalize_params(session),
-         :ok <- ensure_stripe_session_matches_purchase(purchase, session),
-         {:ok, updated_purchase, result} <-
-           reconcile_stripe_purchase_from_session(purchase, session) do
-      {:ok, %{purchase: updated_purchase, result: result, stripe_session: session}}
-    end
-  end
+  @doc delegate_to: {StripeEvents, :stripe_customer_id, 1}
+  defdelegate stripe_customer_id(user), to: StripeEvents
 
-  def reconcile_stripe_purchase(%Purchase{provider: "stripe"}),
-    do: {:error, :missing_stripe_session_id}
-
-  def reconcile_stripe_purchase(%Purchase{}), do: {:error, :not_stripe_purchase}
-
-  @spec cancel_stripe_subscription_at_period_end(User.t(), Ecto.UUID.t()) ::
-          {:ok,
-           %{purchase: Purchase.t(), entitlement: Entitlement.t(), stripe_subscription: map()}}
-          | {:error, term()}
-  def cancel_stripe_subscription_at_period_end(%User{} = user, entitlement_id)
-      when is_binary(entitlement_id) do
-    with {:ok, %Entitlement{} = entitlement} <-
-           get_user_subscription_entitlement(user, entitlement_id),
-         %Purchase{} = purchase <- entitlement.source_purchase,
-         {:ok, subscription_id} <- stripe_subscription_id(purchase),
-         {:ok, subscription} <-
-           stripe_adapter().cancel_subscription_at_period_end(subscription_id),
-         subscription <- normalize_params(subscription),
-         {:ok, updated_purchase} <-
-           update_purchase_from_stripe_subscription(
-             purchase,
-             subscription,
-             "cancel_at_period_end"
-           ),
-         {:ok, updated_entitlements} <-
-           update_entitlements_from_stripe_subscription(updated_purchase, subscription) do
-      updated_entitlement =
-        Enum.find(updated_entitlements, &(&1.id == entitlement.id)) ||
-          Entitlement
-          |> Repo.get(entitlement_id)
-          |> Repo.preload([:product, :source_purchase])
-
-      {:ok,
-       %{
-         purchase: updated_purchase,
-         entitlement: updated_entitlement,
-         stripe_subscription: subscription
-       }}
-    else
-      %Purchase{} -> {:error, :not_stripe_subscription}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  def cancel_stripe_subscription_at_period_end(%User{}, _entitlement_id),
-    do: {:error, :invalid_entitlement_id}
+  @doc delegate_to: {StripeEvents, :create_stripe_billing_portal, 2}
+  defdelegate create_stripe_billing_portal(user, return_url), to: StripeEvents
 
   # ---------------------------------------------------------------------------
   # Steam
@@ -508,7 +430,7 @@ defmodule Gamend.Payments do
   def create_steam_checkout(%User{} = user, attrs) when is_map(attrs) do
     attrs =
       attrs
-      |> normalize_params()
+      |> Params.normalize()
       |> client_checkout_attrs()
       |> Map.put("order_id", generate_steam_order_id())
 
@@ -540,13 +462,13 @@ defmodule Gamend.Payments do
   @spec finalize_steam_purchase(User.t(), map()) ::
           {:ok, %{purchase: Purchase.t()}} | {:error, term()}
   def finalize_steam_purchase(%User{} = user, attrs) when is_map(attrs) do
-    attrs = normalize_params(attrs)
+    attrs = Params.normalize(attrs)
 
-    with {:ok, order_id} <- required_value(attrs, "order_id"),
+    with {:ok, order_id} <- Params.required_value(attrs, "order_id"),
          %Purchase{provider: "steam", user_id: user_id} = purchase when user_id == user.id <-
            get_purchase_by_order_id(order_id),
          {:ok, validation} <- provider_adapter("steam").finalize_transaction(purchase, attrs),
-         validation <- normalize_params(validation),
+         validation <- Params.normalize(validation),
          {:ok, updated} <- update_purchase_from_validation(purchase, validation),
          {:ok, final_purchase} <- apply_validated_status(updated, validation) do
       {:ok, %{purchase: final_purchase}}
@@ -561,61 +483,47 @@ defmodule Gamend.Payments do
   # Provider webhooks
   # ---------------------------------------------------------------------------
 
-  @spec handle_google_webhook(binary(), binary() | nil) :: {:ok, atom()} | {:error, term()}
-  def handle_google_webhook(raw_body, authorization_header) when is_binary(raw_body) do
-    with {:ok, event} <- provider_adapter("google").verify_webhook(raw_body, authorization_header),
-         event <- normalize_params(event),
-         event_id <- event["message_id"] || provider_event_hash("google", raw_body),
-         event_type <- google_event_type(event) do
-      claim_provider_event("google", event_id, event_type, event, fn ->
-        process_google_event(event)
-      end)
-    else
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  @doc delegate_to: {StoreEvents, :handle_google_webhook, 2}
+  defdelegate handle_google_webhook(raw_body, authorization_header), to: StoreEvents
 
-  @spec handle_apple_webhook(binary()) :: {:ok, atom()} | {:error, term()}
-  def handle_apple_webhook(raw_body) when is_binary(raw_body) do
-    with {:ok, event} <- provider_adapter("apple").verify_notification(raw_body),
-         event <- normalize_params(event),
-         event_id <- event["notificationUUID"] || provider_event_hash("apple", raw_body),
-         event_type when is_binary(event_type) <- event["notificationType"] do
-      claim_provider_event("apple", event_id, event_type, event, fn ->
-        process_apple_event(event)
-      end)
-    else
-      nil -> {:error, :missing_event_type}
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  @doc delegate_to: {StoreEvents, :handle_apple_webhook, 1}
+  defdelegate handle_apple_webhook(raw_body), to: StoreEvents
 
   # ---------------------------------------------------------------------------
   # Entitlements
   # ---------------------------------------------------------------------------
 
+  @doc """
+  The user's entitlements, by key: active ones only unless
+  `include_inactive: true`. Pass `:page` and `:page_size` for one page.
+  """
   @spec list_user_entitlements(Ecto.UUID.t(), keyword()) :: [Entitlement.t()]
   def list_user_entitlements(user_id, opts \\ []) when is_binary(user_id) do
-    include_inactive = Keyword.get(opts, :include_inactive, false)
-    now = DateTime.utc_now(:second)
+    user_id
+    |> entitlements_query(opts)
+    |> order_by([e], asc: e.key)
+    |> preload([:product, :source_purchase])
+    |> maybe_page(opts)
+    |> Repo.all()
+  end
 
-    query =
-      from e in Entitlement,
-        where: e.user_id == ^user_id,
-        order_by: [asc: e.key],
-        preload: [:product, :source_purchase]
+  @doc "Counts `list_user_entitlements/2`'s entitlements; takes `:include_inactive`."
+  @spec count_user_entitlements(Ecto.UUID.t(), keyword()) :: non_neg_integer()
+  def count_user_entitlements(user_id, opts \\ []) when is_binary(user_id) do
+    user_id |> entitlements_query(opts) |> Repo.aggregate(:count)
+  end
 
-    query =
-      if include_inactive do
-        query
-      else
-        from e in query,
-          where:
-            e.status == "active" and
-              (is_nil(e.expires_at) or e.expires_at > ^now)
-      end
+  defp entitlements_query(user_id, opts) do
+    query = from e in Entitlement, where: e.user_id == ^user_id
 
-    Repo.all(query)
+    if Keyword.get(opts, :include_inactive, false) do
+      query
+    else
+      now = DateTime.utc_now(:second)
+
+      from e in query,
+        where: e.status == "active" and (is_nil(e.expires_at) or e.expires_at > ^now)
+    end
   end
 
   @spec has_entitlement?(Ecto.UUID.t(), String.t()) :: boolean()
@@ -632,205 +540,140 @@ defmodule Gamend.Payments do
     |> Kernel.>(0)
   end
 
+  @doc """
+  Grant an entitlement without a purchase: a trial, a contributor's reward,
+  a support gesture. Upserts the one `(user, key)` row.
+
+  Never shortens what the user already has: an active row with no end (a
+  lifetime purchase) keeps no end, and an active row ending later than
+  `:expires_at` keeps its later end. A row a purchase created keeps its
+  `source_purchase_id`, so its provider sync still finds it.
+
+  Options: `:expires_at` (a `DateTime`, `nil` for no end), `:metadata` (a map
+  merged into the row's, e.g. `%{"source" => "trial", "granted_by" => id}`).
+  """
+  @spec grant_entitlement(Ecto.UUID.t(), String.t(), keyword()) ::
+          {:ok, Entitlement.t()} | {:error, term()}
+  def grant_entitlement(user_id, key, opts \\ [])
+      when is_binary(user_id) and is_binary(key) do
+    now = DateTime.utc_now(:second)
+    requested = Keyword.get(opts, :expires_at)
+    extra = Keyword.get(opts, :metadata, %{})
+    existing = Repo.get_by(Entitlement, user_id: user_id, key: key)
+
+    expires_at = granted_expiry(existing, requested, now)
+
+    attrs = %{
+      user_id: user_id,
+      key: key,
+      status: "active",
+      starts_at: (existing && existing_active?(existing, now) && existing.starts_at) || now,
+      expires_at: expires_at,
+      revoked_at: nil,
+      metadata: Map.merge((existing && existing.metadata) || %{}, extra)
+    }
+
+    case (existing || %Entitlement{})
+         |> Entitlement.changeset(attrs)
+         |> Repo.insert_or_update() do
+      {:ok, entitlement} ->
+        after_entitlement_changed(entitlement)
+        {:ok, entitlement}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  # The later of what the user holds (while it is still active) and what is
+  # granted; no end beats any end.
+  defp granted_expiry(nil, requested, _now), do: requested
+
+  defp granted_expiry(%Entitlement{} = existing, requested, now) do
+    cond do
+      not existing_active?(existing, now) -> requested
+      is_nil(existing.expires_at) -> nil
+      is_nil(requested) -> nil
+      DateTime.compare(existing.expires_at, requested) == :gt -> existing.expires_at
+      true -> requested
+    end
+  end
+
+  defp existing_active?(%Entitlement{status: "active", expires_at: nil}, _now), do: true
+
+  defp existing_active?(%Entitlement{status: "active", expires_at: %DateTime{} = at}, now),
+    do: DateTime.compare(at, now) == :gt
+
+  defp existing_active?(_entitlement, _now), do: false
+
+  @doc """
+  Whether the user has EVER held `key`, active or not. What a once-per-account
+  grant (a trial) checks, since the row outlives its end.
+  """
+  @spec entitlement_ever?(Ecto.UUID.t(), String.t()) :: boolean()
+  def entitlement_ever?(user_id, key) when is_binary(user_id) and is_binary(key) do
+    Repo.exists?(from e in Entitlement, where: e.user_id == ^user_id and e.key == ^key)
+  end
+
+  @doc "The user's `key` row, active or not, or `nil`."
+  @spec get_user_entitlement_by_key(Ecto.UUID.t(), String.t()) :: Entitlement.t() | nil
+  def get_user_entitlement_by_key(user_id, key) when is_binary(user_id) and is_binary(key),
+    do: Repo.get_by(Entitlement, user_id: user_id, key: key)
+
   @spec product_entitlement_key(Product.t()) :: String.t()
   def product_entitlement_key(%Product{grant_config: config, sku: sku}) do
     config = config || %{}
     config["entitlement_key"] || config[:entitlement_key] || sku
   end
 
-  @spec admin_stats() :: map()
-  def admin_stats do
-    %{
-      products: count_products(),
-      provider_products: count_provider_products(),
-      purchases: count_purchases(),
-      completed_purchases: count_purchases(status: "completed"),
-      entitlements: count_entitlements(),
-      active_entitlements: count_entitlements(status: "active"),
-      provider_events: count_provider_events()
-    }
-  end
+  # ---------------------------------------------------------------------------
+  # Admin
+  # ---------------------------------------------------------------------------
 
-  @spec stripe_config_status() :: map()
-  def stripe_config_status do
-    secret_key = ProviderConfig.stripe_secret_key()
-    webhook_secret = ProviderConfig.stripe_webhook_secret()
-    secret_key_source = ProviderConfig.stripe_secret_key_source()
-    webhook_secret_source = ProviderConfig.stripe_webhook_secret_source()
-    api_version_source = ProviderConfig.stripe_api_version_source()
+  @doc delegate_to: {Admin, :admin_stats, 0}
+  defdelegate admin_stats(), to: Admin
 
-    %{
-      configured: present?(secret_key) and present?(webhook_secret),
-      secret_key_configured: present?(secret_key),
-      webhook_secret_configured: present?(webhook_secret),
-      mode: stripe_key_mode(secret_key),
-      selected_secret_key: source_label(secret_key_source),
-      selected_webhook_secret: source_label(webhook_secret_source),
-      expected_secret_keys: ProviderConfig.stripe_candidate_labels(:secret_key),
-      expected_webhook_secrets: ProviderConfig.stripe_candidate_labels(:webhook_secret),
-      api_version: ProviderConfig.stripe_api_version(),
-      api_version_source: source_label(api_version_source) || "stripity_stripe default",
-      masked_secret_key: mask_secret(secret_key),
-      masked_webhook_secret: mask_secret(webhook_secret),
-      environment: default_environment()
-    }
-  end
+  @doc delegate_to: {Admin, :stripe_config_status, 0}
+  defdelegate stripe_config_status(), to: Admin
 
-  @spec provider_adapter_statuses() :: [map()]
-  def provider_adapter_statuses do
-    adapters = Application.get_env(:gamend_core, :payment_provider_adapters, [])
-    stripe_status = stripe_config_status()
+  @doc delegate_to: {Admin, :provider_adapter_statuses, 0}
+  defdelegate provider_adapter_statuses(), to: Admin
 
-    stripe = %{
-      provider: "stripe",
-      module: Gamend.Payments.Providers.Stripe,
-      configured: stripe_status.configured,
-      status: Map.put(stripe_status, :provider, "stripe")
-    }
+  @doc delegate_to: {Admin, :list_admin_products, 1}
+  defdelegate list_admin_products(opts \\ []), to: Admin
 
-    store_adapters =
-      for {provider, default_module} <- [
-            {"apple", Gamend.Payments.Providers.Apple},
-            {"google", Gamend.Payments.Providers.Google},
-            {"steam", Gamend.Payments.Providers.Steam}
-          ] do
-        key = String.to_existing_atom(provider)
-        module = Keyword.get(adapters, key, default_module)
-        status = provider_module_status(module)
+  @doc delegate_to: {Admin, :count_products, 1}
+  defdelegate count_products(opts \\ []), to: Admin
 
-        %{
-          provider: provider,
-          module: module,
-          configured: Map.get(status, :configured, module != default_module),
-          status: status
-        }
-      end
+  @doc delegate_to: {Admin, :list_admin_provider_products, 1}
+  defdelegate list_admin_provider_products(opts \\ []), to: Admin
 
-    [stripe | store_adapters]
-  end
+  @doc delegate_to: {Admin, :count_provider_products, 1}
+  defdelegate count_provider_products(opts \\ []), to: Admin
 
-  @spec list_admin_products(keyword()) :: [Product.t()]
-  def list_admin_products(opts \\ []) do
-    page = positive_page(opts)
-    page_size = page_size(opts)
-    offset = page_offset(page, page_size)
+  @doc delegate_to: {Admin, :list_admin_purchases, 1}
+  defdelegate list_admin_purchases(opts \\ []), to: Admin
 
-    from(p in Product,
-      order_by: [desc: p.inserted_at, desc: p.id],
-      limit: ^page_size,
-      offset: ^offset
-    )
-    |> Repo.all()
-  end
+  @doc delegate_to: {Admin, :count_purchases, 1}
+  defdelegate count_purchases(opts \\ []), to: Admin
 
-  @spec count_products(keyword()) :: non_neg_integer()
-  def count_products(_opts \\ []) do
-    Repo.aggregate(Product, :count, :id)
-  end
+  @doc delegate_to: {Admin, :list_admin_entitlements, 1}
+  defdelegate list_admin_entitlements(opts \\ []), to: Admin
 
-  @spec list_admin_provider_products(keyword()) :: [ProviderProduct.t()]
-  def list_admin_provider_products(opts \\ []) do
-    page = positive_page(opts)
-    page_size = page_size(opts)
-    offset = page_offset(page, page_size)
+  @doc delegate_to: {Admin, :count_entitlements, 1}
+  defdelegate count_entitlements(opts \\ []), to: Admin
 
-    from(pp in ProviderProduct,
-      order_by: [desc: pp.inserted_at, desc: pp.id],
-      preload: [:product],
-      limit: ^page_size,
-      offset: ^offset
-    )
-    |> Repo.all()
-  end
+  @doc delegate_to: {Admin, :list_provider_events, 1}
+  defdelegate list_provider_events(opts \\ []), to: Admin
 
-  @spec count_provider_products(keyword()) :: non_neg_integer()
-  def count_provider_products(_opts \\ []) do
-    Repo.aggregate(ProviderProduct, :count, :id)
-  end
+  @doc delegate_to: {Admin, :count_provider_events, 1}
+  defdelegate count_provider_events(opts \\ []), to: Admin
 
-  @spec list_admin_purchases(keyword()) :: [Purchase.t()]
-  def list_admin_purchases(opts \\ []) do
-    page = positive_page(opts)
-    page_size = page_size(opts)
-    offset = page_offset(page, page_size)
+  @doc delegate_to: {Admin, :list_reconciliation_cursors, 1}
+  defdelegate list_reconciliation_cursors(opts \\ []), to: Admin
 
-    Purchase
-    |> admin_purchase_filters(opts)
-    |> order_by([p], desc: p.inserted_at, desc: p.id)
-    |> preload([:product, :provider_product, :user])
-    |> limit(^page_size)
-    |> offset(^offset)
-    |> Repo.all()
-  end
-
-  @spec count_purchases(keyword()) :: non_neg_integer()
-  def count_purchases(opts \\ []) do
-    Purchase
-    |> admin_purchase_filters(opts)
-    |> Repo.aggregate(:count, :id)
-  end
-
-  @spec list_admin_entitlements(keyword()) :: [Entitlement.t()]
-  def list_admin_entitlements(opts \\ []) do
-    page = positive_page(opts)
-    page_size = page_size(opts)
-    offset = page_offset(page, page_size)
-
-    Entitlement
-    |> admin_entitlement_filters(opts)
-    |> order_by([e], desc: e.inserted_at, desc: e.id)
-    |> preload([:product, :source_purchase, :user])
-    |> limit(^page_size)
-    |> offset(^offset)
-    |> Repo.all()
-  end
-
-  @spec count_entitlements(keyword()) :: non_neg_integer()
-  def count_entitlements(opts \\ []) do
-    Entitlement
-    |> admin_entitlement_filters(opts)
-    |> Repo.aggregate(:count, :id)
-  end
-
-  @spec list_provider_events(keyword()) :: [ProviderEvent.t()]
-  def list_provider_events(opts \\ []) do
-    page = positive_page(opts)
-    page_size = page_size(opts)
-    offset = page_offset(page, page_size)
-
-    ProviderEvent
-    |> provider_event_filters(opts)
-    |> order_by([e], desc: e.inserted_at, desc: e.id)
-    |> limit(^page_size)
-    |> offset(^offset)
-    |> Repo.all()
-  end
-
-  @spec count_provider_events(keyword()) :: non_neg_integer()
-  def count_provider_events(opts \\ []) do
-    ProviderEvent
-    |> provider_event_filters(opts)
-    |> Repo.aggregate(:count, :id)
-  end
-
-  @spec list_reconciliation_cursors(keyword()) :: [ReconciliationCursor.t()]
-  def list_reconciliation_cursors(opts \\ []) do
-    page = positive_page(opts)
-    page_size = page_size(opts)
-    offset = page_offset(page, page_size)
-
-    from(c in ReconciliationCursor,
-      order_by: [asc: c.provider, asc: c.name],
-      limit: ^page_size,
-      offset: ^offset
-    )
-    |> Repo.all()
-  end
-
-  @spec count_reconciliation_cursors(keyword()) :: non_neg_integer()
-  def count_reconciliation_cursors(_opts \\ []) do
-    Repo.aggregate(ReconciliationCursor, :count, :id)
-  end
+  @doc delegate_to: {Admin, :count_reconciliation_cursors, 1}
+  defdelegate count_reconciliation_cursors(opts \\ []), to: Admin
 
   @spec record_provider_event(String.t(), String.t(), String.t(), map(), map()) ::
           {:ok, ProviderEvent.t(), boolean()} | {:error, Ecto.Changeset.t()}
@@ -893,7 +736,8 @@ defmodule Gamend.Payments do
   # again — webhook handlers are idempotent (`fulfill_purchase/2` locks the row
   # and returns `:already_fulfilled`), so re-running one is safe and losing one
   # is not.
-  defp claim_provider_event(provider, event_id, event_type, event, fun) do
+  @doc false
+  def claim_provider_event(provider, event_id, event_type, event, fun) do
     case record_provider_event(provider, event_id, event_type, event) do
       {:ok, %ProviderEvent{processed_at: %DateTime{}}, false} ->
         {:ok, :duplicate}
@@ -923,10 +767,12 @@ defmodule Gamend.Payments do
   defp preload_product(nil), do: nil
   defp preload_product(provider_product), do: Repo.preload(provider_product, :product)
 
-  defp preload_purchase(nil), do: nil
-  defp preload_purchase(purchase), do: Repo.preload(purchase, [:product, :provider_product])
+  @doc false
+  def preload_purchase(nil), do: nil
+  def preload_purchase(purchase), do: Repo.preload(purchase, [:product, :provider_product])
 
-  defp resolve_provider_product(provider, %{"provider_product_id" => id}) do
+  @doc false
+  def resolve_provider_product(provider, %{"provider_product_id" => id}) do
     case Gamend.UUIDv7.cast_or_nil(id) do
       nil ->
         {:error, :invalid_provider_product_id}
@@ -943,7 +789,7 @@ defmodule Gamend.Payments do
     end
   end
 
-  defp resolve_provider_product(provider, %{"product_sku" => sku}) when is_binary(sku) do
+  def resolve_provider_product(provider, %{"product_sku" => sku}) when is_binary(sku) do
     query =
       from pp in ProviderProduct,
         join: p in assoc(pp, :product),
@@ -958,20 +804,21 @@ defmodule Gamend.Payments do
     end
   end
 
-  defp resolve_provider_product(_provider, _attrs), do: {:error, :missing_product_reference}
+  def resolve_provider_product(_provider, _attrs), do: {:error, :missing_product_reference}
 
-  defp ensure_checkout_allowed(
-         %User{} = user,
-         %ProviderProduct{product: %Product{} = product},
-         attrs
-       ) do
+  @doc false
+  def ensure_checkout_allowed(
+        %User{} = user,
+        %ProviderProduct{product: %Product{} = product},
+        attrs
+      ) do
     with :ok <- ensure_single_ownership_quantity(product, attrs),
          :ok <- ensure_single_ownership_available(user, product) do
       ensure_game_allows_purchase(user, product)
     end
   end
 
-  defp ensure_checkout_allowed(_user, _provider_product, _attrs), do: :ok
+  def ensure_checkout_allowed(_user, _provider_product, _attrs), do: :ok
 
   # The game's veto, and the last one before money moves: a plugin can refuse to
   # sell to this player — an unlinked account whose entitlement would be
@@ -987,7 +834,7 @@ defmodule Gamend.Payments do
 
   defp ensure_single_ownership_quantity(%Product{kind: kind}, attrs)
        when kind in ["entitlement", "subscription"] do
-    if parse_positive_int(attrs["quantity"], 1) == 1 do
+    if Params.parse_positive_int(attrs["quantity"], 1) == 1 do
       :ok
     else
       {:error, :quantity_not_allowed}
@@ -1025,7 +872,8 @@ defmodule Gamend.Payments do
     end)
   end
 
-  defp mark_purchase_failed(%Purchase{} = purchase, reason, provider_reason) do
+  @doc false
+  def mark_purchase_failed(%Purchase{} = purchase, reason, provider_reason) do
     payload = %{
       "failure_reason" => reason,
       "provider_reason" => inspect(provider_reason) |> String.slice(0, 1_000)
@@ -1035,7 +883,7 @@ defmodule Gamend.Payments do
       purchase
       |> Purchase.changeset(%{
         status: "failed",
-        raw_provider_payload: merge_payload(purchase.raw_provider_payload, payload)
+        raw_provider_payload: Params.merge_payload(purchase.raw_provider_payload, payload)
       })
       |> Repo.update()
       |> tap_bump({:payments, :purchase_version})
@@ -1052,7 +900,8 @@ defmodule Gamend.Payments do
     result
   end
 
-  defp mark_purchase_requires_action(%Purchase{} = purchase, session) when is_map(session) do
+  @doc false
+  def mark_purchase_requires_action(%Purchase{} = purchase, session) when is_map(session) do
     metadata =
       purchase.metadata
       |> Map.put("stripe_checkout_url", session["url"])
@@ -1064,7 +913,7 @@ defmodule Gamend.Payments do
       provider_transaction_id: session["id"],
       metadata: metadata,
       raw_provider_payload:
-        merge_payload(purchase.raw_provider_payload, %{"stripe_session" => session})
+        Params.merge_payload(purchase.raw_provider_payload, %{"stripe_session" => session})
     })
     |> Repo.update()
     |> tap_bump({:payments, :purchase_version})
@@ -1077,7 +926,7 @@ defmodule Gamend.Payments do
       purchase.metadata
       |> Map.put("steam_url", params["steamurl"])
       |> Map.put("steam_transaction_id", params["transid"])
-      |> put_if_present(
+      |> Params.put_if_present(
         "steam_agreements",
         params["agreements"],
         not is_nil(params["agreements"])
@@ -1089,13 +938,14 @@ defmodule Gamend.Payments do
       provider_transaction_id: params["transid"] || purchase.provider_transaction_id,
       metadata: metadata,
       raw_provider_payload:
-        merge_payload(purchase.raw_provider_payload, %{"steam_init" => result})
+        Params.merge_payload(purchase.raw_provider_payload, %{"steam_init" => result})
     })
     |> Repo.update()
     |> tap_bump({:payments, :purchase_version})
   end
 
-  defp update_purchase_from_validation(%Purchase{} = purchase, validation) do
+  @doc false
+  def update_purchase_from_validation(%Purchase{} = purchase, validation) do
     validated_status = validation["status"] || "completed"
 
     attrs = %{
@@ -1117,9 +967,12 @@ defmodule Gamend.Payments do
       currency: validation["currency"] || purchase.currency,
       amount: validation["amount"] || purchase.amount,
       environment: validation["environment"] || purchase.environment,
-      expires_at: parse_datetime(validation["expires_at"]) || purchase.expires_at,
+      expires_at: Params.parse_datetime(validation["expires_at"]) || purchase.expires_at,
       raw_provider_payload:
-        merge_payload(purchase.raw_provider_payload, validation["raw_payload"] || validation)
+        Params.merge_payload(
+          purchase.raw_provider_payload,
+          validation["raw_payload"] || validation
+        )
     }
 
     purchase
@@ -1148,7 +1001,7 @@ defmodule Gamend.Payments do
     |> Purchase.changeset(%{
       status: "completed",
       purchased_at: purchase.purchased_at || DateTime.utc_now(:second),
-      raw_provider_payload: merge_payload(purchase.raw_provider_payload, provider_payload)
+      raw_provider_payload: Params.merge_payload(purchase.raw_provider_payload, provider_payload)
     })
     |> Repo.update()
     |> tap_bump({:payments, :purchase_version})
@@ -1215,8 +1068,8 @@ defmodule Gamend.Payments do
       "quantity" => validation["quantity"] || 1,
       "currency" => validation["currency"],
       "amount" => validation["amount"],
-      "environment" => validation["environment"] || default_environment(),
-      "expires_at" => parse_datetime(validation["expires_at"]),
+      "environment" => validation["environment"] || ProviderConfig.environment(),
+      "expires_at" => Params.parse_datetime(validation["expires_at"]),
       "raw_provider_payload" => validation["raw_payload"] || validation
     }
 
@@ -1249,10 +1102,9 @@ defmodule Gamend.Payments do
   # `"environment"` — Apple maps `Sandbox`/`Xcode`, Google maps `purchaseType`
   # 0 — so one comparison covers all of them.
   defp test_purchase?(validation) do
-    configured = to_string(default_environment())
     reported = validation["environment"]
 
-    configured == "production" and is_binary(reported) and
+    ProviderConfig.production?() and is_binary(reported) and
       String.downcase(reported) != "production"
   end
 
@@ -1288,286 +1140,12 @@ defmodule Gamend.Payments do
 
   defp maybe_fulfill_validated_purchase(%Purchase{} = purchase, _status), do: {:ok, purchase}
 
-  defp process_stripe_event(%{
-         "type" => "checkout.session.completed",
-         "data" => %{"object" => object}
-       })
-       when is_map(object) do
-    with {:ok, purchase} <- purchase_from_provider_object(object),
-         {:ok, updated} <- update_purchase_from_stripe_session(purchase, object) do
-      if stripe_session_paid?(object) do
-        with {:ok, _purchase} <- fulfill_purchase(updated, %{"stripe_session" => object}) do
-          {:ok, :processed}
-        end
-      else
-        {:ok, :processed}
-      end
-    end
-  end
+  @doc false
+  def processed_result({:ok, _purchase}), do: {:ok, :processed}
+  def processed_result({:error, reason}), do: {:error, reason}
 
-  defp process_stripe_event(%{
-         "type" => "checkout.session.async_payment_succeeded",
-         "data" => %{"object" => object}
-       })
-       when is_map(object) do
-    with {:ok, purchase} <- purchase_from_provider_object(object),
-         {:ok, updated} <- update_purchase_from_stripe_session(purchase, object),
-         {:ok, _purchase} <- fulfill_purchase(updated, %{"stripe_session" => object}) do
-      {:ok, :processed}
-    end
-  end
-
-  defp process_stripe_event(%{
-         "type" => "checkout.session.async_payment_failed",
-         "data" => %{"object" => object}
-       })
-       when is_map(object) do
-    with {:ok, purchase} <- purchase_from_provider_object(object),
-         {:ok, _purchase, :failed} <-
-           update_purchase_from_stripe_reconciliation(purchase, object, "failed", :failed) do
-      {:ok, :processed}
-    end
-  end
-
-  defp process_stripe_event(%{"type" => "charge.succeeded", "data" => %{"object" => object}})
-       when is_map(object) do
-    with {:ok, purchase} <- purchase_from_provider_object(object),
-         {:ok, _purchase} <- update_purchase_from_stripe_charge(purchase, object) do
-      {:ok, :processed}
-    else
-      {:error, :purchase_not_found} -> {:ok, :ignored}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp process_stripe_event(%{
-         "type" => "checkout.session.expired",
-         "data" => %{"object" => object}
-       })
-       when is_map(object) do
-    with {:ok, purchase} <- purchase_from_provider_object(object) do
-      _ =
-        purchase
-        |> Purchase.changeset(%{
-          status: "cancelled",
-          raw_provider_payload:
-            merge_payload(purchase.raw_provider_payload, %{
-              "stripe_session" => object
-            })
-        })
-        |> Repo.update()
-        |> tap_bump({:payments, :purchase_version})
-
-      {:ok, :processed}
-    end
-  end
-
-  defp process_stripe_event(%{"type" => type, "data" => %{"object" => object}})
-       when type in [
-              "charge.refunded",
-              "refund.created",
-              "refund.updated",
-              "charge.refund.updated",
-              "charge.dispute.created",
-              "charge.dispute.funds_withdrawn"
-            ] and is_map(object) do
-    # Only a refund that actually succeeded revokes.
-    #
-    # `refund.created` and `refund.updated` fire for pending, failed and
-    # cancelled refunds too, and every one of them revoked the entitlement — so
-    # a refund that failed left the customer charged *and* without the goods,
-    # with nothing to put it back. A partial `charge.refunded` was treated as a
-    # full one for the same reason.
-    if reversal_effective?(type, object) do
-      with {:ok, purchase} <- purchase_from_provider_object(object),
-           {:ok, _purchase} <-
-             revoke_purchase(purchase, %{
-               "status" => stripe_reversal_status(type),
-               "reason" => type,
-               "payload" => %{"stripe_event_object" => object}
-             }) do
-        {:ok, :processed}
-      else
-        {:error, :purchase_not_found} -> {:ok, :ignored}
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      {:ok, :ignored}
-    end
-  end
-
-  defp process_stripe_event(%{
-         "type" => "customer.subscription.updated",
-         "data" => %{"object" => object}
-       })
-       when is_map(object) do
-    with {:ok, purchase} <- purchase_from_provider_object(object),
-         {:ok, updated} <-
-           update_purchase_from_stripe_subscription(purchase, object, "subscription_updated"),
-         {:ok, _entitlements} <- update_entitlements_from_stripe_subscription(updated, object) do
-      {:ok, :processed}
-    else
-      {:error, :purchase_not_found} -> {:ok, :ignored}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp process_stripe_event(%{
-         "type" => "customer.subscription.deleted",
-         "data" => %{"object" => object}
-       })
-       when is_map(object) do
-    with {:ok, purchase} <- purchase_from_provider_object(object),
-         {:ok, updated} <-
-           update_purchase_from_stripe_subscription(purchase, object, "subscription_deleted"),
-         {:ok, _purchase} <-
-           revoke_purchase(updated, %{
-             "status" => "cancelled",
-             "reason" => "customer.subscription.deleted",
-             "payload" => %{"stripe_subscription" => object}
-           }) do
-      {:ok, :processed}
-    else
-      {:error, :purchase_not_found} -> {:ok, :ignored}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp process_stripe_event(_event), do: {:ok, :ignored}
-
-  defp process_google_event(%{"testNotification" => _notification}), do: {:ok, :processed}
-
-  defp process_google_event(%{"voidedPurchaseNotification" => notification})
-       when is_map(notification) do
-    purchase =
-      find_provider_purchase(
-        "google",
-        notification["orderId"],
-        notification["purchaseToken"]
-      )
-
-    case purchase do
-      %Purchase{} ->
-        revoke_purchase(purchase, %{
-          "status" => "refunded",
-          "reason" => "google_voided_purchase",
-          "payload" => %{"google_notification" => notification}
-        })
-        |> processed_result()
-
-      nil ->
-        {:ok, :ignored}
-    end
-  end
-
-  defp process_google_event(%{"oneTimeProductNotification" => notification})
-       when is_map(notification) do
-    purchase = find_provider_purchase("google", nil, notification["purchaseToken"])
-
-    case {notification["notificationType"], purchase} do
-      {2, %Purchase{} = purchase} ->
-        revoke_purchase(purchase, %{
-          "status" => "cancelled",
-          "reason" => "google_one_time_product_cancelled",
-          "payload" => %{"google_notification" => notification}
-        })
-        |> processed_result()
-
-      {_type, %Purchase{} = purchase} ->
-        fulfill_purchase(purchase, %{"google_notification" => notification})
-        |> processed_result()
-
-      _ ->
-        {:ok, :ignored}
-    end
-  end
-
-  defp process_google_event(%{"subscriptionNotification" => notification})
-       when is_map(notification) do
-    purchase = find_provider_purchase("google", nil, notification["purchaseToken"])
-
-    case {notification["notificationType"], purchase} do
-      {type, %Purchase{} = purchase} when type in [12, 13, 20] ->
-        revoke_purchase(purchase, %{
-          "status" => google_subscription_reversal_status(type),
-          "reason" => "google_subscription_notification_#{type}",
-          "payload" => %{"google_notification" => notification}
-        })
-        |> processed_result()
-
-      {_type, %Purchase{} = purchase} ->
-        fulfill_purchase(purchase, %{"google_notification" => notification})
-        |> processed_result()
-
-      _ ->
-        {:ok, :ignored}
-    end
-  end
-
-  defp process_google_event(_event), do: {:ok, :ignored}
-
-  defp process_apple_event(event) do
-    transaction = event["decoded_transaction_info"] || %{}
-    type = event["notificationType"]
-
-    purchase =
-      find_provider_purchase(
-        "apple",
-        transaction["transactionId"],
-        transaction["originalTransactionId"]
-      )
-
-    cond do
-      is_nil(purchase) ->
-        {:ok, :ignored}
-
-      type in @apple_reversal_notifications or not is_nil(transaction["revocationDate"]) ->
-        revoke_purchase(purchase, %{
-          "status" => "revoked",
-          "reason" => "apple_#{type}",
-          "payload" => %{"apple_notification" => event}
-        })
-        |> processed_result()
-
-      type in @apple_activation_notifications ->
-        with {:ok, updated} <-
-               update_purchase_from_validation(
-                 purchase,
-                 apple_validation_from_transaction(transaction)
-               ),
-             {:ok, _purchase} <- fulfill_purchase(updated, %{"apple_notification" => event}) do
-          {:ok, :processed}
-        end
-
-      true ->
-        {:ok, :ignored}
-    end
-  end
-
-  defp processed_result({:ok, _purchase}), do: {:ok, :processed}
-  defp processed_result({:error, reason}), do: {:error, reason}
-
-  defp google_subscription_reversal_status(20), do: "cancelled"
-  defp google_subscription_reversal_status(_type), do: "revoked"
-
-  defp apple_validation_from_transaction(transaction) do
-    %{
-      "transaction_id" => transaction["transactionId"],
-      "original_transaction_id" => transaction["originalTransactionId"],
-      "status" => "completed",
-      "quantity" => transaction["quantity"] || 1,
-      "environment" => apple_event_environment(transaction["environment"]),
-      "expires_at" => millis_to_iso8601(transaction["expiresDate"]),
-      "raw_payload" => %{"apple_transaction" => transaction}
-    }
-  end
-
-  defp apple_event_environment("Sandbox"), do: "sandbox"
-  defp apple_event_environment("Production"), do: "production"
-  defp apple_event_environment("Xcode"), do: "test"
-  defp apple_event_environment(_environment), do: default_environment()
-
-  defp purchase_from_provider_object(object) do
+  @doc false
+  def purchase_from_provider_object(object) do
     metadata = object["metadata"] || %{}
 
     cond do
@@ -1608,7 +1186,8 @@ defmodule Gamend.Payments do
     end
   end
 
-  defp get_user_subscription_entitlement(%User{} = user, entitlement_id) do
+  @doc false
+  def get_user_subscription_entitlement(%User{} = user, entitlement_id) do
     Entitlement
     |> Repo.get(entitlement_id)
     |> Repo.preload([:product, source_purchase: [:product, :provider_product]])
@@ -1633,271 +1212,20 @@ defmodule Gamend.Payments do
     end
   end
 
-  defp ensure_stripe_session_matches_purchase(%Purchase{} = purchase, session) do
-    metadata = session["metadata"] || %{}
-
-    cond do
-      stripe_metadata_purchase_mismatch?(metadata["purchase_id"], purchase.id) ->
-        {:error, :stripe_session_purchase_mismatch}
-
-      is_binary(metadata["order_id"]) and metadata["order_id"] != purchase.order_id ->
-        {:error, :stripe_session_order_mismatch}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp stripe_metadata_purchase_mismatch?(nil, _purchase_id), do: false
-  defp stripe_metadata_purchase_mismatch?("", _purchase_id), do: false
-  defp stripe_metadata_purchase_mismatch?(purchase_id, purchase_id), do: false
-
-  defp stripe_metadata_purchase_mismatch?(purchase_id, _expected_id)
-       when is_binary(purchase_id),
-       do: true
-
-  defp stripe_metadata_purchase_mismatch?(_purchase_id, _expected_id), do: true
-
-  defp reconcile_stripe_purchase_from_session(%Purchase{status: "completed"} = purchase, session) do
-    if stripe_session_paid?(session) do
-      with {:ok, updated} <- update_purchase_from_stripe_session(purchase, session),
-           {:ok, _entitlements} <- maybe_update_entitlements_from_stripe_purchase(updated) do
-        {:ok, preload_purchase(updated), :already_completed}
-      end
-    else
-      {:ok, preload_purchase(purchase), :already_completed}
-    end
-  end
-
-  defp reconcile_stripe_purchase_from_session(%Purchase{status: status} = purchase, _session)
-       when status in ["refunded", "revoked"] do
-    {:ok, preload_purchase(purchase), :unchanged}
-  end
-
-  defp reconcile_stripe_purchase_from_session(%Purchase{} = purchase, session) do
-    cond do
-      stripe_session_paid?(session) ->
-        with {:ok, updated} <- update_purchase_from_stripe_session(purchase, session),
-             {:ok, fulfilled} <-
-               fulfill_purchase(updated, stripe_reconciliation_payload(session, "fulfilled")) do
-          {:ok, fulfilled, :fulfilled}
-        end
-
-      session["status"] == "expired" ->
-        update_purchase_from_stripe_reconciliation(purchase, session, "cancelled", :cancelled)
-
-      stripe_payment_failed?(session) ->
-        update_purchase_from_stripe_reconciliation(purchase, session, "failed", :failed)
-
-      session["status"] == "open" ->
-        update_purchase_from_stripe_reconciliation(
-          purchase,
-          session,
-          "requires_action",
-          :still_open
-        )
-
-      true ->
-        update_purchase_from_stripe_reconciliation(
-          purchase,
-          session,
-          "requires_action",
-          :payment_processing
-        )
-    end
-  end
-
-  defp stripe_session_paid?(%{"payment_status" => status})
-       when status in ["paid", "no_payment_required"],
-       do: true
-
-  defp stripe_session_paid?(_session), do: false
-
-  defp stripe_payment_failed?(session) do
-    session["status"] == "complete" and
-      stripe_payment_intent_status(session) in ["canceled", "requires_payment_method"]
-  end
-
-  defp stripe_payment_intent_status(%{"payment_intent" => %{"status" => status}}), do: status
-  defp stripe_payment_intent_status(_session), do: nil
-
-  defp update_purchase_from_stripe_reconciliation(%Purchase{} = purchase, session, status, result) do
-    purchase
-    |> Purchase.changeset(%{
-      status: status,
-      raw_provider_payload:
-        merge_payload(
-          purchase.raw_provider_payload,
-          stripe_reconciliation_payload(session, result)
-        )
-    })
-    |> Repo.update()
-    |> tap_bump({:payments, :purchase_version})
-    |> case do
-      {:ok, updated} -> {:ok, preload_purchase(updated), result}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp stripe_reconciliation_payload(session, result) do
-    %{
-      "stripe_session" => session,
-      "stripe_reconciliation" => %{
-        "result" => to_string(result),
-        "reconciled_at" => DateTime.utc_now(:second) |> DateTime.to_iso8601()
-      }
-    }
-  end
-
-  defp update_purchase_from_stripe_session(%Purchase{} = purchase, object) do
-    subscription = stripe_session_subscription(purchase, object)
-    amount = object["amount_total"] || purchase.amount
-    currency = object["currency"] |> normalize_currency() || purchase.currency
-
-    metadata =
-      purchase
-      |> stripe_purchase_metadata(object)
-      |> stripe_subscription_metadata(subscription)
-
-    purchase
-    |> Purchase.changeset(%{
-      provider_transaction_id: object["id"] || purchase.provider_transaction_id,
-      amount: amount,
-      currency: currency,
-      expires_at: stripe_subscription_period_end(subscription) || purchase.expires_at,
-      metadata: metadata,
-      raw_provider_payload:
-        stripe_payload_with_subscription(
-          purchase.raw_provider_payload,
-          %{"stripe_session" => object},
-          subscription
-        )
-    })
-    |> Repo.update()
-    |> tap_bump({:payments, :purchase_version})
-  end
-
-  defp update_purchase_from_stripe_subscription(
-         %Purchase{} = purchase,
-         subscription,
-         reconciliation_result
-       )
-       when is_map(subscription) do
-    metadata =
-      purchase
-      |> stripe_purchase_metadata(%{})
-      |> stripe_subscription_metadata(subscription)
-
-    purchase
-    |> Purchase.changeset(%{
-      expires_at: stripe_subscription_period_end(subscription) || purchase.expires_at,
-      metadata: metadata,
-      raw_provider_payload:
-        merge_payload(purchase.raw_provider_payload, %{
-          "stripe_subscription" => subscription,
-          "stripe_subscription_reconciliation" => %{
-            "result" => reconciliation_result,
-            "reconciled_at" => DateTime.utc_now(:second) |> DateTime.to_iso8601()
-          }
-        })
-    })
-    |> Repo.update()
-    |> tap_bump({:payments, :purchase_version})
-    |> case do
-      {:ok, updated} -> {:ok, preload_purchase(updated)}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp update_entitlements_from_stripe_subscription(%Purchase{} = purchase, subscription)
-       when is_map(subscription) do
-    metadata = stripe_entitlement_subscription_metadata(subscription)
-    expires_at = stripe_subscription_period_end(subscription)
-
-    from(e in Entitlement, where: e.source_purchase_id == ^purchase.id)
-    |> Repo.all()
-    |> Enum.reduce_while({:ok, []}, fn entitlement, {:ok, updated_entitlements} ->
-      attrs = %{
-        metadata: merge_payload(entitlement.metadata || %{}, metadata)
-      }
-
-      attrs =
-        if expires_at do
-          Map.put(attrs, :expires_at, expires_at)
-        else
-          attrs
-        end
-
-      case entitlement |> Entitlement.changeset(attrs) |> Repo.update() do
-        {:ok, updated} ->
-          after_entitlement_changed(updated)
-
-          {:cont,
-           {:ok, [Repo.preload(updated, [:product, :source_purchase]) | updated_entitlements]}}
-
-        {:error, reason} ->
-          {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, entitlements} -> {:ok, Enum.reverse(entitlements)}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp maybe_update_entitlements_from_stripe_purchase(%Purchase{} = purchase) do
-    case subscription_object_id((purchase.raw_provider_payload || %{})["stripe_subscription"]) do
-      nil ->
-        {:ok, []}
-
-      _subscription_id ->
-        update_entitlements_from_stripe_subscription(
-          purchase,
-          purchase.raw_provider_payload["stripe_subscription"]
-        )
-    end
-  end
-
-  defp update_purchase_from_stripe_charge(%Purchase{} = purchase, object) do
-    metadata = stripe_purchase_metadata(purchase, object)
-
-    purchase
-    |> Purchase.changeset(%{
-      provider_original_transaction_id: object["id"] || purchase.provider_original_transaction_id,
-      metadata: metadata,
-      raw_provider_payload:
-        merge_payload(purchase.raw_provider_payload, %{
-          "stripe_charge" => object
-        })
-    })
-    |> Repo.update()
-    |> tap_bump({:payments, :purchase_version})
-  end
-
-  defp stripe_reversal_status(type)
-       when type in [
-              "charge.refunded",
-              "refund.created",
-              "refund.updated",
-              "charge.refund.updated"
-            ],
-       do: "refunded"
-
-  defp stripe_reversal_status(_type), do: "revoked"
-
   # A dispute always takes effect. A refund object counts only when its status
   # says the money actually moved; a `charge.refunded` counts only when the
   # charge was refunded in full, since a partial refund is not a revocation.
-  defp reversal_effective?("charge.dispute" <> _rest, _object), do: true
+  @doc false
+  def reversal_effective?("charge.dispute" <> _rest, _object), do: true
 
-  defp reversal_effective?("charge.refunded", object) do
+  def reversal_effective?("charge.refunded", object) do
     case {object["amount"], object["amount_refunded"]} do
       {amount, refunded} when is_integer(amount) and is_integer(refunded) -> refunded >= amount
       _unknown -> true
     end
   end
 
-  defp reversal_effective?(_refund_event, object) do
+  def reversal_effective?(_refund_event, object) do
     case object["status"] do
       status when is_binary(status) -> status == "succeeded"
       _unknown -> true
@@ -1913,150 +1241,8 @@ defmodule Gamend.Payments do
     end
   end
 
-  defp stripe_purchase_metadata(%Purchase{} = purchase, object) do
-    metadata = purchase.metadata || %{}
-
-    metadata
-    |> put_if_present("stripe_session_id", object["id"], object["object"] == "checkout.session")
-    |> put_if_present("stripe_payment_intent_id", object["payment_intent"], true)
-    |> put_if_present("stripe_charge_id", object["id"], object["object"] == "charge")
-    |> put_if_present("stripe_subscription_id", stripe_session_subscription_id(object), true)
-  end
-
-  defp stripe_subscription_metadata(metadata, nil), do: metadata
-
-  defp stripe_subscription_metadata(metadata, subscription) when is_map(subscription) do
-    metadata
-    |> put_if_present("stripe_subscription_id", subscription["id"], true)
-    |> put_if_present("stripe_subscription_status", subscription["status"], true)
-    |> put_if_present(
-      "stripe_subscription_current_period_end",
-      datetime_iso(stripe_subscription_period_end(subscription)),
-      true
-    )
-    |> Map.put(
-      "stripe_subscription_cancel_at_period_end",
-      subscription["cancel_at_period_end"] == true
-    )
-  end
-
-  defp stripe_entitlement_subscription_metadata(subscription) when is_map(subscription) do
-    %{
-      "stripe_subscription_id" => subscription["id"],
-      "stripe_subscription_status" => subscription["status"],
-      "stripe_subscription_cancel_at_period_end" => subscription["cancel_at_period_end"] == true,
-      "stripe_subscription_current_period_end" =>
-        datetime_iso(stripe_subscription_period_end(subscription))
-    }
-  end
-
-  defp stripe_session_subscription(%Purchase{product: %Product{kind: "subscription"}}, object) do
-    case object["subscription"] do
-      %{} = subscription ->
-        subscription
-
-      subscription_id when is_binary(subscription_id) and subscription_id != "" ->
-        case stripe_adapter().retrieve_subscription(subscription_id) do
-          {:ok, subscription} ->
-            normalize_params(subscription)
-
-          {:error, reason} ->
-            Logger.warning(
-              "Stripe subscription retrieve failed subscription_id=#{subscription_id} reason=#{inspect(reason)}"
-            )
-
-            %{"id" => subscription_id}
-        end
-
-      _ ->
-        nil
-    end
-  end
-
-  defp stripe_session_subscription(_purchase, _object), do: nil
-
-  defp stripe_session_subscription_id(%{"subscription" => %{"id" => id}}) when is_binary(id),
-    do: id
-
-  defp stripe_session_subscription_id(%{"subscription" => id}) when is_binary(id), do: id
-  defp stripe_session_subscription_id(_object), do: nil
-
-  defp stripe_subscription_id(%Purchase{} = purchase) do
-    metadata = purchase.metadata || %{}
-    payload = purchase.raw_provider_payload || %{}
-
-    candidates = [
-      metadata["stripe_subscription_id"],
-      stripe_session_subscription_id(payload["stripe_session"] || %{}),
-      subscription_object_id(payload["stripe_subscription"]),
-      purchase.provider_original_transaction_id
-    ]
-
-    case Enum.find(candidates, &stripe_subscription_id?/1) do
-      nil -> {:error, :missing_stripe_subscription_id}
-      subscription_id -> {:ok, subscription_id}
-    end
-  end
-
-  defp subscription_object_id(%{"id" => id}) when is_binary(id), do: id
-  defp subscription_object_id(_subscription), do: nil
-
-  defp stripe_subscription_id?("sub_" <> _rest), do: true
-  defp stripe_subscription_id?(_value), do: false
-
-  defp stripe_payload_with_subscription(existing, incoming, nil),
-    do: merge_payload(existing, incoming)
-
-  defp stripe_payload_with_subscription(existing, incoming, subscription)
-       when is_map(subscription) do
-    merge_payload(existing, Map.put(incoming, "stripe_subscription", subscription))
-  end
-
-  defp stripe_subscription_period_end(nil), do: nil
-
-  defp stripe_subscription_period_end(subscription) when is_map(subscription) do
-    top_level_period_end =
-      unix_seconds_to_datetime(subscription["current_period_end"]) ||
-        unix_seconds_to_datetime(subscription["cancel_at"])
-
-    top_level_period_end || stripe_subscription_item_period_end(subscription)
-  end
-
-  defp stripe_subscription_item_period_end(%{"items" => %{"data" => items}})
-       when is_list(items) do
-    items
-    |> Enum.map(&unix_seconds_to_datetime(&1["current_period_end"]))
-    |> Enum.reject(&is_nil/1)
-    |> Enum.max_by(&DateTime.to_unix/1, fn -> nil end)
-  end
-
-  defp stripe_subscription_item_period_end(_subscription), do: nil
-
-  defp unix_seconds_to_datetime(value) when is_integer(value) do
-    case DateTime.from_unix(value, :second) do
-      {:ok, datetime} -> DateTime.truncate(datetime, :second)
-      {:error, _reason} -> nil
-    end
-  end
-
-  defp unix_seconds_to_datetime(value) when is_binary(value) do
-    value
-    |> parse_int()
-    |> unix_seconds_to_datetime()
-  end
-
-  defp unix_seconds_to_datetime(_value), do: nil
-
-  defp datetime_iso(%DateTime{} = value), do: DateTime.to_iso8601(value)
-  defp datetime_iso(_value), do: nil
-
-  defp put_if_present(metadata, key, value, true) when is_binary(value) and value != "" do
-    Map.put(metadata, key, value)
-  end
-
-  defp put_if_present(metadata, _key, _value, _condition), do: metadata
-
-  defp find_provider_purchase(provider, transaction_id, original_transaction_id) do
+  @doc false
+  def find_provider_purchase(provider, transaction_id, original_transaction_id) do
     [
       fn ->
         if is_binary(transaction_id) and transaction_id != "" do
@@ -2077,25 +1263,8 @@ defmodule Gamend.Payments do
     end)
   end
 
-  defp google_event_type(%{"voidedPurchaseNotification" => notification})
-       when is_map(notification) do
-    "voided_purchase:#{notification["refundType"] || "unknown"}"
-  end
-
-  defp google_event_type(%{"oneTimeProductNotification" => notification})
-       when is_map(notification) do
-    "one_time_product:#{notification["notificationType"] || "unknown"}"
-  end
-
-  defp google_event_type(%{"subscriptionNotification" => notification})
-       when is_map(notification) do
-    "subscription:#{notification["notificationType"] || "unknown"}"
-  end
-
-  defp google_event_type(%{"testNotification" => _notification}), do: "test"
-  defp google_event_type(_event), do: "unknown"
-
-  defp provider_event_hash(provider, raw_body) do
+  @doc false
+  def provider_event_hash(provider, raw_body) do
     digest = :crypto.hash(:sha256, raw_body) |> Base.encode16(case: :lower)
     "#{provider}_#{digest}"
   end
@@ -2123,7 +1292,7 @@ defmodule Gamend.Payments do
   end
 
   defp after_purchase_fulfilled(%Purchase{} = purchase) do
-    Phoenix.PubSub.broadcast(@pubsub, "user:#{purchase.user_id}", {:purchase_updated, purchase})
+    Gamend.Broadcast.publish("user:#{purchase.user_id}", {:purchase_updated, purchase})
 
     Gamend.Async.run(fn ->
       Gamend.Hooks.internal_call(:after_purchase_fulfilled, [purchase])
@@ -2131,16 +1300,16 @@ defmodule Gamend.Payments do
   end
 
   defp after_purchase_revoked(%Purchase{} = purchase) do
-    Phoenix.PubSub.broadcast(@pubsub, "user:#{purchase.user_id}", {:purchase_updated, purchase})
+    Gamend.Broadcast.publish("user:#{purchase.user_id}", {:purchase_updated, purchase})
 
     Gamend.Async.run(fn ->
       Gamend.Hooks.internal_call(:after_purchase_revoked, [purchase])
     end)
   end
 
-  defp after_entitlement_changed(%Entitlement{} = entitlement) do
-    Phoenix.PubSub.broadcast(
-      @pubsub,
+  @doc false
+  def after_entitlement_changed(%Entitlement{} = entitlement) do
+    Gamend.Broadcast.publish(
       "user:#{entitlement.user_id}",
       {:entitlement_changed, entitlement}
     )
@@ -2150,21 +1319,23 @@ defmodule Gamend.Payments do
     end)
   end
 
-  defp provider_adapter(provider) do
+  @doc false
+  def provider_adapter(provider) do
     adapters =
       Application.get_env(:gamend_core, :payment_provider_adapters, [])
 
-    key =
-      case provider do
-        "apple" -> :apple
-        "google" -> :google
-        "steam" -> :steam
-      end
-
-    Keyword.get(adapters, key, default_provider_adapter(provider))
+    # A `case` with no catch-all raised CaseClauseError on any other string,
+    # which is a 500 for what is really "no such provider".
+    case provider do
+      "apple" -> Keyword.get(adapters, :apple, Providers.Apple)
+      "google" -> Keyword.get(adapters, :google, Providers.Google)
+      "steam" -> Keyword.get(adapters, :steam, Providers.Steam)
+      _other -> nil
+    end
   end
 
-  defp stripe_adapter do
+  @doc false
+  def stripe_adapter do
     Application.get_env(
       :gamend_core,
       :stripe_adapter,
@@ -2172,99 +1343,8 @@ defmodule Gamend.Payments do
     )
   end
 
-  defp default_provider_adapter("apple"), do: Gamend.Payments.Providers.Apple
-  defp default_provider_adapter("google"), do: Gamend.Payments.Providers.Google
-  defp default_provider_adapter("steam"), do: Gamend.Payments.Providers.Steam
-
-  defp provider_module_status(module) do
-    if function_exported?(module, :config_status, 0) do
-      module.config_status()
-    else
-      %{configured: true}
-    end
-  end
-
-  defp positive_page(opts) do
-    opts
-    |> Keyword.get(:page, 1)
-    |> parse_positive_int(1)
-  end
-
-  defp page_size(opts) do
-    opts
-    |> Keyword.get(:page_size, 50)
-    |> parse_positive_int(50)
-    |> min(250)
-  end
-
-  defp page_offset(page, page_size), do: (page - 1) * page_size
-
-  defp admin_purchase_filters(query, opts) do
-    query
-    |> maybe_where_string(:provider, Keyword.get(opts, :provider))
-    |> maybe_where_string(:status, Keyword.get(opts, :status))
-    |> maybe_where_id(:user_id, Keyword.get(opts, :user_id))
-    |> maybe_where_like(:order_id, Keyword.get(opts, :order_id))
-  end
-
-  defp admin_entitlement_filters(query, opts) do
-    query
-    |> maybe_where_string(:status, Keyword.get(opts, :status))
-    |> maybe_where_id(:user_id, Keyword.get(opts, :user_id))
-    |> maybe_where_like(:key, Keyword.get(opts, :key))
-  end
-
-  defp provider_event_filters(query, opts) do
-    query
-    |> maybe_where_string(:provider, Keyword.get(opts, :provider))
-    |> maybe_where_like(:event_type, Keyword.get(opts, :event_type))
-  end
-
-  defp maybe_where_string(query, _field, value) when value in [nil, ""], do: query
-
-  defp maybe_where_string(query, field, value) when is_binary(value) do
-    where(query, [row], field(row, ^field) == ^value)
-  end
-
-  defp maybe_where_id(query, _field, value) when value in [nil, ""], do: query
-
-  defp maybe_where_id(query, field, value) do
-    case Gamend.UUIDv7.cast_or_nil(value) do
-      nil -> query
-      uuid -> where(query, [row], field(row, ^field) == ^uuid)
-    end
-  end
-
-  defp maybe_where_like(query, _field, value) when value in [nil, ""], do: query
-
-  defp maybe_where_like(query, field, value) when is_binary(value) do
-    pattern = "%#{Repo.escape_like(value)}%"
-    where(query, [row], fragment("? LIKE ? ESCAPE '\\'", field(row, ^field), ^pattern))
-  end
-
-  defp present?(value), do: is_binary(value) and value != ""
-
-  defp stripe_key_mode("sk_test_" <> _rest), do: "test"
-  defp stripe_key_mode("rk_test_" <> _rest), do: "test"
-  defp stripe_key_mode("sk_live_" <> _rest), do: "live"
-  defp stripe_key_mode("rk_live_" <> _rest), do: "live"
-  defp stripe_key_mode(value) when is_binary(value) and value != "", do: "unknown"
-  defp stripe_key_mode(_value), do: "not_configured"
-
-  defp mask_secret(value) when is_binary(value) and value != "" do
-    len = byte_size(value)
-
-    if len <= 8 do
-      String.duplicate("*", len)
-    else
-      "#{String.slice(value, 0, 7)}...#{String.slice(value, -4, 4)}"
-    end
-  end
-
-  defp mask_secret(_value), do: "<unset>"
-
   defp entitlement_expiry(%Product{kind: "subscription", grant_config: config}) do
-    duration = parse_positive_int((config || %{})["duration_seconds"], 0)
+    duration = Params.parse_positive_int((config || %{})["duration_seconds"], 0)
 
     if duration > 0 do
       DateTime.utc_now(:second) |> DateTime.add(duration, :second)
@@ -2288,73 +1368,7 @@ defmodule Gamend.Payments do
     int |> rem(9_000_000_000_000_000_000) |> Kernel.+(1_000_000_000_000_000_000) |> to_string()
   end
 
-  defp default_environment do
-    ProviderConfig.environment()
-  end
-
-  defp source_label({label, _value}), do: label
-  defp source_label(nil), do: nil
-
-  defp merge_payload(existing, incoming) when is_map(existing) and is_map(incoming) do
-    Map.merge(existing, incoming)
-  end
-
-  defp required_value(map, key) do
-    case Map.get(map, key) do
-      value when is_binary(value) and value != "" -> {:ok, value}
-      value when is_integer(value) -> {:ok, to_string(value)}
-      _ -> {:error, String.to_atom("missing_#{key}")}
-    end
-  end
-
-  defp parse_positive_int(value, default) do
-    case parse_int(value) do
-      int when is_integer(int) and int > 0 -> int
-      _ -> default
-    end
-  end
-
-  defp parse_int(value) when is_integer(value), do: value
-
-  defp parse_int(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {int, ""} -> int
-      _ -> nil
-    end
-  end
-
-  defp parse_int(_value), do: nil
-
-  defp parse_datetime(nil), do: nil
-  defp parse_datetime(%DateTime{} = dt), do: DateTime.truncate(dt, :second)
-
-  defp parse_datetime(value) when is_binary(value) do
-    case DateTime.from_iso8601(value) do
-      {:ok, dt, _offset} -> DateTime.truncate(dt, :second)
-      _ -> nil
-    end
-  end
-
-  defp parse_datetime(_value), do: nil
-
-  defp millis_to_iso8601(nil), do: nil
-
-  defp millis_to_iso8601(value) do
-    with int when is_integer(int) <- parse_int(value),
-         {:ok, dt} <- DateTime.from_unix(int, :millisecond) do
-      DateTime.to_iso8601(dt)
-    else
-      _ -> nil
-    end
-  end
-
-  defp normalize_currency(nil), do: nil
-  defp normalize_currency(currency) when is_binary(currency), do: String.upcase(currency)
-
-  defp normalize_params(attrs) when is_map(attrs) do
-    Map.new(attrs, fn
-      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-      {k, v} -> {k, v}
-    end)
-  end
+  @doc false
+  def source_label({label, _value}), do: label
+  def source_label(nil), do: nil
 end

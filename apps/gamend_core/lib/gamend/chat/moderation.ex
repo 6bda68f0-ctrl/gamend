@@ -147,14 +147,10 @@ defmodule Gamend.Chat.Moderation do
   @doc "List blocklist entries. Filters: `:word`, `:severity`, `:lang`."
   @spec list_filter_words(map(), keyword()) :: [FilterWord.t()]
   def list_filter_words(filters \\ %{}, opts \\ []) do
-    page = Keyword.get(opts, :page, 1)
-    page_size = Keyword.get(opts, :page_size, 25)
-
     filters
     |> filter_words_query()
     |> order_by([w], asc: w.word)
-    |> limit(^page_size)
-    |> offset(^((page - 1) * page_size))
+    |> Gamend.Query.page(opts)
     |> Repo.all()
   end
 
@@ -218,7 +214,7 @@ defmodule Gamend.Chat.Moderation do
     query = from(w in FilterWord)
 
     query =
-      case blank_to_nil(Map.get(filters, :word) || Map.get(filters, "word")) do
+      case Gamend.Parse.blank_to_nil(Map.get(filters, :word) || Map.get(filters, "word")) do
         nil ->
           query
 
@@ -228,12 +224,12 @@ defmodule Gamend.Chat.Moderation do
       end
 
     query =
-      case blank_to_nil(Map.get(filters, :severity) || Map.get(filters, "severity")) do
+      case Gamend.Parse.blank_to_nil(Map.get(filters, :severity) || Map.get(filters, "severity")) do
         nil -> query
         value -> where(query, [w], w.severity == ^value)
       end
 
-    case blank_to_nil(Map.get(filters, :lang) || Map.get(filters, "lang")) do
+    case Gamend.Parse.blank_to_nil(Map.get(filters, :lang) || Map.get(filters, "lang")) do
       nil -> query
       value -> where(query, [w], w.lang == ^value)
     end
@@ -419,14 +415,10 @@ defmodule Gamend.Chat.Moderation do
   """
   @spec list_mutes(map(), keyword()) :: [Mute.t()]
   def list_mutes(filters \\ %{}, opts \\ []) do
-    page = Keyword.get(opts, :page, 1)
-    page_size = Keyword.get(opts, :page_size, 25)
-
     filters
     |> mutes_query()
     |> order_by([m], desc: m.inserted_at, desc: m.id)
-    |> limit(^page_size)
-    |> offset(^((page - 1) * page_size))
+    |> Gamend.Query.page(opts)
     |> preload([:user, :muted_by_user])
     |> Repo.all()
   end
@@ -465,19 +457,21 @@ defmodule Gamend.Chat.Moderation do
     query = from(m in Mute)
 
     query =
-      case blank_to_nil(Map.get(filters, :user_id) || Map.get(filters, "user_id")) do
+      case Gamend.Parse.blank_to_nil(Map.get(filters, :user_id) || Map.get(filters, "user_id")) do
         nil -> query
         value -> where(query, [m], m.user_id == ^to_string(value))
       end
 
     query =
-      case blank_to_nil(Map.get(filters, :scope) || Map.get(filters, "scope")) do
+      case Gamend.Parse.blank_to_nil(Map.get(filters, :scope) || Map.get(filters, "scope")) do
         nil -> query
         value -> where(query, [m], m.scope == ^value)
       end
 
     query =
-      case blank_to_nil(Map.get(filters, :scope_ref_id) || Map.get(filters, "scope_ref_id")) do
+      case Gamend.Parse.blank_to_nil(
+             Map.get(filters, :scope_ref_id) || Map.get(filters, "scope_ref_id")
+           ) do
         nil -> query
         value -> where(query, [m], m.scope_ref_id == ^to_string(value))
       end
@@ -500,10 +494,6 @@ defmodule Gamend.Chat.Moderation do
     end)
   end
 
-  defp blank_to_nil(nil), do: nil
-  defp blank_to_nil(""), do: nil
-  defp blank_to_nil(value), do: value
-
   defp tap_ok({:ok, value} = result, fun) do
     fun.(value)
     result
@@ -513,14 +503,7 @@ defmodule Gamend.Chat.Moderation do
 
   # The muted player's own socket, so the client can grey out its chat input.
   # Best-effort for the same reason the cache broadcast is.
-  defp notify_user(user_id, event) do
-    Phoenix.PubSub.broadcast(Gamend.PubSub, "user:#{user_id}", event)
-    :ok
-  rescue
-    _error -> :ok
-  catch
-    :exit, _reason -> :ok
-  end
+  defp notify_user(user_id, event), do: Gamend.Broadcast.best_effort("user:#{user_id}", event)
 
   # Hooks never run inside the write — they are queued and flushed after it.
   defp dispatch(hook, args) do

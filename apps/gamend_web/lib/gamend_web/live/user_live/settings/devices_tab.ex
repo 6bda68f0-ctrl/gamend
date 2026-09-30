@@ -9,6 +9,7 @@ defmodule GamendWeb.UserLive.Settings.DevicesTab do
   import Phoenix.LiveView, only: [put_flash: 3]
 
   alias Gamend.Push
+  alias GamendWeb.LiveHelpers
 
   @page_size 25
 
@@ -129,7 +130,7 @@ defmodule GamendWeb.UserLive.Settings.DevicesTab do
 
     devices = Push.list_tokens(user.id, page: page, page_size: @page_size)
     count = Push.count_tokens(user.id)
-    total_pages = div(count + @page_size - 1, @page_size)
+    total_pages = LiveHelpers.total_pages(count, @page_size)
 
     socket
     |> assign(:devices, devices)

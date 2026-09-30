@@ -41,7 +41,7 @@ defmodule GamendWeb.Uploads do
         key = Storage.build_key(prefix, owner_id, stem <> Storage.extension_for(content_type))
         {:ok, ticket} = Storage.presigned_upload(key, content_type: content_type)
 
-        json(conn, sign_local_ticket(ticket, key))
+        GamendWeb.Reply.reply_data(conn, sign_local_ticket(ticket, key))
 
       {:error, reason} ->
         error(conn, :bad_request, to_string(reason))
@@ -54,8 +54,11 @@ defmodule GamendWeb.Uploads do
   """
   def token_salt, do: "storage upload"
 
-  @doc "How long an upload ticket stays valid, in seconds."
-  def token_max_age, do: 900
+  @doc """
+  How long an upload ticket stays valid, in seconds: the `expires_in` the ticket
+  answers, so a client is never told a longer window than the token allows.
+  """
+  def token_max_age, do: Gamend.Storage.upload_ttl_seconds()
 
   # The local backend receives the upload on our own endpoint, so the key has to
   # travel signed: the receiver takes the key *from the token*, never from the
@@ -147,6 +150,42 @@ defmodule GamendWeb.Uploads do
   @doc "The content type a client declared, as a string."
   @spec content_type(map()) :: String.t()
   def content_type(params), do: params["content_type"] || ""
+
+  @doc """
+  The request's `content-type`, without any `; charset=...` parameters.
+
+  `default` is what an absent header means, and the two upload endpoints
+  deliberately disagree: the player-facing one passes `""`, so
+  `Storage.validate_upload/2` rejects an upload that did not declare a type,
+  while the admin one passes `"application/octet-stream"` and stores the bytes
+  as-is. That difference used to live in two private copies of this function
+  that were otherwise identical, where it read as drift rather than a choice.
+  """
+  @spec request_content_type(Plug.Conn.t(), String.t()) :: String.t()
+  def request_content_type(conn, default \\ "") do
+    case Plug.Conn.get_req_header(conn, "content-type") do
+      [content_type | _] -> content_type |> String.split(";") |> hd() |> String.trim()
+      [] -> default
+    end
+  end
+
+  @doc """
+  Reads the whole request body, or `{:error, :too_large}` past `max` bytes.
+
+  Reads one byte past the cap so an oversized body is detected without
+  buffering the whole thing. Image bodies pass the endpoint parser unparsed
+  (`pass: */*`).
+  """
+  @spec read_full_body(Plug.Conn.t(), pos_integer()) ::
+          {:ok, binary(), Plug.Conn.t()} | {:error, term()}
+  def read_full_body(conn, max) do
+    case Plug.Conn.read_body(conn, length: max + 1) do
+      {:ok, body, conn} when byte_size(body) <= max -> {:ok, body, conn}
+      {:ok, _body, _conn} -> {:error, :too_large}
+      {:more, _partial, _conn} -> {:error, :too_large}
+      {:error, _} = error -> error
+    end
+  end
 
   defp error(conn, status, message) do
     conn |> put_status(status) |> json(%{error: message})

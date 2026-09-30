@@ -11,11 +11,11 @@ defmodule GamendWeb.AuthController do
   alias Gamend.Accounts
   alias Gamend.Accounts.Scope
   alias Gamend.Accounts.User
-  alias Gamend.OAuth.GoogleIDToken
   alias Gamend.OAuth.Providers
   alias Gamend.OAuthSessions
-  alias GamendWeb.Auth.Guardian
-  alias GamendWeb.Schemas.OAuthSessionData
+  alias GamendWeb.Auth.OAuthExchange
+  alias GamendWeb.Auth.Tokens
+  alias GamendWeb.Schemas
   alias GamendWeb.UserAuth
 
   @browser_state_prefix "browser:"
@@ -25,6 +25,7 @@ defmodule GamendWeb.AuthController do
     "google" => :google,
     "apple" => :apple,
     "facebook" => :facebook,
+    "github" => :github,
     "steam" => :steam
   }
 
@@ -149,220 +150,88 @@ defmodule GamendWeb.AuthController do
     end
   end
 
-  # Optionally extract current user from JWT in Authorization header.
-  # Returns {:ok, user} if valid JWT present, or {:ok, nil} if no JWT or invalid.
-  # This allows the same endpoint to handle both login and linking.
-  defp maybe_load_user_from_jwt(conn) do
-    case Plug.Conn.get_req_header(conn, "authorization") do
-      ["Bearer " <> token] ->
-        case Guardian.decode_and_verify(token, %{"typ" => "access"}) do
-          {:ok, claims} ->
-            case Guardian.resource_from_claims(claims) do
-              {:ok, user} -> {:ok, user}
-              _ -> {:ok, nil}
-            end
+  # The API polling flow's callback: the provider sent the player back with
+  # `state` = an OAuth session id. A session started by
+  # `POST /api/v1/me/providers/:provider/authorize` carries `link_user_id` and
+  # links; one started by `GET /api/v1/auth/:provider` signs in. What the
+  # client started decides, never whether a token happened to be sent.
+  defp handle_session_oauth_callback(conn, session_id, user_params, provider) do
+    config = OAuthExchange.provider!(provider)
+    session = OAuthSessions.get_session(session_id)
 
-          _ ->
-            {:ok, nil}
+    outcome =
+      case session && (session.data["link_user_id"] || session.data[:link_user_id]) do
+        link_user_id when is_binary(link_user_id) ->
+          link_session_outcome(link_user_id, user_params, provider, config)
+
+        _ ->
+          sign_in_session_outcome(user_params, config)
+      end
+
+    OAuthSessions.create_session(session_id, outcome)
+    redirect(conn, to: ~p"/auth/success?session_id=#{session_id}")
+  end
+
+  defp link_session_outcome(link_user_id, user_params, provider, config) do
+    case Accounts.get_user(link_user_id) do
+      %User{} = user ->
+        case Accounts.link_account(user, user_params, config.id_field, config.changeset) do
+          {:ok, _updated_user} ->
+            %{status: "completed", data: %{link_user_id: link_user_id, provider: provider}}
+
+          {:error, {:conflict, _other_user}} ->
+            session_error(
+              "provider_already_linked",
+              "This provider is already linked to another account",
+              %{link_user_id: link_user_id, provider: provider}
+            )
+
+          {:error, _changeset} ->
+            session_error("link_failed", "The provider could not be linked", %{
+              link_user_id: link_user_id,
+              provider: provider
+            })
         end
 
-      _ ->
-        {:ok, nil}
-    end
-  end
-
-  # Create an OAuth session for the API flow.
-  # If a JWT is present, stores the user_id in the data map for linking when the callback completes.
-  defp create_api_oauth_session(conn, provider) do
-    session_id = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
-
-    # Check if user is authenticated - if so, store their ID for linking
-    data =
-      case maybe_load_user_from_jwt(conn) do
-        {:ok, %User{id: user_id}} ->
-          %{link_user_id: user_id}
-
-        {:ok, nil} ->
-          %{}
-      end
-
-    Gamend.OAuthSessions.create_session(session_id, %{
-      provider: provider,
-      status: "pending",
-      data: data
-    })
-
-    session_id
-  end
-
-  # Handle the session-based OAuth callback (browser redirect flow).
-  # If link_user_id is present in the session data, links the provider instead of login.
-  defp handle_session_oauth_callback(conn, session_id, user_params, provider) do
-    config = oauth_provider!(provider)
-
-    handle_session_oauth_callback(
-      conn,
-      session_id,
-      user_params,
-      config.id_field,
-      config.changeset,
-      config.finder
-    )
-  end
-
-  defp handle_session_oauth_callback(
-         conn,
-         session_id,
-         user_params,
-         provider_id_field,
-         changeset_fn,
-         find_or_create_fn
-       ) do
-    # Check if this session has a link_user_id in its data (meaning we should link, not login)
-    session = OAuthSessions.get_session(session_id)
-    link_user_id = session && get_in(session.data, ["link_user_id"])
-
-    if is_binary(link_user_id) do
-      # This is a linking flow
-      case Accounts.get_user!(link_user_id) do
-        user ->
-          case Accounts.link_account(user, user_params, provider_id_field, changeset_fn) do
-            {:ok, _updated_user} ->
-              OAuthSessions.create_session(session_id, %{
-                status: "completed",
-                data: %{linked: true, provider: Atom.to_string(provider_id_field)}
-              })
-
-              redirect(conn, to: ~p"/auth/success?session_id=#{session_id}")
-
-            {:error, {:conflict, _other_user}} ->
-              OAuthSessions.create_session(session_id, %{
-                status: "error",
-                data: %{
-                  error: "provider_already_linked",
-                  message: "This provider is already linked to another account"
-                }
-              })
-
-              redirect(conn, to: ~p"/auth/success?session_id=#{session_id}")
-
-            {:error, _changeset} ->
-              OAuthSessions.create_session(session_id, %{
-                status: "error",
-                data: %{error: "link_failed", details: "internal_error"}
-              })
-
-              redirect(conn, to: ~p"/auth/success?session_id=#{session_id}")
-          end
-      end
-    else
-      # Normal login/create flow
-      case find_or_create_fn.(user_params) do
-        {:ok, user} ->
-          if Accounts.user_activated?(user) do
-            {:ok, access_token, _} = Guardian.encode_and_sign(user, %{}, token_type: "access")
-
-            {:ok, refresh_token, _} =
-              Guardian.encode_and_sign(user, %{}, token_type: "refresh", ttl: {30, :days})
-
-            Accounts.touch_last_seen(user)
-
-            OAuthSessions.create_session(session_id, %{
-              status: "completed",
-              data: %{
-                access_token: access_token,
-                refresh_token: refresh_token,
-                expires_in: 900,
-                user_id: user.id
-              }
-            })
-
-            redirect(conn, to: ~p"/auth/success?session_id=#{session_id}")
-          else
-            OAuthSessions.create_session(session_id, %{
-              status: "error",
-              data: %{
-                error: "account_not_activated",
-                message: "Your account is pending activation by an administrator."
-              }
-            })
-
-            redirect(conn, to: ~p"/auth/success?session_id=#{session_id}")
-          end
-
-        {:error, changeset} ->
-          OAuthSessions.create_session(session_id, %{
-            status: "error",
-            data: %{details: changeset.errors}
-          })
-
-          redirect(conn, to: ~p"/auth/success?session_id=#{session_id}")
-      end
-    end
-  rescue
-    Ecto.NoResultsError ->
-      OAuthSessions.create_session(session_id, %{
-        status: "error",
-        data: %{error: "user_not_found", message: "The user to link to was not found"}
-      })
-
-      redirect(conn, to: ~p"/auth/success?session_id=#{session_id}")
-  end
-
-  # Handle linking a provider to an existing user (API flow)
-  defp handle_api_link(conn, user, user_params, provider_id_field, changeset_fn) do
-    case Accounts.link_account(user, user_params, provider_id_field, changeset_fn) do
-      {:ok, _updated_user} ->
-        json(conn, %{data: %{linked: true, provider: Atom.to_string(provider_id_field)}})
-
-      {:error, {:conflict, _other_user}} ->
-        conn
-        |> put_status(:conflict)
-        |> json(%{
-          error: "provider_already_linked",
-          message: "This provider is already linked to another account"
+      nil ->
+        session_error("user_not_found", "The user to link to was not found", %{
+          link_user_id: link_user_id,
+          provider: provider
         })
+    end
+  end
+
+  defp sign_in_session_outcome(user_params, config) do
+    case config.finder.(user_params) do
+      {:ok, user} ->
+        case Tokens.refusal(user) do
+          nil -> %{status: "completed", data: Tokens.sign_in(user)}
+          {_status, code, message} -> session_error(code, message)
+        end
 
       {:error, _changeset} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "link_failed", details: "internal_error"})
+        session_error("sign_in_failed", "The account could not be created")
     end
   end
 
-  # Handle login/create flow (API) - returns JWT tokens
-  defp handle_api_login(conn, find_or_create_fn, user_params) do
-    case find_or_create_fn.(user_params) do
+  defp session_error(code, message, data \\ %{}) do
+    %{status: "error", data: Map.merge(data, %{error: code, message: message})}
+  end
+
+  # A provider sign-in over the API: find or create the account, answer the
+  # same `Session` as email and device login.
+  defp sign_in_api(conn, provider, user_params) do
+    config = OAuthExchange.provider!(provider)
+
+    case config.finder.(user_params) do
       {:ok, user} ->
-        if Accounts.user_activated?(user) do
-          {:ok, access_token, _} = Guardian.encode_and_sign(user, %{}, token_type: "access")
-
-          {:ok, refresh_token, _} =
-            Guardian.encode_and_sign(user, %{}, token_type: "refresh", ttl: {30, :days})
-
-          Accounts.touch_last_seen(user)
-
-          json(conn, %{
-            data: %{
-              access_token: access_token,
-              refresh_token: refresh_token,
-              expires_in: 900,
-              user_id: user.id
-            }
-          })
-        else
-          conn
-          |> put_status(:forbidden)
-          |> json(%{
-            error: "account_not_activated",
-            message: "Your account is pending activation by an administrator."
-          })
+        case Tokens.refusal(user) do
+          nil -> reply_data(conn, Tokens.sign_in(user))
+          {status, code, message} -> reply_error(conn, status, code, message)
         end
 
       {:error, changeset} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "create_failed", details: changeset.errors})
+        unprocessable(conn, changeset)
     end
   end
 
@@ -398,227 +267,8 @@ defmodule GamendWeb.AuthController do
     |> redirect(to: ~p"/users/log_in")
   end
 
-  defp oauth_provider(provider) do
-    case provider do
-      "discord" ->
-        {:ok,
-         %{
-           label: "Discord",
-           id_field: :discord_id,
-           changeset: &User.discord_oauth_changeset/2,
-           finder: &Accounts.find_or_create_from_discord/1
-         }}
-
-      "google" ->
-        {:ok,
-         %{
-           label: "Google",
-           id_field: :google_id,
-           changeset: &User.google_oauth_changeset/2,
-           finder: &Accounts.find_or_create_from_google/1
-         }}
-
-      "facebook" ->
-        {:ok,
-         %{
-           label: "Facebook",
-           id_field: :facebook_id,
-           changeset: &User.facebook_oauth_changeset/2,
-           finder: &Accounts.find_or_create_from_facebook/1
-         }}
-
-      "apple" ->
-        {:ok,
-         %{
-           label: "Apple",
-           id_field: :apple_id,
-           changeset: &User.apple_oauth_changeset/2,
-           finder: &Accounts.find_or_create_from_apple/1
-         }}
-
-      "steam" ->
-        {:ok,
-         %{
-           label: "Steam",
-           id_field: :steam_id,
-           changeset: &User.steam_oauth_changeset/2,
-           finder: &Accounts.find_or_create_from_steam/1
-         }}
-
-      _ ->
-        {:error, :unsupported_provider}
-    end
-  end
-
-  defp oauth_provider!(provider) do
-    {:ok, config} = oauth_provider(provider)
-    config
-  end
-
-  defp exchange_oauth_code(provider, code, client_type \\ :web) do
-    with {:ok, _config} <- oauth_provider(provider),
-         {:ok, user_info} <- exchange_provider_code(provider, code, client_type) do
-      oauth_user_params(provider, user_info)
-    end
-  end
-
-  defp exchange_provider_code("discord", code, :web) do
-    exchanger = oauth_exchanger()
-
-    exchanger.exchange_discord_code(
-      code,
-      Gamend.Settings.get(Gamend.OAuth.Providers, :discord_client_id),
-      Gamend.Settings.get(Gamend.OAuth.Providers, :discord_client_secret),
-      oauth_redirect_uri("discord")
-    )
-  end
-
-  defp exchange_provider_code("google", code, :web) do
-    exchanger = oauth_exchanger()
-
-    exchanger.exchange_google_code(
-      code,
-      Gamend.Settings.get(Gamend.OAuth.Providers, :google_client_id),
-      Gamend.Settings.get(Gamend.OAuth.Providers, :google_client_secret),
-      oauth_redirect_uri("google")
-    )
-  end
-
-  defp exchange_provider_code("facebook", code, :web) do
-    exchanger = oauth_exchanger()
-
-    exchanger.exchange_facebook_code(
-      code,
-      Gamend.Settings.get(Gamend.OAuth.Providers, :facebook_client_id),
-      Gamend.Settings.get(Gamend.OAuth.Providers, :facebook_client_secret),
-      oauth_redirect_uri("facebook")
-    )
-  end
-
-  defp exchange_provider_code("apple", code, client_type) when client_type in [:web, :ios] do
-    exchanger = oauth_exchanger()
-    client_id = if client_type == :ios, do: apple_ios_client_id(), else: apple_web_client_id()
-    client_secret = apple_client_secret(client_id)
-    exchanger.exchange_apple_code(code, client_id, client_secret, oauth_redirect_uri("apple"))
-  end
-
-  defp oauth_exchanger do
-    Application.get_env(:gamend_web, :oauth_exchanger, Gamend.OAuth.Exchanger)
-  end
-
-  defp oauth_redirect_uri(provider) do
-    "#{GamendWeb.endpoint().url()}/auth/#{provider}/callback"
-  end
-
-  # Without the log this surfaces only as Apple's opaque `invalid_client`: a
-  # nil secret and a genuinely rejected one look identical from the outside.
-  defp apple_client_secret(client_id) do
-    Gamend.Apple.client_secret(client_id: client_id)
-  rescue
-    error ->
-      require Logger
-
-      Logger.error("Apple OAuth: could not build client secret: #{Exception.message(error)}")
-      nil
-  end
-
-  defp oauth_user_params("discord", %{"id" => discord_id, "email" => email} = response) do
-    avatar = response["avatar"]
-    display_name = Map.get(response, "global_name") || Map.get(response, "username")
-
-    {:ok,
-     %{
-       email: email,
-       email_verified: verified_email?(response["verified"]),
-       discord_id: discord_id,
-       display_name: display_name,
-       profile_url:
-         if(avatar,
-           do: "https://cdn.discordapp.com/avatars/#{discord_id}/#{avatar}.png",
-           else: nil
-         )
-     }}
-  end
-
-  defp oauth_user_params("google", %{"id" => google_id, "email" => email} = user_info) do
-    picture = Map.get(user_info, "picture")
-    name = Map.get(user_info, "name") || Map.get(user_info, "given_name")
-
-    user_params = %{
-      email: email,
-      email_verified: verified_email?(user_info["email_verified"] || user_info["verified_email"]),
-      google_id: google_id,
-      display_name: name
-    }
-
-    {:ok, if(picture, do: Map.put(user_params, :profile_url, picture), else: user_params)}
-  end
-
-  defp oauth_user_params("facebook", %{"id" => facebook_id} = user_info) do
-    profile_url =
-      user_info
-      |> Map.get("picture", %{})
-      |> Map.get("data", %{})
-      |> Map.get("url")
-
-    user_params = %{
-      email: user_info["email"],
-      # Facebook does not expose a per-login email-verification claim, so its
-      # emails are never trusted for auto-linking to an existing account.
-      email_verified: false,
-      facebook_id: facebook_id,
-      display_name: Map.get(user_info, "name")
-    }
-
-    {:ok, if(profile_url, do: Map.put(user_params, :profile_url, profile_url), else: user_params)}
-  end
-
-  defp oauth_user_params("apple", %{"sub" => apple_id} = user_info) do
-    {:ok,
-     %{
-       email: user_info["email"],
-       email_verified: verified_email?(user_info["email_verified"]),
-       apple_id: apple_id,
-       display_name: Map.get(user_info, "name")
-     }}
-  end
-
-  defp oauth_user_params("steam", %{"id" => steam_id} = profile_info) do
-    {:ok,
-     %{
-       steam_id: steam_id,
-       display_name: Map.get(profile_info, "display_name"),
-       profile_url: Map.get(profile_info, "profile_url")
-     }}
-  end
-
-  defp oauth_user_params(_provider, _user_info), do: {:error, :missing_user_info}
-
-  # Providers report email verification as either a boolean or a "true" string.
-  defp verified_email?(true), do: true
-  defp verified_email?("true"), do: true
-  defp verified_email?(_), do: false
-
-  defp handle_api_oauth_result(conn, provider, user_params) do
-    config = oauth_provider!(provider)
-
-    case maybe_load_user_from_jwt(conn) do
-      {:ok, %User{} = current_user} ->
-        handle_api_link(
-          conn,
-          current_user,
-          user_params,
-          config.id_field,
-          config.changeset
-        )
-
-      {:ok, nil} ->
-        handle_api_login(conn, config.finder, user_params)
-    end
-  end
-
   defp handle_browser_oauth_callback(conn, provider, user_params) do
-    config = oauth_provider!(provider)
+    config = OAuthExchange.provider!(provider)
 
     case Scope.user(conn.assigns[:current_scope]) do
       %User{} = current_user ->
@@ -710,7 +360,7 @@ defmodule GamendWeb.AuthController do
         name: "provider",
         schema: %OpenApiSpex.Schema{
           type: :string,
-          enum: ["discord", "apple", "google", "facebook", "steam"]
+          enum: ["discord", "apple", "google", "facebook", "github", "steam"]
         },
         required: true
       ]
@@ -762,6 +412,20 @@ defmodule GamendWeb.AuthController do
 
     url =
       "https://www.facebook.com/v18.0/dialog/oauth?client_id=#{client_id}&redirect_uri=#{URI.encode_www_form(redirect_uri)}&response_type=code&scope=#{URI.encode_www_form(scope)}&state=#{URI.encode_www_form(state)}"
+
+    redirect(conn, external: url)
+  end
+
+  # No scope: a GitHub App ignores it, its permissions are set on the App.
+  def request(conn, %{"provider" => "github"}) do
+    client_id = Gamend.Settings.get(Gamend.OAuth.Providers, :github_client_id)
+
+    base = GamendWeb.endpoint().url()
+    redirect_uri = "#{base}/auth/github/callback"
+    {conn, state} = put_oauth_state(conn, "github")
+
+    url =
+      "https://github.com/login/oauth/authorize?client_id=#{client_id}&redirect_uri=#{URI.encode_www_form(redirect_uri)}&state=#{URI.encode_www_form(state)}"
 
     redirect(conn, external: url)
   end
@@ -843,9 +507,18 @@ defmodule GamendWeb.AuthController do
   # API flows include a 'state' parameter with session_id
   # Browser flows don't have state
   def callback(conn, %{"provider" => provider, "code" => code} = params)
-      when provider in ["discord", "google", "facebook", "apple"] do
-    case exchange_oauth_code(provider, code) do
+      when provider in ["discord", "google", "facebook", "github", "apple"] do
+    case OAuthExchange.exchange_code(provider, code) do
       {:ok, user_params} ->
+        user_params =
+          if provider == "apple",
+            do:
+              OAuthExchange.put_apple_name(
+                user_params,
+                OAuthExchange.apple_web_name(params["user"])
+              ),
+            else: user_params
+
         handle_oauth_state_success(conn, provider, user_params, params["state"])
 
       {:error, error} ->
@@ -883,7 +556,10 @@ defmodule GamendWeb.AuthController do
         handle_browser_oauth_callback(conn, "steam", user_params)
 
       session_id ->
-        case OAuthSessions.get_session(session_id) do
+        # Only a pending Steam session, as `dispatch_oauth_state/2` requires
+        # for the other providers: a finished one redeemed again would hand
+        # this player's tokens to whoever started it.
+        case OAuthSessions.get_pending_session(session_id, "steam") do
           nil ->
             handle_browser_oauth_callback(conn, "steam", user_params)
 
@@ -907,10 +583,10 @@ defmodule GamendWeb.AuthController do
             browser_oauth_error_redirect(conn, "steam", failure)
 
           _ ->
-            Gamend.OAuthSessions.create_session(session_id, %{
-              status: "error",
-              data: %{details: "authentication_failed"}
-            })
+            Gamend.OAuthSessions.create_session(
+              session_id,
+              session_error("authentication_failed", "The provider did not sign the player in")
+            )
 
             redirect(conn, to: ~p"/auth/success?session_id=#{session_id}")
         end
@@ -955,10 +631,10 @@ defmodule GamendWeb.AuthController do
         browser_oauth_error_redirect(conn, provider, error)
 
       {:api, session_id} ->
-        Gamend.OAuthSessions.create_session(session_id, %{
-          status: "error",
-          data: %{details: "authentication_failed"}
-        })
+        Gamend.OAuthSessions.create_session(
+          session_id,
+          session_error("authentication_failed", "The provider did not sign the player in")
+        )
 
         redirect(conn, to: ~p"/auth/success?session_id=#{session_id}")
 
@@ -976,188 +652,90 @@ defmodule GamendWeb.AuthController do
     |> UserAuth.log_out_user()
   end
 
-  # API OAuth endpoints
+  # API sign-in through a provider. Every one of these signs in: a bearer
+  # token on the request is ignored. Linking a provider to the signed-in
+  # account is `GamendWeb.Api.V1.ProviderController`, under `/api/v1/me`.
+
+  @provider_path_param [
+    in: :path,
+    name: "provider",
+    schema: %OpenApiSpex.Schema{
+      type: :string,
+      enum: ["discord", "apple", "google", "facebook", "github", "steam"]
+    },
+    description: "OAuth provider",
+    required: true,
+    example: "discord"
+  ]
+
   operation(:api_request,
     operation_id: "oauth_request",
-    summary: "Initiate API OAuth",
-    description: "Returns OAuth authorization URL for API clients",
+    summary: "Start a provider sign-in",
+    description:
+      "Answers the provider page to open and a session to poll with " <>
+        "`GET /api/v1/auth/session/{session_id}` until the player finishes there. " <>
+        "Always a sign-in; to link a provider to the signed-in account, " <>
+        "`POST /api/v1/me/providers/{provider}/authorize`.",
     tags: ["Authentication"],
-    parameters: [
-      provider: [
-        in: :path,
-        name: "provider",
-        schema: %OpenApiSpex.Schema{
-          type: :string,
-          enum: ["discord", "apple", "google", "facebook", "steam"]
-        },
-        description: "OAuth provider",
-        required: true,
-        example: "discord"
-      ]
-    ],
+    parameters: [provider: @provider_path_param],
     responses: [
-      ok: {
-        "OAuth URL",
-        "application/json",
-        %OpenApiSpex.Schema{
-          type: :object,
-          properties: %{
-            authorization_url: %OpenApiSpex.Schema{
-              type: :string,
-              description: "URL to redirect user to for OAuth"
-            },
-            session_id: %OpenApiSpex.Schema{
-              type: :string,
-              description: "Unique session ID to track this OAuth request"
-            }
-          },
-          example: %{
-            authorization_url: "https://discord.com/oauth2/authorize?...",
-            session_id: "abc123..."
-          }
-        }
-      }
+      ok: {"OAuth URL", "application/json", Schemas.OAuthAuthorizationResponse},
+      not_found: Schemas.error("Unknown or disabled provider")
     ]
   )
 
+  def api_request(conn, %{"provider" => provider}) do
+    reply_data(conn, OAuthExchange.start_session(provider, %{}))
+  end
+
   operation(:api_callback,
     operation_id: "oauth_api_callback",
-    summary: "API callback / code exchange",
+    summary: "Sign in with a provider code",
     description:
-      "Accepts an OAuth authorization code via the API and returns access/refresh tokens on success. " <>
-        "If a valid JWT is provided in the Authorization header, the provider will be **linked** to the authenticated user instead of logging in. " <>
-        "For the Steam provider, the `code` field should contain a server-verifiable Steam credential (for example a Steam auth ticket or Steam identifier) and will be validated via the Steam Web API.",
+      "Exchanges an authorization code (or, for Steam, a session ticket from " <>
+        "`ISteamUser::GetAuthTicketForWebApi`) and signs in, finding or creating the " <>
+        "account: the same `Session` as email and device login. Always a sign-in; to " <>
+        "link a provider to the signed-in account, `POST /api/v1/me/providers/{provider}`.",
     tags: ["Authentication"],
-    parameters: [
-      provider: [
-        in: :path,
-        name: "provider",
-        schema: %OpenApiSpex.Schema{type: :string},
-        required: true
-      ]
-    ],
+    parameters: [provider: @provider_path_param],
     request_body: {
-      "Code exchange or steam payload",
+      "Provider code",
       "application/json",
       %OpenApiSpex.Schema{
         type: :object,
+        required: [:code],
         properties: %{
           code: %OpenApiSpex.Schema{
             type: :string,
             description:
-              "Authorization code (for code-based providers). For Steam provider this MUST be a Steam auth ticket (AuthenticateUserTicket) and NOT a steam id."
+              "Authorization code; for Steam, a Steam auth ticket (hex), never a Steam id"
           }
         }
       }
     },
     responses: [
-      ok:
-        {"OAuth tokens", "application/json",
-         %OpenApiSpex.Schema{
-           type: :object,
-           properties: %{data: OAuthSessionData}
-         }},
-      bad_request: {"Bad request", "application/json", %OpenApiSpex.Schema{type: :object}}
+      ok: {"Signed in", "application/json", Schemas.SessionResponse},
+      bad_request: Schemas.error("Missing code, or the provider refused it"),
+      forbidden: Schemas.error("Account awaiting activation, or scheduled for deletion"),
+      not_found: Schemas.error("Unknown or disabled provider"),
+      unprocessable_entity: Schemas.error("The account could not be created")
     ]
   )
 
-  def api_request(conn, %{"provider" => "discord"}) do
-    # Create session (with optional link_user_id if JWT is present)
-    session_id = create_api_oauth_session(conn, "discord")
-
-    # Generate the Discord OAuth URL with state parameter
-    client_id = Gamend.Settings.get(Gamend.OAuth.Providers, :discord_client_id)
-    base = GamendWeb.endpoint().url()
-    redirect_uri = "#{base}/auth/discord/callback"
-    scope = "identify email"
-
-    url =
-      "https://discord.com/oauth2/authorize?client_id=#{client_id}&redirect_uri=#{URI.encode_www_form(redirect_uri)}&response_type=code&scope=#{URI.encode_www_form(scope)}&state=#{URI.encode_www_form(session_id)}"
-
-    json(conn, %{authorization_url: url, session_id: session_id})
+  def api_callback(conn, %{"provider" => provider} = params) do
+    case OAuthExchange.code_params(provider, params["code"]) do
+      {:ok, user_params} -> sign_in_api(conn, provider, user_params)
+      {:error, reason} -> OAuthExchange.reply_refused(conn, reason)
+    end
   end
 
-  def api_request(conn, %{"provider" => "apple"}) do
-    # Create session (with optional link_user_id if JWT is present)
-    session_id = create_api_oauth_session(conn, "apple")
-
-    # Generate the Apple OAuth URL
-    client_id = Gamend.Settings.get(Gamend.OAuth.Providers, :apple_client_id)
-    base = GamendWeb.endpoint().url()
-    redirect_uri = "#{base}/auth/apple/callback"
-    scope = "name email"
-
-    url =
-      "https://appleid.apple.com/auth/authorize?client_id=#{client_id}&redirect_uri=#{URI.encode_www_form(redirect_uri)}&response_type=code&response_mode=form_post&scope=#{URI.encode_www_form(scope)}&state=#{URI.encode_www_form(session_id)}"
-
-    json(conn, %{authorization_url: url, session_id: session_id})
-  end
-
-  def api_request(conn, %{"provider" => "google"}) do
-    # Create session (with optional link_user_id if JWT is present)
-    session_id = create_api_oauth_session(conn, "google")
-
-    # Generate the Google OAuth URL
-    client_id = Gamend.Settings.get(Gamend.OAuth.Providers, :google_client_id)
-    base = GamendWeb.endpoint().url()
-    redirect_uri = "#{base}/auth/google/callback"
-    scope = "email profile"
-
-    url =
-      "https://accounts.google.com/o/oauth2/v2/auth?client_id=#{client_id}&redirect_uri=#{URI.encode_www_form(redirect_uri)}&response_type=code&scope=#{URI.encode_www_form(scope)}&access_type=offline&state=#{URI.encode_www_form(session_id)}"
-
-    json(conn, %{authorization_url: url, session_id: session_id})
-  end
-
-  def api_request(conn, %{"provider" => "facebook"}) do
-    # Create session (with optional link_user_id if JWT is present)
-    session_id = create_api_oauth_session(conn, "facebook")
-
-    # Generate the Facebook OAuth URL
-    client_id = Gamend.Settings.get(Gamend.OAuth.Providers, :facebook_client_id)
-    base = GamendWeb.endpoint().url()
-    redirect_uri = "#{base}/auth/facebook/callback"
-    scope = "email"
-
-    url =
-      "https://www.facebook.com/v18.0/dialog/oauth?client_id=#{client_id}&redirect_uri=#{URI.encode_www_form(redirect_uri)}&response_type=code&scope=#{URI.encode_www_form(scope)}&state=#{URI.encode_www_form(session_id)}"
-
-    json(conn, %{authorization_url: url, session_id: session_id})
-  end
-
-  def api_request(conn, %{"provider" => "steam"}) do
-    # Create session (with optional link_user_id if JWT is present)
-    session_id = create_api_oauth_session(conn, "steam")
-
-    base = GamendWeb.endpoint().url()
-
-    # For Steam OpenID, include the session_id in the return_to callback so
-    # the callback handler can treat this as an API/session flow when the
-    # session_id is present.
-    return_to = "#{base}/auth/steam/callback?state=#{URI.encode_www_form(session_id)}"
-    realm = base
-
-    url =
-      "https://steamcommunity.com/openid/login?openid.ns=http://specs.openid.net/auth/2.0&openid.mode=checkid_setup&openid.return_to=#{URI.encode_www_form(return_to)}&openid.realm=#{URI.encode_www_form(realm)}&openid.identity=http://specs.openid.net/auth/2.0/identifier_select&openid.claimed_id=http://specs.openid.net/auth/2.0/identifier_select"
-
-    json(conn, %{authorization_url: url, session_id: session_id})
-  end
-
-  # Unknown provider
-  def api_request(conn, %{"provider" => _provider}) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{error: "invalid_provider", message: "Unsupported OAuth provider"})
-  end
-
-  # API clients can POST a code (or steam_id) to the callback endpoint and receive
-  # tokens directly. Supports discord, google, facebook, apple and steam (steam via steam_id).
-  # If a valid JWT is provided in Authorization header, links the provider instead of login.
   operation(:api_google_id_token,
     operation_id: "oauth_google_id_token",
-    summary: "Google ID token login (native/mobile)",
+    summary: "Sign in with a Google ID token",
     description:
-      "Verify a Google OpenID Connect id_token (eg. from Android Credential Manager) and return JWT tokens.",
+      "Verifies a Google OpenID Connect `id_token` (Android Credential Manager, One Tap) " <>
+        "and signs in. Always a sign-in; linking is " <>
+        "`POST /api/v1/me/providers/google/id_token`.",
     tags: ["Authentication"],
     request_body: {
       "Google ID token",
@@ -1175,160 +753,31 @@ defmodule GamendWeb.AuthController do
       }
     },
     responses: [
-      ok:
-        {"OAuth tokens", "application/json",
-         %OpenApiSpex.Schema{
-           type: :object,
-           properties: %{data: GamendWeb.Schemas.OAuthSessionData}
-         }},
-      bad_request: {"Bad request", "application/json", %OpenApiSpex.Schema{type: :object}},
-      internal_server_error:
-        {"Server misconfigured", "application/json", %OpenApiSpex.Schema{type: :object}}
+      ok: {"Signed in", "application/json", Schemas.SessionResponse},
+      bad_request: Schemas.error("Missing or invalid token"),
+      forbidden: Schemas.error("Account awaiting activation, or scheduled for deletion"),
+      unprocessable_entity: Schemas.error("The account could not be created"),
+      service_unavailable: Schemas.error("Google sign-in not configured")
     ]
   )
 
-  def api_google_id_token(conn, %{"id_token" => id_token}) when is_binary(id_token) do
-    case GoogleIDToken.verify(id_token) do
-      {:ok, claims} ->
-        user_params = %{
-          google_id: Map.get(claims, "sub"),
-          email: Map.get(claims, "email"),
-          email_verified: verified_email?(Map.get(claims, "email_verified")),
-          display_name: Map.get(claims, "name"),
-          profile_url: Map.get(claims, "picture")
-        }
-
-        # Check if user is authenticated (linking) or not (login)
-        case maybe_load_user_from_jwt(conn) do
-          {:ok, %User{} = current_user} ->
-            handle_api_link(
-              conn,
-              current_user,
-              user_params,
-              :google_id,
-              &User.google_oauth_changeset/2
-            )
-
-          {:ok, nil} ->
-            handle_api_login(conn, &Accounts.find_or_create_from_google/1, user_params)
-        end
-
-      {:error, :missing_google_client_id} ->
-        conn
-        |> put_status(:internal_server_error)
-        |> json(%{
-          error: "server_misconfigured",
-          message: "Missing GOOGLE_WEB_CLIENT_ID/GOOGLE_CLIENT_ID"
-        })
-
-      {:error, :invalid_audience} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "invalid_token", message: "Invalid audience"})
-
-      {:error, :invalid_issuer} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "invalid_token", message: "Invalid issuer"})
-
-      {:error, :expired} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "invalid_token", message: "Token expired"})
-
-      {:error, _err} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "invalid_token", details: "authentication_failed"})
+  def api_google_id_token(conn, params) do
+    case OAuthExchange.google_params(params["id_token"]) do
+      {:ok, user_params} -> sign_in_api(conn, "google", user_params)
+      {:error, reason} -> OAuthExchange.reply_refused(conn, reason)
     end
-  end
-
-  def api_google_id_token(conn, _params) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{error: "missing_param", message: "id_token is required"})
-  end
-
-  def api_callback(conn, %{"provider" => provider, "code" => code})
-      when provider in ["discord", "google", "facebook", "apple"] do
-    case exchange_oauth_code(provider, code) do
-      {:ok, user_params} ->
-        handle_api_oauth_result(conn, provider, user_params)
-
-      {:error, :missing_user_info} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "exchange_failed", details: "missing id/email"})
-
-      {:error, _err} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "exchange_failed", details: "authentication_failed"})
-    end
-  end
-
-  # For steam, allow clients to POST an object with a steam_id (and optional display_name/profile_url)
-  # and return tokens on success.
-  # Steam: verify the provided `code` with the configured exchanger (uses Steam Web API)
-  # For steam, allow clients to POST either a steam SDK `ticket` (preferred for SDK flows)
-  # or a `code`/steam_id. If `ticket` is present prefer exchange_steam_ticket which
-  # verifies the client-provided ticket via the Steam Web API. Otherwise fall back to
-  # exchange_steam_code which validates a steam id or steam-specific code.
-  def api_callback(conn, %{"provider" => "steam"} = params) do
-    # For API Steam flows, the 'code' field MUST be a Steam auth ticket
-    # issued by the client (AuthenticateUserTicket). We prefer the stronger
-    # AuthenticateUserTicket verification and explicitly DO NOT accept plain
-    # steam ids via the API (they remain supported in the browser OpenID flow).
-    exchange_result =
-      case params["code"] do
-        nil -> {:error, :missing_param}
-        code -> oauth_exchanger().exchange_steam_ticket(code, fetch_profile: true)
-      end
-
-    case exchange_result do
-      {:ok, profile_info} ->
-        case oauth_user_params("steam", profile_info) do
-          {:ok, user_params} ->
-            handle_api_oauth_result(conn, "steam", user_params)
-
-          {:error, _} ->
-            conn
-            |> put_status(:bad_request)
-            |> json(%{error: "exchange_failed", details: "authentication_failed"})
-        end
-
-      {:error, :missing_param} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{
-          error: "missing_param",
-          message: "code (Steam auth ticket) is required for steam provider"
-        })
-
-      {:error, _err} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "exchange_failed", details: "authentication_failed"})
-    end
-  end
-
-  def api_callback(conn, %{"provider" => _provider}) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{
-      error: "missing_or_unsupported",
-      message: "provider or required params are missing/unsupported"
-    })
   end
 
   operation(:api_apple_ios_callback,
     operation_id: "oauth_callback_api_apple_ios",
-    summary: "Apple callback (native iOS)",
+    summary: "Sign in with Apple (native iOS)",
     description:
-      "Exchanges a native iOS Sign in with Apple authorization code using APPLE_IOS_CLIENT_ID.",
+      "Exchanges a native iOS Sign in with Apple authorization code, issued to " <>
+        "APPLE_IOS_CLIENT_ID, and signs in. Always a sign-in; linking is " <>
+        "`POST /api/v1/me/providers/apple/ios`.",
     tags: ["Authentication"],
     request_body: {
-      "Apple callback params",
+      "Apple authorization code",
       "application/json",
       %OpenApiSpex.Schema{
         type: :object,
@@ -1337,48 +786,38 @@ defmodule GamendWeb.AuthController do
           code: %OpenApiSpex.Schema{
             type: :string,
             description: "Apple authorization code from the native Sign in with Apple flow"
+          },
+          given_name: %OpenApiSpex.Schema{
+            type: :string,
+            description:
+              "Given name from the credential. Apple hands it over only on the first " <>
+                "authorization and never in the token; it fills a blank display name."
+          },
+          family_name: %OpenApiSpex.Schema{
+            type: :string,
+            description: "Family name from the credential, as `given_name`."
           }
         }
       }
     },
     responses: [
-      ok:
-        {"OAuth tokens", "application/json",
-         %OpenApiSpex.Schema{
-           type: :object,
-           properties: %{data: OAuthSessionData}
-         }},
-      bad_request: {"Bad request", "application/json", GamendWeb.Schemas.ErrorResponse},
-      unauthorized: {"Unauthorized", "application/json", GamendWeb.Schemas.ErrorResponse}
+      ok: {"Signed in", "application/json", Schemas.SessionResponse},
+      bad_request: Schemas.error("Missing code, or Apple refused it"),
+      forbidden: Schemas.error("Account awaiting activation, or scheduled for deletion"),
+      unprocessable_entity: Schemas.error("The account could not be created")
     ]
   )
 
-  def api_apple_ios_callback(conn, %{"code" => code}) do
-    case exchange_oauth_code("apple", code, :ios) do
+  def api_apple_ios_callback(conn, params) do
+    name = OAuthExchange.apple_name(params["given_name"], params["family_name"])
+
+    case OAuthExchange.apple_ios_params(params["code"]) do
       {:ok, user_params} ->
-        handle_api_oauth_result(conn, "apple", user_params)
+        sign_in_api(conn, "apple", OAuthExchange.put_apple_name(user_params, name))
 
-      {:error, _err} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: "exchange_failed", details: "authentication_failed"})
+      {:error, reason} ->
+        OAuthExchange.reply_refused(conn, reason)
     end
-  end
-
-  def api_apple_ios_callback(conn, _params) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{error: "missing_code"})
-  end
-
-  defp apple_web_client_id do
-    Gamend.Settings.get(Gamend.OAuth.Providers, :apple_client_id) ||
-      raise "GAMEND_OAUTH_APPLE_CLIENT_ID is not set"
-  end
-
-  defp apple_ios_client_id do
-    Gamend.Settings.get(Gamend.OAuth.Providers, :apple_ios_client_id) ||
-      raise "GAMEND_OAUTH_APPLE_IOS_CLIENT_ID is not set"
   end
 
   operation(:api_providers,
@@ -1387,34 +826,21 @@ defmodule GamendWeb.AuthController do
     description: "The OAuth providers a player may currently sign in with.",
     tags: ["Authentication"],
     responses: [
-      ok: {
-        "Enabled providers",
-        "application/json",
-        %OpenApiSpex.Schema{
-          type: :object,
-          properties: %{
-            data: %OpenApiSpex.Schema{
-              type: :array,
-              items: %OpenApiSpex.Schema{
-                type: :string,
-                enum: ["discord", "google", "apple", "facebook", "steam"]
-              }
-            }
-          },
-          example: %{data: ["discord", "steam"]}
-        }
-      }
+      ok: {"Enabled providers", "application/json", GamendWeb.Schemas.AuthProvidersResponse}
     ]
   )
 
   def api_providers(conn, _params) do
-    json(conn, %{data: Enum.map(Providers.enabled(), &Atom.to_string/1)})
+    reply_data(conn, Enum.map(Providers.enabled(), &Atom.to_string/1))
   end
 
   operation(:api_session_status,
     operation_id: "oauth_session_status",
-    summary: "Get OAuth session status",
-    description: "Check the status of an OAuth session for API clients",
+    summary: "Poll a provider sign-in",
+    description:
+      "The state of a sign-in started with `GET /api/v1/auth/{provider}`. " <>
+        "`session` carries the tokens once the player finished, and only on the " <>
+        "first read after that; every other read has `session: null`.",
     tags: ["Authentication"],
     parameters: [
       session_id: [
@@ -1426,71 +852,58 @@ defmodule GamendWeb.AuthController do
       ]
     ],
     responses: [
-      ok: {"Session status", "application/json", GamendWeb.Schemas.OAuthSessionStatus},
-      not_found: {
-        "Session not found",
-        "application/json",
-        %OpenApiSpex.Schema{
-          type: :object,
-          properties: %{
-            error: %OpenApiSpex.Schema{type: :string},
-            message: %OpenApiSpex.Schema{type: :string}
-          },
-          required: [:error, :message]
-        }
-      }
+      ok: {"Session status", "application/json", Schemas.OAuthSessionStatusResponse},
+      not_found: Schemas.error("Session not found")
     ]
   )
 
   def api_session_status(conn, %{"session_id" => session_id}) do
-    case Gamend.OAuthSessions.get_session(session_id) do
-      %Gamend.OAuthSession{status: status, data: data} ->
-        {message, normalized_data} = pop_session_message(data)
+    case OAuthSessions.get_session(session_id) do
+      # A link session is polled by its owner under /api/v1/me.
+      %Gamend.OAuthSession{data: %{"link_user_id" => _}} ->
+        reply_error(conn, :not_found, "session_not_found", "OAuth session not found")
 
+      %Gamend.OAuthSession{status: status, data: data} ->
         # Hand the tokens over exactly once. They used to be re-served on every
         # read until retention pruned the row a day later, so the session id —
         # which travels in a redirect URL, and therefore through browser
         # history, proxies and access logs — stayed a bearer credential for 24
         # hours after the client had already collected it.
-        _ = consume_session_tokens(session_id, normalized_data)
+        session = session_of(data)
+        if session, do: consume_session_tokens(session_id, data)
 
-        json(conn, %{
+        reply_data(conn, %{
           status: status,
-          message: message,
-          data: normalized_data
+          error: Map.get(data, "error", ""),
+          message: Map.get(data, "message", ""),
+          session: session
         })
 
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "session_not_found", message: "OAuth session not found"})
+        reply_error(conn, :not_found, "session_not_found", "OAuth session not found")
     end
   end
+
+  defp session_of(%{"access_token" => access_token} = data)
+       when is_binary(access_token) and access_token != "" do
+    %{
+      access_token: access_token,
+      refresh_token: Map.get(data, "refresh_token", ""),
+      expires_in: Map.get(data, "expires_in", Tokens.access_ttl_seconds()),
+      user_id: Map.get(data, "user_id", ""),
+      username: Map.get(data, "username", ""),
+      display_name: Map.get(data, "display_name", "")
+    }
+  end
+
+  defp session_of(_data), do: nil
 
   # Blank the token fields on the stored row after they have been served once.
   # Anything else in `data` stays, so the client can still poll for status.
-  @session_token_keys ~w(access_token refresh_token)
-
   defp consume_session_tokens(session_id, data) do
-    if Enum.any?(@session_token_keys, &(Map.get(data, &1) not in [nil, ""])) do
-      Gamend.OAuthSessions.update_session(
-        session_id,
-        %{data: Map.drop(data, @session_token_keys)}
-      )
-    end
-  end
-
-  defp pop_session_message(data) do
-    message =
-      Map.get(data, "message") ||
-        Map.get(data, :message) ||
-        ""
-
-    cleaned =
-      data
-      |> Map.delete("message")
-      |> Map.delete(:message)
-
-    {message, cleaned}
+    Gamend.OAuthSessions.update_session(
+      session_id,
+      %{data: Map.drop(data, ~w(access_token refresh_token))}
+    )
   end
 end

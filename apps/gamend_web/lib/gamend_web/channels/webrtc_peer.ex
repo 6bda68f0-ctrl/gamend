@@ -51,8 +51,11 @@ defmodule GamendWeb.WebRTCPeer do
 
   # DataChannel message rate limits (per user) — defaults, overridden by config
 
-  # Max open DataChannels per peer (clients create named channels)
-  @max_data_channels 1
+  # Max open DataChannels per peer. The JS and Godot clients open two by
+  # default ("events" and "state"); this was 1, so the second was refused, and
+  # when "events" came second every hook call over WebRTC timed out. Still a
+  # cap: a channel costs SCTP state, and a client has no use for dozens.
+  @max_data_channels 4
 
   # Max inbound DataChannel message size (bytes) — prevents memory spikes
   @max_dc_message_size 65_536
@@ -117,11 +120,7 @@ defmodule GamendWeb.WebRTCPeer do
 
     user = Accounts.get_user(user_id)
 
-    ice_servers =
-      Keyword.get_lazy(opts, :ice_servers, fn ->
-        webrtc_config = Application.get_env(:gamend_web, :webrtc, [])
-        Keyword.get(webrtc_config, :ice_servers, [%{urls: "stun:stun.l.google.com:19302"}])
-      end)
+    ice_servers = Keyword.get_lazy(opts, :ice_servers, &GamendWeb.WebRTC.ice_servers/0)
 
     {:ok, pc} = PeerConnection.start_link(ice_servers: ice_servers)
 

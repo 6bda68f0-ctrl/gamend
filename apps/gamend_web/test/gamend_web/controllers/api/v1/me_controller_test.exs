@@ -16,7 +16,7 @@ defmodule GamendWeb.Api.V1.MeControllerTest do
 
       conn = conn |> put_req_header("authorization", "Bearer " <> token) |> get("/api/v1/me")
 
-      body = json_response(conn, 200)
+      body = json_response(conn, 200)["data"]
       assert body["id"] == user.id
       assert body["email"] == user.email
       assert Map.has_key?(body, "display_name")
@@ -30,6 +30,7 @@ defmodule GamendWeb.Api.V1.MeControllerTest do
       assert Map.has_key?(body, "linked_providers")
       assert body["linked_providers"]["google"] == false
       assert body["linked_providers"]["facebook"] == false
+      assert body["linked_providers"]["github"] == false
       assert body["linked_providers"]["discord"] == false
       assert body["linked_providers"]["apple"] == false
       assert body["linked_providers"]["steam"] == false
@@ -49,7 +50,7 @@ defmodule GamendWeb.Api.V1.MeControllerTest do
         |> put_req_header("authorization", "Bearer " <> token)
         |> patch("/api/v1/me/display_name", %{display_name: "API Name"})
 
-      assert json_response(conn, 200)["display_name"] == "API Name"
+      assert json_response(conn, 200)["data"]["display_name"] == "API Name"
 
       reloaded = Gamend.Repo.get(Gamend.Accounts.User, user.id)
       assert reloaded.display_name == "API Name"
@@ -66,6 +67,21 @@ defmodule GamendWeb.Api.V1.MeControllerTest do
 
       assert conn.status == 200
       _body = json_response(conn, 200)
+    end
+  end
+
+  describe "PATCH /api/v1/me/username" do
+    test "sets the handle, lowercased, and echoes it back", %{conn: conn} do
+      user = Gamend.AccountsFixtures.user_fixture()
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> patch("/api/v1/me/username", %{username: "New.Handle"})
+
+      assert %{"id" => id, "username" => "new.handle"} = json_response(conn, 200)["data"]
+      assert id == user.id
     end
   end
 
@@ -97,8 +113,8 @@ defmodule GamendWeb.Api.V1.MeControllerTest do
         |> put_req_header("authorization", "Bearer " <> token)
         |> patch("/api/v1/me/password", %{password: ""})
 
-      assert conn.status == 400
-      body = json_response(conn, 400)
+      assert conn.status == 422
+      body = json_response(conn, 422)
       assert Map.has_key?(body, "errors")
       assert Map.has_key?(body["errors"], "password")
     end
@@ -134,6 +150,29 @@ defmodule GamendWeb.Api.V1.MeControllerTest do
     test "returns 401 when not authenticated", %{conn: conn} do
       conn = delete(conn, "/api/v1/me")
       assert json_response(conn, 401)
+    end
+
+    test "an account with a password is deleted only with it in the body", %{conn: conn} do
+      _admin = Gamend.AccountsFixtures.user_fixture()
+
+      {:ok, user} =
+        Gamend.Accounts.register_user_with_password_and_deliver(
+          %{email: "leaving@example.com", password: "hello world!"},
+          fn token -> token end
+        )
+
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+      authed = put_req_header(conn, "authorization", "Bearer " <> token)
+
+      refused = delete(authed, "/api/v1/me")
+      assert json_response(refused, 401)["error"] == "invalid_current_password"
+
+      wrong = delete(authed, "/api/v1/me", %{current_password: "not it at all"})
+      assert json_response(wrong, 401)["error"] == "invalid_current_password"
+
+      deleted = delete(authed, "/api/v1/me", %{current_password: "hello world!"})
+      assert deleted.status == 200
+      assert Gamend.Repo.get(Gamend.Accounts.User, user.id) == nil
     end
   end
 end

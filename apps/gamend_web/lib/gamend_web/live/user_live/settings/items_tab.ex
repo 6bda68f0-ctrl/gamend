@@ -9,6 +9,7 @@ defmodule GamendWeb.UserLive.Settings.ItemsTab do
   import Phoenix.LiveView, only: [stream: 4]
 
   alias Gamend.Inventory
+  alias GamendWeb.LiveHelpers
 
   @page_size 50
 
@@ -92,7 +93,7 @@ defmodule GamendWeb.UserLive.Settings.ItemsTab do
     filters = [user_id: user.id, page: page, page_size: page_size]
     items = Inventory.list_items(filters)
     count = Inventory.count_items(filters)
-    total_pages = if page_size > 0, do: div(count + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(count, page_size)
 
     socket
     |> stream(:inventory_items, items, reset: true, dom_id: &"inv-item-#{&1.id}")

@@ -45,6 +45,7 @@ defmodule Gamend.Parties do
   require Logger
 
   alias Gamend.Accounts
+  alias Gamend.Accounts.PasswordHash
   alias Gamend.Accounts.PresenceStatus
   alias Gamend.Accounts.User
   alias Gamend.Friends
@@ -79,7 +80,7 @@ defmodule Gamend.Parties do
   end
 
   defp broadcast_party(party_id, event) do
-    Phoenix.PubSub.broadcast(Gamend.PubSub, "party:#{party_id}", event)
+    Gamend.Broadcast.publish("party:#{party_id}", event)
   end
 
   @doc "Broadcast a member presence event (online/offline) to a party's PubSub topic."
@@ -92,8 +93,6 @@ defmodule Gamend.Parties do
   # Cache helpers
   # ---------------------------------------------------------------------------
 
-  @party_invite_cache_ttl_ms 60_000
-
   defp party_invite_cache_version(user_id) when is_binary(user_id) do
     Gamend.Cache.get!({:party_invites, :version, user_id}) || 1
   end
@@ -105,8 +104,6 @@ defmodule Gamend.Parties do
 
   # Party-row cache: get_party is keyed by a version bumped on every party-row
   # write. Membership/invite changes don't touch the party row, so they don't bump.
-  @party_cache_ttl_ms 60_000
-  @stats_cache_ttl_ms 60_000
   defp party_cache_version, do: Gamend.Cache.get!({:parties, :version}) || 1
 
   @doc """
@@ -117,7 +114,7 @@ defmodule Gamend.Parties do
   """
   @spec stats() :: %{parties_active: non_neg_integer(), players_in_parties: non_neg_integer()}
   def stats do
-    Gamend.Cache.cached({:parties, :stats}, [ttl: @stats_cache_ttl_ms], fn ->
+    Gamend.Cache.cached({:parties, :stats}, [ttl: Gamend.Cache.ttl()], fn ->
       %{
         parties_active: Repo.aggregate(Party, :count, :id),
         players_in_parties: Accounts.count_users_in_parties()
@@ -227,7 +224,7 @@ defmodule Gamend.Parties do
   @decorate cacheable(
               key: {:parties, :get, party_cache_version(), id},
               match: &(&1 != nil),
-              opts: [ttl: @party_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def get_party(id), do: Repo.get_uuid(Party, id)
 
@@ -399,13 +396,13 @@ defmodule Gamend.Parties do
         {:ok, invite} ->
           # Send an informational notification (independent of the invite record)
           Gamend.Notifications.admin_create_notification(leader.id, target_user_id, %{
-            "title" => "Party invite from #{leader.display_name || ""}",
+            "title" => "Party invite from #{Gamend.Accounts.display_name(leader)}",
             "content" => "",
             "metadata" => %{
               "type" => "party_invite",
               "party_id" => party.id,
-              "sender_name" => leader.display_name || "",
-              "recipient_name" => target.display_name || ""
+              "sender_name" => Gamend.Accounts.display_name(leader),
+              "recipient_name" => Gamend.Accounts.display_name(target)
             }
           })
 
@@ -473,7 +470,7 @@ defmodule Gamend.Parties do
       # a spurious party_invite_cancelled event to the recipient even when no
       # prior invite existed.
       if deleted_count > 0 do
-        leader_name = leader.display_name || ""
+        leader_name = Gamend.Accounts.display_name(leader)
 
         Gamend.Notifications.delete_notification_by(
           leader.id,
@@ -481,8 +478,7 @@ defmodule Gamend.Parties do
           "Party invite from #{leader_name}"
         )
 
-        Phoenix.PubSub.broadcast(
-          Gamend.PubSub,
+        Gamend.Broadcast.publish(
           "user:#{target_user_id}",
           {:party_invite_cancelled, %{party_id: party.id, user_id: leader.id}}
         )
@@ -555,7 +551,7 @@ defmodule Gamend.Parties do
   end
 
   defp handle_accept_capacity_failure(user, invite, party_id, reason_str) do
-    user_name = user.display_name || ""
+    user_name = Gamend.Accounts.display_name(user)
 
     # Mark the invite as declined so the sender knows it didn't go through.
     #
@@ -575,7 +571,7 @@ defmodule Gamend.Parties do
 
     # Retract the original invite notification
     sender = Gamend.Accounts.get_user(invite.sender_id)
-    sender_name = (sender && sender.display_name) || ""
+    sender_name = Gamend.Accounts.display_name(sender)
 
     Gamend.Notifications.delete_notification_by(
       invite.sender_id,
@@ -601,8 +597,7 @@ defmodule Gamend.Parties do
     )
 
     # Real-time PubSub so the sender's UI updates immediately
-    Phoenix.PubSub.broadcast(
-      Gamend.PubSub,
+    Gamend.Broadcast.publish(
       "user:#{invite.sender_id}",
       {:party_invite_declined, %{party_id: party_id, user_id: user.id, reason: reason_str}}
     )
@@ -649,7 +644,7 @@ defmodule Gamend.Parties do
 
     # Retract the invite notification for the accepting user
     sender = Gamend.Accounts.get_user(invite.sender_id)
-    sender_name = (sender && sender.display_name) || ""
+    sender_name = Gamend.Accounts.display_name(sender)
 
     Gamend.Notifications.delete_notification_by(
       invite.sender_id,
@@ -658,7 +653,7 @@ defmodule Gamend.Parties do
     )
 
     # Notify the leader that the invite was accepted
-    user_name = user.display_name || ""
+    user_name = Gamend.Accounts.display_name(user)
 
     Gamend.Notifications.admin_create_notification(
       user.id,
@@ -676,8 +671,7 @@ defmodule Gamend.Parties do
     )
 
     # Notify the sender that the invite was accepted via PubSub
-    Phoenix.PubSub.broadcast(
-      Gamend.PubSub,
+    Gamend.Broadcast.publish(
       "user:#{invite.sender_id}",
       {:party_invite_accepted, %{party_id: party_id, user_id: user.id}}
     )
@@ -717,12 +711,12 @@ defmodule Gamend.Parties do
     Enum.each(sender_ids, &invalidate_party_invite_cache/1)
 
     # Notify each sender that the invite was declined
-    user_name = user.display_name || ""
+    user_name = Gamend.Accounts.display_name(user)
 
     Enum.each(sender_ids, fn sender_id ->
       # Retract the invite notification
       sender = Gamend.Accounts.get_user(sender_id)
-      sender_name = (sender && sender.display_name) || ""
+      sender_name = Gamend.Accounts.display_name(sender)
 
       Gamend.Notifications.delete_notification_by(
         sender_id,
@@ -746,8 +740,7 @@ defmodule Gamend.Parties do
         }
       )
 
-      Phoenix.PubSub.broadcast(
-        Gamend.PubSub,
+      Gamend.Broadcast.publish(
         "user:#{sender_id}",
         {:party_invite_declined, %{party_id: party_id, user_id: user.id}}
       )
@@ -759,16 +752,27 @@ defmodule Gamend.Parties do
   @doc """
   List pending party invites for the given user.
   """
-  @spec list_party_invitations(User.t()) :: [map()]
-  def list_party_invitations(%User{} = user) do
-    do_list_party_invitations(user.id)
+  @spec list_party_invitations(User.t(), keyword()) :: [map()]
+  def list_party_invitations(%User{} = user, opts \\ []) do
+    do_list_party_invitations(user.id, Keyword.get(opts, :page), Keyword.get(opts, :page_size))
+  end
+
+  @doc "How many pending party invites the user has, for paging."
+  @spec count_party_invitations(User.t()) :: non_neg_integer()
+  def count_party_invitations(%User{id: user_id}) do
+    Repo.aggregate(
+      from(i in PartyInvite, where: i.recipient_id == ^user_id and i.status == "pending"),
+      :count
+    )
   end
 
   @decorate cacheable(
-              key: {:party_invites, :list, party_invite_cache_version(user_id), user_id},
-              opts: [ttl: @party_invite_cache_ttl_ms]
+              key:
+                {:party_invites, :list, party_invite_cache_version(user_id), user_id, page,
+                 page_size},
+              opts: [ttl: Gamend.Cache.ttl()]
             )
-  defp do_list_party_invitations(user_id) do
+  defp do_list_party_invitations(user_id, page, page_size) do
     from(i in PartyInvite,
       where: i.recipient_id == ^user_id and i.status == "pending",
       join: s in assoc(i, :sender),
@@ -776,6 +780,7 @@ defmodule Gamend.Parties do
       order_by: [desc: i.inserted_at],
       preload: [sender: s, recipient: r]
     )
+    |> Gamend.Query.page(page: page, page_size: page_size)
     |> Repo.all()
     |> Enum.map(&serialize_party_invite/1)
   end
@@ -785,16 +790,31 @@ defmodule Gamend.Parties do
 
   Returns invitations the leader has sent that have not yet been accepted or declined.
   """
-  @spec list_sent_party_invitations(User.t()) :: [map()]
-  def list_sent_party_invitations(%User{} = leader) do
-    do_list_sent_party_invitations(leader.id)
+  @spec list_sent_party_invitations(User.t(), keyword()) :: [map()]
+  def list_sent_party_invitations(%User{} = leader, opts \\ []) do
+    do_list_sent_party_invitations(
+      leader.id,
+      Keyword.get(opts, :page),
+      Keyword.get(opts, :page_size)
+    )
+  end
+
+  @doc "How many pending party invites the leader has sent, for paging."
+  @spec count_sent_party_invitations(User.t()) :: non_neg_integer()
+  def count_sent_party_invitations(%User{id: leader_id}) do
+    Repo.aggregate(
+      from(i in PartyInvite, where: i.sender_id == ^leader_id and i.status == "pending"),
+      :count
+    )
   end
 
   @decorate cacheable(
-              key: {:party_invites, :list_sent, party_invite_cache_version(leader_id), leader_id},
-              opts: [ttl: @party_invite_cache_ttl_ms]
+              key:
+                {:party_invites, :list_sent, party_invite_cache_version(leader_id), leader_id,
+                 page, page_size},
+              opts: [ttl: Gamend.Cache.ttl()]
             )
-  defp do_list_sent_party_invitations(leader_id) do
+  defp do_list_sent_party_invitations(leader_id, page, page_size) do
     from(i in PartyInvite,
       where: i.sender_id == ^leader_id and i.status == "pending",
       join: s in assoc(i, :sender),
@@ -802,6 +822,7 @@ defmodule Gamend.Parties do
       order_by: [desc: i.inserted_at],
       preload: [sender: s, recipient: r]
     )
+    |> Gamend.Query.page(page: page, page_size: page_size)
     |> Repo.all()
     |> Enum.map(&serialize_party_invite/1)
   end
@@ -811,9 +832,9 @@ defmodule Gamend.Parties do
       id: invite.id,
       party_id: invite.party_id,
       sender_id: invite.sender_id,
-      sender_name: invite.sender.display_name || "",
+      sender_name: Gamend.Accounts.display_name(invite.sender),
       recipient_id: invite.recipient_id,
-      recipient_name: invite.recipient.display_name || "",
+      recipient_name: Gamend.Accounts.display_name(invite.recipient),
       status: invite.status,
       inserted_at: invite.inserted_at
     }
@@ -1405,8 +1426,7 @@ defmodule Gamend.Parties do
           updated = Accounts.get_user(member.id)
           _ = Accounts.broadcast_user_update(updated)
 
-          Phoenix.PubSub.broadcast(
-            Gamend.PubSub,
+          Gamend.Broadcast.publish(
             "lobby:#{lobby.id}",
             {:user_joined, lobby.id, member.id}
           )
@@ -1490,7 +1510,7 @@ defmodule Gamend.Parties do
         {:error, :password_required}
 
       {hash, pwd} ->
-        if Bcrypt.verify_pass(pwd, hash), do: :ok, else: {:error, :invalid_password}
+        if PasswordHash.verify(pwd, hash), do: :ok, else: {:error, :invalid_password}
     end
   end
 
@@ -1541,8 +1561,7 @@ defmodule Gamend.Parties do
           updated = Accounts.get_user(member.id)
           _ = Accounts.broadcast_user_update(updated)
 
-          Phoenix.PubSub.broadcast(
-            Gamend.PubSub,
+          Gamend.Broadcast.publish(
             "lobby:#{lobby.id}",
             {:user_joined, lobby.id, member.id}
           )
@@ -1579,7 +1598,7 @@ defmodule Gamend.Parties do
     members = get_party_members(party.id)
     member_ids = Enum.map(members, & &1.id)
 
-    Repo.transaction(fn ->
+    Gamend.AfterCommit.transaction(fn ->
       # Bulk-clear party_id for all members in a single query
       from(u in User, where: u.party_id == ^party.id)
       |> Repo.update_all(set: [party_id: nil])
@@ -1747,22 +1766,18 @@ defmodule Gamend.Parties do
   end
 
   defp broadcast_parties(event) do
-    Phoenix.PubSub.broadcast(Gamend.PubSub, "parties", event)
+    Gamend.Broadcast.publish("parties", event)
   end
 
   @doc "List all parties with optional filters and pagination."
   @spec list_all_parties(map(), keyword()) :: [Party.t()]
   def list_all_parties(filters \\ %{}, opts \\ []) do
-    page = Keyword.get(opts, :page, 1)
-    page_size = Keyword.get(opts, :page_size, 25)
     sort_by = Keyword.get(opts, :sort_by, "updated_at")
-    offset = (page - 1) * page_size
 
     from(p in Party)
     |> apply_party_filters(filters)
     |> apply_party_sort(sort_by)
-    |> limit(^page_size)
-    |> offset(^offset)
+    |> Gamend.Query.page(opts)
     |> Repo.all()
     |> Repo.preload(:leader)
   end

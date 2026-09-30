@@ -26,6 +26,7 @@ defmodule GamendWeb.Api.V1.AvatarUploadTest do
     conn
     |> post("/api/v1/me/avatar/upload_url", %{content_type: content_type})
     |> json_response(200)
+    |> Map.fetch!("data")
   end
 
   defp upload_path(key, token) do
@@ -35,7 +36,7 @@ defmodule GamendWeb.Api.V1.AvatarUploadTest do
   describe "POST /api/v1/me/avatar/upload_url" do
     test "returns a ticket with an owned key", %{conn: conn, user: user} do
       conn = post(conn, "/api/v1/me/avatar/upload_url", %{content_type: "image/png"})
-      body = json_response(conn, 200)
+      body = json_response(conn, 200)["data"]
 
       assert body["method"] == "PUT"
       assert body["key"] =~ "avatars/#{user.id}/"
@@ -57,7 +58,7 @@ defmodule GamendWeb.Api.V1.AvatarUploadTest do
         |> put_req_header("content-type", "image/png")
         |> put(upload_path(key, token), @png)
 
-      assert json_response(up, 200)["key"] == key
+      assert json_response(up, 200) == %{"ok" => true}
 
       # served publicly, with immutable caching + an ETag (avatar keys are
       # content-unique, so the URL changes whenever the image does)
@@ -77,7 +78,7 @@ defmodule GamendWeb.Api.V1.AvatarUploadTest do
 
       # confirm sets profile_url
       confirm = post(conn, "/api/v1/me/avatar", %{key: key})
-      body = json_response(confirm, 200)
+      body = json_response(confirm, 200)["data"]
       assert body["profile_url"] =~ "/storage/#{key}"
     end
 
@@ -87,7 +88,7 @@ defmodule GamendWeb.Api.V1.AvatarUploadTest do
         |> put_req_header("content-type", "image/png")
         |> put("/api/v1/storage/upload?key=avatars/#{user.id}/x.png", @png)
 
-      assert json_response(up, 400)["error"] == "missing_token"
+      assert json_response(up, 400)["error"] == "missing_param"
     end
 
     test "rejects a token that does not match the requested key", %{conn: conn} do

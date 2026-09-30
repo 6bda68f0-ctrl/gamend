@@ -217,7 +217,7 @@ defmodule GamendWeb.AdminLive.System do
                       <td class="text-right font-mono">{format_number(@gc_count)}</td>
                     </tr>
                     <tr>
-                      <td class="font-medium">GC Words Reclaimed</td>
+                      <td class="font-medium">GC Memory Reclaimed</td>
                       <td class="text-right font-mono">{format_bytes(@gc_words_reclaimed * 8)}</td>
                     </tr>
                     <tr>

@@ -115,6 +115,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
         conn
         |> patch("/api/v1/lobbies", %{"lobby_id" => lobby.id, "metadata" => %{"round" => 2}})
         |> json_response(200)
+        |> Map.fetch!("data")
 
       assert resp["metadata"] == %{"round" => 2}
     end
@@ -124,6 +125,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
         conn
         |> post("/api/v1/lobbies/state", %{"lobby_id" => lobby.id, "state" => "playing"})
         |> json_response(200)
+        |> Map.fetch!("data")
 
       assert resp["state"] == "playing"
       assert Lobbies.get_lobby(lobby.id).state == "playing"
@@ -161,12 +163,12 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
         |> put_req_header("authorization", "Bearer " <> token)
         |> post("/api/v1/lobbies/state", %{"lobby_id" => lobby.id, "state" => "playing"})
 
-      assert json_response(resp, 404)["error"] == "Lobby not found"
+      assert json_response(resp, 404)["error"] == "not_found"
     end
 
     test "a malformed lobby_id is a bad request", %{conn: conn} do
       resp = post(conn, "/api/v1/lobbies/state", %{"lobby_id" => "nope", "state" => "playing"})
-      assert json_response(resp, 400)["error"] == "Invalid lobby id"
+      assert json_response(resp, 400)["error"] == "invalid_id"
     end
 
     test "omitting lobby_id while seated nowhere is still not_in_lobby", %{conn: conn} do
@@ -207,6 +209,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
         conn
         |> post("/api/v1/lobbies/state", %{"lobby_id" => lobby.id, "state" => "playing"})
         |> json_response(200)
+        |> Map.fetch!("data")
 
       assert resp["state"] == "playing"
     end
@@ -216,6 +219,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
         conn
         |> patch("/api/v1/lobbies", %{"lobby_id" => lobby.id, "metadata" => %{"round" => 2}})
         |> json_response(200)
+        |> Map.fetch!("data")
 
       assert resp["metadata"] == %{"round" => 2}
     end
@@ -288,7 +292,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
     end
 
     test "an outsider gets 404, not 403", %{conn: conn, lobby: lobby, outsider: outsider} do
-      assert json_response(show_as(conn, outsider, lobby), 404)["error"] == "Lobby not found"
+      assert json_response(show_as(conn, outsider, lobby), 404)["error"] == "not_found"
     end
   end
 
@@ -301,7 +305,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
       |> put_req_header("authorization", "Bearer " <> token)
       |> get("/api/v1/lobbies/not-a-uuid")
 
-    assert json_response(conn, 400)["error"] == "Invalid lobby id"
+    assert json_response(conn, 400)["error"] == "invalid_id"
   end
 
   test "GET /api/v1/lobbies/:id omits member emails", %{conn: conn} do
@@ -316,7 +320,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
       |> put_req_header("authorization", "Bearer " <> token)
       |> get("/api/v1/lobbies/#{lobby.id}")
 
-    resp = json_response(conn, 200)
+    resp = json_response(conn, 200)["data"]
 
     assert Enum.any?(resp["members"], fn m -> m["id"] == host.id end)
     assert Enum.all?(resp["members"], fn m -> not Map.has_key?(m, "email") end)
@@ -332,7 +336,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
       |> post("/api/v1/lobbies", %{title: "api-room"})
 
     assert conn.status == 201
-    lobby = json_response(conn, 201)
+    lobby = json_response(conn, 201)["data"]
     assert lobby["host_id"] == user.id
     assert Map.has_key?(lobby, "host_name")
     # 'name' (slug) is omitted from API responses - the unique id is used instead
@@ -346,6 +350,21 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
   } do
     conn = post(conn, "/api/v1/lobbies", %{title: "service-room", hostless: true})
     assert conn.status == 401
+  end
+
+  test "POST /api/v1/lobbies/:id/join answers 409 when already in a lobby", %{conn: conn} do
+    host = AccountsFixtures.user_fixture()
+    {:ok, _own} = Lobbies.create_lobby(%{title: "own-room", host_id: host.id})
+    {:ok, other} = Lobbies.create_lobby(%{title: "other-room", hostless: true})
+    {:ok, token, _} = Guardian.encode_and_sign(host)
+
+    resp =
+      conn
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> post("/api/v1/lobbies/#{other.id}/join", %{})
+      |> json_response(409)
+
+    assert resp["error"] == "already_in_lobby"
   end
 
   test "POST /api/v1/lobbies/:id/join requires auth and manages lobby membership", %{conn: conn} do
@@ -362,7 +381,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
 
     # join now returns the lobby representation
     assert conn.status == 200
-    body = json_response(conn, 200)
+    body = json_response(conn, 200)["data"]
     assert body["id"] == lobby.id
 
     reloaded = Gamend.Repo.get(User, other.id)
@@ -393,7 +412,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
 
     assert conn.status == 200
 
-    body = json_response(conn, 200)
+    body = json_response(conn, 200)["data"]
     assert body["id"] == lobby.id
 
     reloaded = Gamend.Repo.get(User, other.id)
@@ -414,7 +433,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
       })
 
     assert conn.status == 200
-    body = json_response(conn, 200)
+    body = json_response(conn, 200)["data"]
 
     reloaded = Gamend.Repo.get(User, other.id)
     assert reloaded.lobby_id == body["id"]
@@ -430,7 +449,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
       |> post("/api/v1/lobbies/quick_join", %{max_users: 4, metadata: json_metadata})
 
     assert conn2.status == 200
-    body2 = json_response(conn2, 200)
+    body2 = json_response(conn2, 200)["data"]
     assert Map.get(body2, "metadata")["mode"] == "cap"
     # response should contain decoded metadata
     assert body2["max_users"] == 4
@@ -468,7 +487,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
 
     # join should return the lobby representation now
     assert conn3.status == 200
-    body3 = json_response(conn3, 200)
+    body3 = json_response(conn3, 200)["data"]
     assert body3["id"] == lobby.id
   end
 
@@ -495,7 +514,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
       |> put_req_header("authorization", "Bearer " <> token_host)
       |> patch("/api/v1/lobbies", %{title: "New Title"})
 
-    assert json_response(conn2, 200)["title"] == "New Title"
+    assert json_response(conn2, 200)["data"]["title"] == "New Title"
   end
 
   test "PATCH /api/v1/lobbies is forbidden for a non-host member", %{conn: conn} do
@@ -561,7 +580,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
       |> put_req_header("authorization", "Bearer " <> token_host)
       |> patch("/api/v1/lobbies", %{max_users: 6})
 
-    assert json_response(conn_ok, 200)["max_users"] == 6
+    assert json_response(conn_ok, 200)["data"]["max_users"] == 6
   end
 
   test "POST /api/v1/lobbies/:id/kick allowed for host", %{conn: conn} do
@@ -787,7 +806,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
       |> put_req_header("authorization", "Bearer " <> token)
       |> post("/api/v1/lobbies", %{title: "party-auto-lobby", max_users: 8})
 
-    body = json_response(conn, 201)
+    body = json_response(conn, 201)["data"]
     assert body["title"] == "party-auto-lobby"
 
     # Both leader and member should now be in the lobby
@@ -831,7 +850,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
       |> put_req_header("authorization", "Bearer " <> token)
       |> post("/api/v1/lobbies/#{lobby.id}/join")
 
-    body = json_response(conn, 200)
+    body = json_response(conn, 200)["data"]
     assert body["id"] == lobby.id
 
     reloaded_leader = Gamend.Repo.get(User, leader.id)
@@ -873,7 +892,7 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
       |> put_req_header("authorization", "Bearer " <> token)
       |> post("/api/v1/lobbies/quick_join", %{title: "party-quick"})
 
-    resp = json_response(conn, 200)
+    resp = json_response(conn, 200)["data"]
     assert resp["id"]
 
     # Verify both members are now in the lobby

@@ -53,7 +53,11 @@ config :gamend_web, GamendWeb.Endpoint,
   # In Docker containers, bind to 0.0.0.0 to accept external connections.
   http: [ip: {0, 0, 0, 0}, port: String.to_integer(System.get_env("PORT") || "4000")],
   check_origin: false,
-  code_reloader: true,
+  # Off under GAMEND_DEV_BENCH (see the phoenix_live_view block below). The
+  # reloader checks every path dep for staleness on each request, and a
+  # benchmark that includes that measures Mix: stress/README.md records 293
+  # req/s in dev against 18,918 in prod for the same scenario.
+  code_reloader: System.get_env("GAMEND_DEV_BENCH") not in ["1", "true"],
   debug_errors: true,
   secret_key_base: "l/tTJZ4KUNjIfiUsNQDQLWOTgFlyiOz8RQ2EgSRa7mopMzPLJuu7/8s5pA7iiSgO",
   watchers: [
@@ -143,13 +147,23 @@ config :phoenix, :stacktrace_depth, 20
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
 
+# `GAMEND_DEV_BENCH=1` turns the dev server into a benchmark target: no code
+# reloader, no HEEx annotations, no expensive runtime checks. Invaluable while
+# editing, ruinous while measuring — the annotations alone add ~1.3 KB to every
+# link. Borrowed from gamend_polyglot, which found both costs first.
+#
+# The annotations are compiled into templates, so run it with its own build
+# path (`MIX_BUILD_PATH=_build/bench`, as the `gamend-bench` launch config
+# does) rather than `mix clean`ing the normal one on every toggle.
+bench? = System.get_env("GAMEND_DEV_BENCH") in ["1", "true"]
+
 config :phoenix_live_view,
   # Include debug annotations and locations in rendered markup.
   # Changing this configuration will require mix clean and a full recompile.
-  debug_heex_annotations: true,
-  debug_attributes: true,
+  debug_heex_annotations: not bench?,
+  debug_attributes: not bench?,
   # Enable helpful, but potentially expensive runtime checks
-  enable_expensive_runtime_checks: true
+  enable_expensive_runtime_checks: not bench?
 
 # The mailer is configured for every environment in host_runtime.exs, from the
 # declared Gamend.Mail settings.
@@ -157,8 +171,7 @@ config :phoenix_live_view,
 # Configure Guardian for development
 config :gamend_web, GamendWeb.Auth.Guardian,
   issuer: "gamend",
-  secret_key: "l/tTJZ4KUNjIfiUsNQDQLWOTgFlyiOz8RQ2EgSRa7mopMzPLJuu7/8s5pA7iiSgO",
-  ttl: {15, :minutes}
+  secret_key: "l/tTJZ4KUNjIfiUsNQDQLWOTgFlyiOz8RQ2EgSRa7mopMzPLJuu7/8s5pA7iiSgO"
 
 # Looser throttling for local iteration. These were previously the *implicit*
 # dev values — the production numbers only ever applied inside runtime.exs's

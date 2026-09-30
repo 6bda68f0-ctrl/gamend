@@ -36,6 +36,7 @@ message LinkedProviders {
   bool apple = 4;
   bool steam = 5;
   bool device = 6;
+  bool github = 7;
 }
 
 // Full user payload ("updated" event).

@@ -117,6 +117,64 @@ defmodule GamendWeb.UserChannelWebRTCTest do
     end
   end
 
+  describe "data channels" do
+    # The JS and Godot clients open two channels by default. The server kept
+    # one per peer, so whichever opened second was refused, and when that was
+    # "events" every hook call over WebRTC timed out.
+    test "both default channels open: events and state", %{socket: socket} do
+      alias ExWebRTC.{PeerConnection, SessionDescription}
+
+      {:ok, pc} = PeerConnection.start_link(ice_servers: [])
+      {:ok, _} = PeerConnection.create_data_channel(pc, "events")
+
+      {:ok, _} =
+        PeerConnection.create_data_channel(pc, "state", ordered: false, max_retransmits: 0)
+
+      {:ok, offer} = PeerConnection.create_offer(pc)
+      :ok = PeerConnection.set_local_description(pc, offer)
+
+      ref = push(socket, "webrtc:offer", SessionDescription.to_json(offer))
+      assert_reply ref, :ok, %{}, 5000
+      assert_push "webrtc:answer", %{sdp: sdp, type: type}, 5000
+
+      :ok =
+        PeerConnection.set_remote_description(
+          pc,
+          SessionDescription.from_json(%{"sdp" => sdp, "type" => type})
+        )
+
+      assert relay_until_open(socket, pc, MapSet.new()) == MapSet.new(["events", "state"])
+      safe_stop_pc(pc)
+    end
+  end
+
+  # Relay ICE both ways until the server reports both channels open.
+  defp relay_until_open(socket, pc, opened) do
+    if MapSet.size(opened) == 2 do
+      opened
+    else
+      receive do
+        {:ex_webrtc, ^pc, {:ice_candidate, candidate}} ->
+          push(socket, "webrtc:ice", ExWebRTC.ICECandidate.to_json(candidate))
+          relay_until_open(socket, pc, opened)
+
+        %Phoenix.Socket.Message{event: "webrtc:ice", payload: payload} ->
+          :ok =
+            ExWebRTC.PeerConnection.add_ice_candidate(
+              pc,
+              ExWebRTC.ICECandidate.from_json(payload)
+            )
+
+          relay_until_open(socket, pc, opened)
+
+        %Phoenix.Socket.Message{event: "webrtc:channel_open", payload: %{channel: label}} ->
+          relay_until_open(socket, pc, MapSet.put(opened, label))
+      after
+        10_000 -> opened
+      end
+    end
+  end
+
   describe "webrtc:ice" do
     test "returns error when no WebRTC session exists", %{socket: socket} do
       ref =

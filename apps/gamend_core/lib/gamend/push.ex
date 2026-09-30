@@ -37,8 +37,6 @@ defmodule Gamend.Push do
 
   @type user_id :: Ecto.UUID.t()
 
-  @push_cache_ttl_ms 60_000
-
   # ---------------------------------------------------------------------------
   # Cache helpers
   # ---------------------------------------------------------------------------
@@ -333,7 +331,7 @@ defmodule Gamend.Push do
   @spec user_has_live_tokens?(user_id()) :: boolean()
   @decorate cacheable(
               key: {:push, :has_tokens, push_version(user_id), user_id},
-              opts: [ttl: @push_cache_ttl_ms]
+              opts: [ttl: Gamend.Cache.ttl()]
             )
   def user_has_live_tokens?(user_id) when is_binary(user_id) do
     Repo.exists?(from(t in PushToken, where: t.user_id == ^user_id and is_nil(t.disabled_at)))
@@ -348,14 +346,9 @@ defmodule Gamend.Push do
   """
   @spec list_all_tokens(map(), keyword()) :: [PushToken.t()]
   def list_all_tokens(filters \\ %{}, opts \\ []) do
-    page = Keyword.get(opts, :page, 1)
-    page_size = Keyword.get(opts, :page_size, 25)
-    offset = (page - 1) * page_size
-
     all_tokens_query(filters)
     |> order_by([t], desc: t.inserted_at, desc: t.id)
-    |> limit(^page_size)
-    |> offset(^offset)
+    |> Gamend.Query.page(opts)
     |> preload(:user)
     |> Repo.all()
   end
@@ -372,7 +365,7 @@ defmodule Gamend.Push do
     filters = Map.new(filters, fn {k, v} -> {to_string(k), v} end)
 
     PushToken
-    |> maybe_filter_user(filters["user_id"])
+    |> Gamend.Query.filter_user(filters["user_id"])
     |> maybe_filter(:platform, filters["platform"])
     |> maybe_filter(:provider, filters["provider"])
     |> maybe_filter_status(filters["status"])
@@ -381,13 +374,6 @@ defmodule Gamend.Push do
   # Cast before querying: a half-typed id in the admin filter box must be
   # ignored (the notifications-filter convention), not raise a CastError on
   # Postgres.
-  defp maybe_filter_user(query, value) do
-    case value != nil and Gamend.UUIDv7.cast_or_nil(value) do
-      id when is_binary(id) -> where(query, [t], t.user_id == ^id)
-      _ -> query
-    end
-  end
-
   defp maybe_filter(query, _field, value) when value in [nil, ""], do: query
   defp maybe_filter(query, field, value), do: where(query, [t], field(t, ^field) == ^value)
 
@@ -465,6 +451,7 @@ defmodule Gamend.Push do
     label: "Push notifications"
 
   setting(:adapter, :atom,
+    values: [:auto, :log],
     default: :auto,
     doc: "Set to `log` to route every delivery to the Log provider, credentials or not."
   )
@@ -509,6 +496,7 @@ defmodule Gamend.Push do
   )
 
   setting(:apns_env, :atom,
+    values: [:production, :sandbox],
     default: :production,
     doc: "`production`, or `sandbox` for dev builds."
   )

@@ -3,103 +3,21 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
   use OpenApiSpex.ControllerSpecs
 
   alias Gamend.Leaderboards
-  alias Gamend.Leaderboards.Leaderboard
   alias GamendWeb.Pagination
+  alias GamendWeb.Schemas
+
+  alias GamendWeb.Schemas.{
+    LeaderboardPage,
+    LeaderboardRecordPage,
+    LeaderboardRecordResponse,
+    LeaderboardResponse,
+    LeaderboardsBySlugResponse
+  }
+
+  alias GamendWeb.Serializers
   alias OpenApiSpex.Schema
 
   tags(["Leaderboards"])
-
-  # Shared schema for leaderboard response
-  @leaderboard_schema %Schema{
-    type: :object,
-    properties: %{
-      id: %Schema{type: :string, format: :uuid, description: "Leaderboard ID"},
-      slug: %Schema{
-        type: :string,
-        description: "Human-readable identifier (reusable across seasons)"
-      },
-      title: %Schema{type: :string, description: "Display title"},
-      description: %Schema{type: :string, description: "Description"},
-      icon_url: %Schema{
-        type: :string,
-        description: "Icon URL; empty when unset (the client applies its own default)"
-      },
-      sort_order: %Schema{
-        type: :string,
-        enum: ["desc", "asc"],
-        description: "Sort order - desc (higher is better) or asc (lower is better)"
-      },
-      operator: %Schema{
-        type: :string,
-        enum: ["set", "best", "incr", "decr"],
-        description: "Score operator"
-      },
-      starts_at: %Schema{type: :string, format: "date-time", nullable: true},
-      ends_at: %Schema{type: :string, format: "date-time", nullable: true},
-      is_active: %Schema{type: :boolean, description: "Whether the leaderboard is still active"},
-      metadata: %Schema{type: :object, description: "Arbitrary metadata"},
-      inserted_at: %Schema{type: :string, format: "date-time"},
-      updated_at: %Schema{type: :string, format: "date-time"}
-    },
-    example: %{
-      id: "0198c0de-0001-7000-8000-000000000001",
-      slug: "weekly_kills",
-      title: "Weekly Kills",
-      description: "Get the most kills this week!",
-      sort_order: "desc",
-      operator: "incr",
-      starts_at: "2025-12-02T00:00:00Z",
-      ends_at: nil,
-      is_active: true,
-      metadata: %{},
-      inserted_at: "2025-12-02T10:00:00Z",
-      updated_at: "2025-12-02T10:00:00Z"
-    }
-  }
-
-  @record_schema %Schema{
-    type: :object,
-    properties: %{
-      rank: %Schema{type: :integer, description: "Player's rank on this leaderboard"},
-      user_id: %Schema{
-        type: :string,
-        format: :uuid,
-        description: "User ID (empty for label-based records)"
-      },
-      username: %Schema{
-        type: :string,
-        description: "Unique username handle (empty for label-based records)"
-      },
-      display_name: %Schema{
-        type: :string,
-        description: "Human-readable name (user display name or label text)"
-      },
-      score: %Schema{type: :integer, description: "Score value"},
-      metadata: %Schema{type: :object, description: "Per-record metadata"},
-      updated_at: %Schema{type: :string, format: "date-time"}
-    },
-    example: %{
-      rank: 1,
-      user_id: "0198c0de-0002-7000-8000-000000000002",
-      username: "progamer123-4821",
-      display_name: "ProGamer123",
-      score: 5000,
-      metadata: %{weapon: "sword"},
-      updated_at: "2025-12-02T10:00:00Z"
-    }
-  }
-
-  @meta_schema %Schema{
-    type: :object,
-    properties: %{
-      page: %Schema{type: :integer},
-      page_size: %Schema{type: :integer},
-      count: %Schema{type: :integer},
-      total_count: %Schema{type: :integer},
-      total_pages: %Schema{type: :integer},
-      has_more: %Schema{type: :boolean}
-    }
-  }
 
   # ---------------------------------------------------------------------------
   # List Leaderboards
@@ -167,15 +85,7 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
       ]
     ],
     responses: [
-      ok:
-        {"List of leaderboards", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @leaderboard_schema},
-             meta: @meta_schema
-           }
-         }}
+      ok: {"List of leaderboards", "application/json", LeaderboardPage}
     ]
   )
 
@@ -198,14 +108,12 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
     leaderboards = Leaderboards.list_leaderboards(opts)
     total_count = Leaderboards.count_leaderboards(count_opts)
 
-    json(
+    reply_page(
       conn,
-      Pagination.envelope(
-        Enum.map(leaderboards, &serialize_leaderboard/1),
-        page,
-        page_size,
-        total_count
-      )
+      Enum.map(leaderboards, &serialize_leaderboard/1),
+      page,
+      page_size,
+      total_count
     )
   end
 
@@ -216,7 +124,7 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
   operation(:show,
     operation_id: "get_leaderboard",
     summary: "Get a leaderboard by ID",
-    description: "Return details for a specific leaderboard by its integer ID.",
+    description: "Return details for a specific leaderboard by its ID.",
     parameters: [
       id: [
         in: :path,
@@ -226,20 +134,15 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
       ]
     ],
     responses: [
-      ok: {"Leaderboard details", "application/json", @leaderboard_schema},
-      not_found: {"Leaderboard not found", "application/json", %Schema{type: :object}}
+      ok: {"Leaderboard details", "application/json", LeaderboardResponse},
+      not_found: Schemas.error("Leaderboard not found")
     ]
   )
 
   def show(conn, %{"id" => id}) do
     case Leaderboards.get_leaderboard(to_string(id)) do
-      nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Leaderboard not found"})
-
-      leaderboard ->
-        json(conn, %{data: serialize_leaderboard(leaderboard)})
+      nil -> not_found(conn)
+      leaderboard -> reply_data(conn, serialize_leaderboard(leaderboard))
     end
   end
 
@@ -273,47 +176,19 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
       }
     },
     responses: [
-      ok:
-        {"Resolved leaderboards", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{
-               type: :object,
-               description: "Map of slug → leaderboard object. Unresolved slugs are omitted.",
-               additionalProperties: @leaderboard_schema
-             }
-           },
-           example: %{
-             data: %{
-               "weekly_kills" => %{
-                 id: "0198c0de-0001-7000-8000-000000000001",
-                 slug: "weekly_kills",
-                 title: "Weekly Kills",
-                 is_active: true
-               }
-             }
-           }
-         }},
-      bad_request:
-        {"Invalid request", "application/json",
-         %Schema{type: :object, properties: %{error: %Schema{type: :string}}}}
+      ok: {"Resolved leaderboards", "application/json", LeaderboardsBySlugResponse},
+      bad_request: Schemas.error("`slugs` is missing or not an array (missing_param)")
     ]
   )
 
   def resolve(conn, %{"slugs" => slugs}) when is_list(slugs) do
     resolved = Leaderboards.resolve_slugs(slugs)
 
-    data =
-      Map.new(resolved, fn {slug, lb} -> {slug, serialize_leaderboard(lb)} end)
-
-    json(conn, %{data: data})
+    reply_data(conn, Map.new(resolved, fn {slug, lb} -> {slug, serialize_leaderboard(lb)} end))
   end
 
   def resolve(conn, _params) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{error: "Request body must include a \"slugs\" array"})
+    reply_error(conn, :bad_request, "missing_param", "slugs must be an array of slugs")
   end
 
   # ---------------------------------------------------------------------------
@@ -323,7 +198,7 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
   operation(:records,
     operation_id: "list_leaderboard_records",
     summary: "List leaderboard records",
-    description: "Return ranked records for a leaderboard by its integer ID.",
+    description: "Return ranked records for a leaderboard, best first.",
     parameters: [
       id: [
         in: :path,
@@ -343,25 +218,15 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
       ]
     ],
     responses: [
-      ok:
-        {"List of records", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @record_schema},
-             meta: @meta_schema
-           }
-         }},
-      not_found: {"Leaderboard not found", "application/json", %Schema{type: :object}}
+      ok: {"List of records", "application/json", LeaderboardRecordPage},
+      not_found: Schemas.error("Leaderboard not found")
     ]
   )
 
   def records(conn, %{"id" => id} = params) do
     case Leaderboards.get_leaderboard(to_string(id)) do
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Leaderboard not found"})
+        not_found(conn)
 
       leaderboard ->
         {page, page_size} = Pagination.params(params)
@@ -369,15 +234,7 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
         records = Leaderboards.list_records(leaderboard.id, page: page, page_size: page_size)
         total_count = Leaderboards.count_records(leaderboard.id)
 
-        json(
-          conn,
-          Pagination.envelope(
-            Enum.map(records, &serialize_record/1),
-            page,
-            page_size,
-            total_count
-          )
-        )
+        reply_page(conn, Enum.map(records, &serialize_record/1), page, page_size, total_count)
     end
   end
 
@@ -388,7 +245,11 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
   operation(:around,
     operation_id: "list_records_around_user",
     summary: "List records around a user",
-    description: "Return records centered around a specific user's rank.",
+    description: """
+    Return up to `limit` records centered on a user's rank. The window is
+    answered as one complete page (`meta.page` 1, `meta.has_more` false); each
+    record's `rank` places it on the board. Empty when the user has no record.
+    """,
     parameters: [
       id: [
         in: :path,
@@ -409,17 +270,9 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
       ]
     ],
     responses: [
-      ok:
-        {"List of records around user", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: %Schema{type: :array, items: @record_schema}
-           }
-         }},
-      not_found: {"Leaderboard or user not found", "application/json", %Schema{type: :object}}
-    ],
-    security: [%{"bearer" => []}]
+      ok: {"Records around the user", "application/json", LeaderboardRecordPage},
+      not_found: Schemas.error("Leaderboard not found")
+    ]
   )
 
   def around(conn, %{"id" => id, "user_id" => user_id_str} = params) do
@@ -431,16 +284,11 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
 
     case Leaderboards.get_leaderboard(to_string(id)) do
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Leaderboard not found"})
+        not_found(conn)
 
       leaderboard ->
         records = Leaderboards.list_records_around_user(leaderboard.id, user_id, limit: limit)
-
-        json(conn, %{
-          data: Enum.map(records, &serialize_record/1)
-        })
+        reply_page(conn, Enum.map(records, &serialize_record/1), 1, limit, length(records))
     end
   end
 
@@ -461,17 +309,12 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
       ]
     ],
     responses: [
-      ok:
-        {"User's record with rank", "application/json",
-         %Schema{
-           type: :object,
-           properties: %{
-             data: @record_schema
-           }
-         }},
-      not_found: {"Leaderboard or record not found", "application/json", %Schema{type: :object}}
+      ok: {"User's record with rank", "application/json", LeaderboardRecordResponse},
+      not_found:
+        Schemas.error("Leaderboard not found (not_found), or no record yet (record_not_found)"),
+      unauthorized: Schemas.error("Not authenticated")
     ],
-    security: [%{"bearer" => []}]
+    security: [%{"authorization" => []}]
   )
 
   def me(conn, %{"id" => id}) do
@@ -479,19 +322,12 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
 
     case Leaderboards.get_leaderboard(to_string(id)) do
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Leaderboard not found"})
+        not_found(conn)
 
       leaderboard ->
         case Leaderboards.get_user_record(leaderboard.id, user_id) do
-          {:ok, record} ->
-            json(conn, %{data: serialize_record(record)})
-
-          {:error, :not_found} ->
-            conn
-            |> put_status(:not_found)
-            |> json(%{error: "No record found for this user"})
+          {:ok, record} -> reply_data(conn, serialize_record(record))
+          {:error, :not_found} -> reply_error(conn, :not_found, "record_not_found")
         end
     end
   end
@@ -500,23 +336,9 @@ defmodule GamendWeb.Api.V1.LeaderboardController do
   # Helpers
   # ---------------------------------------------------------------------------
 
-  defp serialize_leaderboard(lb) do
-    %{
-      id: lb.id,
-      slug: lb.slug,
-      title: lb.title,
-      description: lb.description || "",
-      icon_url: lb.icon_url || "",
-      sort_order: to_string(lb.sort_order),
-      operator: to_string(lb.operator),
-      starts_at: lb.starts_at,
-      ends_at: lb.ends_at,
-      is_active: Leaderboard.active?(lb),
-      metadata: lb.metadata || %{},
-      inserted_at: lb.inserted_at,
-      updated_at: lb.updated_at
-    }
-  end
+  defp not_found(conn), do: reply_error(conn, :not_found, "not_found")
+
+  defp serialize_leaderboard(lb), do: Serializers.serialize_leaderboard(lb)
 
   defp serialize_record(record) do
     base = %{

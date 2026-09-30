@@ -9,8 +9,10 @@ defmodule GamendCore.MixProject do
       app: :gamend_core,
       version: System.get_env("GAMEND_CONTENT_APP_VERSION") || @version,
       elixir: "~> 1.20",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       dialyzer: [plt_add_apps: [:mix]],
+      aliases: aliases(),
       deps: deps(),
       description: description(),
       package: package(),
@@ -21,6 +23,15 @@ defmodule GamendCore.MixProject do
   def application do
     [
       extra_applications: [:logger]
+    ]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  defp aliases do
+    [
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
     ]
   end
 
@@ -72,7 +83,11 @@ defmodule GamendCore.MixProject do
       # renders as undifferentiated text.
       {:lumis, "~> 0.1"},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.40", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
+      # The GDScript transpiler, for the in-process plugin build tests. At runtime
+      # the host ships it (a dependency of the root app); the core only calls
+      # it when it is loaded, so the core itself does not depend on it.
+      {:gamend_plugin_tools, path: "../../sdk_tools", only: :test}
     ]
   end
 

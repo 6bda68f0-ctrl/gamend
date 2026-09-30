@@ -52,11 +52,18 @@ defmodule Gamend.Settings.Provider do
     them to hold.
   - `:with` — sibling keys forming a complete-or-empty group. All unset is
     silent; a partial set trips `:required`.
+  - `:values` — for `:atom`, the complete set of accepted choices. Always give
+    it. Without it the cast falls back to `String.to_existing_atom/1`, which
+    only succeeds when some *other* compiled code happens to mention the atom
+    already — so a perfectly valid choice that nothing else names is rejected
+    and silently replaced by the default. `GAMEND_PAYMENTS_ENVIRONMENT=sandbox`
+    selected production that way. Listing the values here casts against them
+    directly, so the declaration is the only thing that decides what is legal.
   """
 
   @types [:string, :integer, :float, :boolean, :atom, :list, :log_level]
 
-  @setting_opts [:default, :doc, :secret, :required, :when, :with]
+  @setting_opts [:default, :doc, :secret, :required, :when, :with, :values]
 
   @doc false
   defmacro __using__(opts) do
@@ -128,6 +135,9 @@ defmodule Gamend.Settings.Provider do
 option(s) #{inspect(unknown)}; expected one of #{inspect(@setting_opts)}"
     end
 
+    values = Keyword.get(opts, :values, [])
+    validate_values!(module, key, type, values, Keyword.get(opts, :default))
+
     required = Keyword.get(opts, :required)
 
     unless required in [nil, :prod, :warn] do
@@ -150,8 +160,36 @@ option(s) #{inspect(unknown)}; expected one of #{inspect(@setting_opts)}"
       secret: Keyword.get(opts, :secret, false),
       required: required,
       when: Keyword.get(opts, :when),
-      with: Keyword.get(opts, :with, [])
+      with: Keyword.get(opts, :with, []),
+      values: values
     }
+  end
+
+  # `:values` only means something for `:atom`: every other type has a total
+  # parser. A default outside the set would be unreachable by configuration and
+  # is always a mistake in the declaration.
+  defp validate_values!(_module, _key, _type, [], _default), do: :ok
+
+  defp validate_values!(module, key, type, values, default) do
+    cond do
+      type != :atom ->
+        raise ArgumentError,
+              "#{inspect(module)}: setting #{inspect(key)} has :values but type " <>
+                "#{inspect(type)}; :values applies to :atom only"
+
+      not (is_list(values) and Enum.all?(values, &is_atom/1)) ->
+        raise ArgumentError,
+              "#{inspect(module)}: setting #{inspect(key)} has :values " <>
+                "#{inspect(values)}; expected a list of atoms"
+
+      not is_nil(default) and default not in values ->
+        raise ArgumentError,
+              "#{inspect(module)}: setting #{inspect(key)} has default " <>
+                "#{inspect(default)}, which is not in :values #{inspect(values)}"
+
+      true ->
+        :ok
+    end
   end
 
   @doc """

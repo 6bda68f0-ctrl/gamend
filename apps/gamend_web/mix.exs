@@ -34,7 +34,10 @@ defmodule GamendWeb.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  # The core's test support (DataCase, fixtures, the test runtime) lives with
+  # the core suite and is shared from there, not copied.
+  defp elixirc_paths(:test),
+    do: ["lib", "test/support", Path.expand("../gamend_core/test/support", __DIR__)]
   defp elixirc_paths(_), do: ["lib"]
 
   defp deps do

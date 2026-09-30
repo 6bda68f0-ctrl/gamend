@@ -14,6 +14,9 @@ defmodule GamendWeb.AdminLive.LobbySnapshots do
 
   alias Gamend.LobbySnapshots
 
+  @gap_limit 25
+  @run_limit 50
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -21,7 +24,7 @@ defmodule GamendWeb.AdminLive.LobbySnapshots do
       <div class="space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div class="flex items-center gap-3">
-            <.link navigate={~p"/admin"} class="btn btn-outline btn-sm">&larr; Admin</.link>
+            <.link navigate={~p"/admin"} class="btn btn-outline btn-sm">&larr; Back to Admin</.link>
             <h1 class="text-xl font-bold">Lobby snapshots</h1>
           </div>
 
@@ -43,7 +46,11 @@ defmodule GamendWeb.AdminLive.LobbySnapshots do
         <div :if={@gaps != []} class="alert alert-warning items-start text-sm">
           <div class="space-y-2 w-full">
             <div class="font-semibold">
-              {length(@gaps)} coverage gap{if length(@gaps) == 1, do: "", else: "s"}
+              <%= if length(@gaps) >= @gap_limit do %>
+                {ngettext("%{count}+ coverage gap", "%{count}+ coverage gaps", @gap_limit)}
+              <% else %>
+                {ngettext("%{count} coverage gap", "%{count} coverage gaps", length(@gaps))}
+              <% end %>
             </div>
             <div class="text-xs opacity-80">
               State was written outside a capture chokepoint, so snapshots around these
@@ -64,7 +71,7 @@ defmodule GamendWeb.AdminLive.LobbySnapshots do
 
         <div :if={not @enabled} class="alert alert-warning text-sm">
           <span>
-            Capture is off. Set <code class="font-mono">LOBBY_SNAPSHOTS_ENABLED=true</code>
+            Capture is off. Set <code class="font-mono">GAMEND_LOBBY_SNAPSHOTS_ENABLED=true</code>
             to record runs. Existing records stay readable either way.
           </span>
         </div>
@@ -81,11 +88,17 @@ defmodule GamendWeb.AdminLive.LobbySnapshots do
             >
               flagged only
             </button>
-            <span class="text-xs text-base-content/60">{length(@lobbies)} runs</span>
+            <span class="text-xs text-base-content/60">
+              <%= if length(@lobbies) >= @run_limit do %>
+                {ngettext("latest %{count} run", "latest %{count} runs", @run_limit)}
+              <% else %>
+                {ngettext("%{count} run", "%{count} runs", length(@lobbies))}
+              <% end %>
+            </span>
           </div>
 
           <div :if={@lobbies == []} class="text-sm text-base-content/60 py-8 text-center">
-            No runs recorded yet.
+            {if @flagged_only, do: "No flagged runs.", else: "No runs recorded yet."}
           </div>
 
           <div class="overflow-x-auto">
@@ -363,7 +376,11 @@ defmodule GamendWeb.AdminLive.LobbySnapshots do
      |> assign(:section_filters, %{})
      |> assign(:expanded_events, MapSet.new())
      |> assign(:enabled, LobbySnapshots.enabled?())
-     |> assign(:gaps, LobbySnapshots.list_coverage_gaps(limit: 25))
+     # Both lists are capped, so a count at the cap reads "N+"/"latest N" rather
+     # than claiming to be the total.
+     |> assign(:gap_limit, @gap_limit)
+     |> assign(:run_limit, @run_limit)
+     |> assign(:gaps, LobbySnapshots.list_coverage_gaps(limit: @gap_limit))
      # Cluster-wide: each node buffers independently, so a local read would
      # under-report exactly the dropped rows this is here to expose.
      |> assign(:writer, LobbySnapshots.Writer.cluster_stats())}
@@ -444,7 +461,7 @@ defmodule GamendWeb.AdminLive.LobbySnapshots do
     assign(
       socket,
       :lobbies,
-      LobbySnapshots.list_lobbies(flagged_only: socket.assigns.flagged_only)
+      LobbySnapshots.list_lobbies(flagged_only: socket.assigns.flagged_only, limit: @run_limit)
     )
   end
 

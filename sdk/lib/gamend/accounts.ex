@@ -21,6 +21,8 @@ defmodule Gamend.Accounts do
   The actual implementation runs on the Gamend.
   """
 
+  @type password_error() :: :invalid_credentials | :email_not_confirmed | {:locked, pos_integer()}
+
   @doc ~S"""
     Attach a device_id to an existing user record. Returns {:ok, user} or
     {:error, changeset} if the device_id is already used.
@@ -44,6 +46,41 @@ defmodule Gamend.Accounts do
 
       _ ->
         raise "Gamend.Accounts.attach_device_to_user/2 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    Checks an email and password, counting failures per address
+    (`Gamend.Accounts.LoginLockouts`).
+    
+    `{:error, {:locked, seconds}}` when the address is locked, before the
+    password is looked at, and for the failure that locks it.
+    
+    `{:error, :email_not_confirmed}` for the right password on an account whose
+    email was never confirmed. Anyone can register any address with a password,
+    so the password signs nobody in until the inbox's owner has confirmed it.
+    It is answered only after the password matched, so it tells nothing to
+    someone who does not know it.
+    
+  """
+  @spec authenticate_by_password(String.t(), String.t()) ::
+          {:ok, Gamend.Accounts.User.t()} | {:error, password_error()}
+  def authenticate_by_password(_email, _password) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        {:ok,
+         %Gamend.Accounts.User{
+           id: 0,
+           email: "",
+           display_name: nil,
+           metadata: %{},
+           is_admin: false,
+           inserted_at: ~U[1970-01-01 00:00:00Z],
+           updated_at: ~U[1970-01-01 00:00:00Z]
+         }}
+
+      _ ->
+        raise "Gamend.Accounts.authenticate_by_password/2 is a stub - only available at runtime on Gamend"
     end
   end
 
@@ -134,6 +171,31 @@ defmodule Gamend.Accounts do
 
       _ ->
         raise "Gamend.Accounts.can_upload_avatar?/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    Keep an account that was scheduled for deletion. A no-op for one that was not.
+    
+  """
+  @spec cancel_deletion(Gamend.Accounts.User.t()) ::
+          {:ok, Gamend.Accounts.User.t()} | {:error, Ecto.Changeset.t()}
+  def cancel_deletion(_user) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        {:ok,
+         %Gamend.Accounts.User{
+           id: 0,
+           email: "",
+           display_name: nil,
+           metadata: %{},
+           is_admin: false,
+           inserted_at: ~U[1970-01-01 00:00:00Z],
+           updated_at: ~U[1970-01-01 00:00:00Z]
+         }}
+
+      _ ->
+        raise "Gamend.Accounts.cancel_deletion/1 is a stub - only available at runtime on Gamend"
     end
   end
 
@@ -666,6 +728,34 @@ defmodule Gamend.Accounts do
   end
 
   @doc ~S"""
+    Days a player's own deletion waits (`auth.deletion_grace_days`); 0 deletes at once.
+  """
+  @spec deletion_grace_days() :: non_neg_integer()
+  def deletion_grace_days() do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        0
+
+      _ ->
+        raise "Gamend.Accounts.deletion_grace_days/0 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    Whether `user` is waiting out a deletion grace period.
+  """
+  @spec deletion_scheduled?(Gamend.Accounts.User.t() | nil) :: boolean()
+  def deletion_scheduled?(_user) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        :erlang.phash2(make_ref(), 2) == 0
+
+      _ ->
+        raise "Gamend.Accounts.deletion_scheduled?/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
     Delivers the magic link login instructions to the given user.
     
   """
@@ -752,6 +842,46 @@ defmodule Gamend.Accounts do
 
       _ ->
         raise "Gamend.Accounts.display_label/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    The short form of `display_label/1`: the display name, or the username when
+    there is none. No parenthesised handle.
+    
+    Use this where the name sits inside a sentence the player reads — "Ana
+    invited you" — and `display_label/1` where it stands on its own and the
+    handle disambiguates, such as an admin table or a friends list.
+    
+    This exists because the fallback was being written inline, differently, in
+    four places: parties sent `display_name || ""`, so an invite from a player
+    who had set no display name arrived from nobody; group invites wrote
+    `display_name || username`; three admin views fell through to the email and
+    then the raw id, which `display_label/1` documents as the thing not to do.
+    
+  """
+  @spec display_name(Gamend.Accounts.User.t() | Ecto.UUID.t() | nil) :: String.t()
+  def display_name(_user) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        ""
+
+      _ ->
+        raise "Gamend.Accounts.display_name/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    Accounts whose deletion date has passed. For `Gamend.Retention`.
+  """
+  @spec due_deletions_query() :: Ecto.Query.t()
+  def due_deletions_query() do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        nil
+
+      _ ->
+        raise "Gamend.Accounts.due_deletions_query/0 is a stub - only available at runtime on Gamend"
     end
   end
 
@@ -905,6 +1035,37 @@ defmodule Gamend.Accounts do
   end
 
   @doc ~S"""
+    Finds a user by GitHub ID or creates a new user from OAuth data.
+    
+    ## Examples
+    
+        iex> find_or_create_from_github(%{github_id: "123", email: "user@example.com"})
+        {:ok, %User{}}
+    
+    
+  """
+  @spec find_or_create_from_github(map()) ::
+          {:ok, Gamend.Accounts.User.t()} | {:error, Ecto.Changeset.t() | term()}
+  def find_or_create_from_github(_attrs) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        {:ok,
+         %Gamend.Accounts.User{
+           id: 0,
+           email: "",
+           display_name: nil,
+           metadata: %{},
+           is_admin: false,
+           inserted_at: ~U[1970-01-01 00:00:00Z],
+           updated_at: ~U[1970-01-01 00:00:00Z]
+         }}
+
+      _ ->
+        raise "Gamend.Accounts.find_or_create_from_github/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
     Finds a user by Google ID or creates a new user from OAuth data.
     
     ## Examples
@@ -990,6 +1151,7 @@ defmodule Gamend.Accounts do
   @spec get_linked_providers(Gamend.Accounts.User.t()) :: %{
           google: boolean(),
           facebook: boolean(),
+          github: boolean(),
           discord: boolean(),
           apple: boolean(),
           steam: boolean(),
@@ -1156,7 +1318,9 @@ defmodule Gamend.Accounts do
   end
 
   @doc ~S"""
-    Gets a user by email and password.
+    Gets a user by email and password. `nil` for a wrong password, for an
+    address locked by too many failures, and for an email not yet confirmed
+    (`authenticate_by_password/2` says which).
     
     ## Examples
     
@@ -1213,6 +1377,33 @@ defmodule Gamend.Accounts do
 
       _ ->
         raise "Gamend.Accounts.get_user_by_facebook_id/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    Get a user by their GitHub ID.
+    
+    Returns `%User{}` or `nil`.
+    
+  """
+  @spec get_user_by_github_id(String.t()) :: Gamend.Accounts.User.t() | nil
+  def get_user_by_github_id(_github_id) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        if :erlang.phash2(make_ref(), 2) == 0,
+          do: nil,
+          else: %Gamend.Accounts.User{
+            id: 0,
+            email: "",
+            display_name: nil,
+            metadata: %{},
+            is_admin: false,
+            inserted_at: ~U[1970-01-01 00:00:00Z],
+            updated_at: ~U[1970-01-01 00:00:00Z]
+          }
+
+      _ ->
+        raise "Gamend.Accounts.get_user_by_github_id/1 is a stub - only available at runtime on Gamend"
     end
   end
 
@@ -1457,7 +1648,8 @@ defmodule Gamend.Accounts do
     sensitive fields a player cannot, so it is admin-only.
     
     `filters` keys (string or atom): `:search` (term or full id), `:facets` (list
-    of `"online"`, `"unactivated"`, and provider names). `opts`: `:page`,
+    of `"online"`, `"unactivated"`, `"unverified"` — an email never confirmed —
+    and provider names). `opts`: `:page`,
     `:page_size`, `:sort_field`, `:sort_dir`.
     
   """
@@ -1501,15 +1693,18 @@ defmodule Gamend.Accounts do
     1. The user has already confirmed their email. They are logged in
        and the magic link is expired.
     
-    2. The user has not confirmed their email and no password is set.
-       In this case, the user gets confirmed, logged in, and all tokens -
-       including session ones - are expired. In theory, no other tokens
-       exist but we delete all of them for best security practices.
+    2. The user has not confirmed their email. Opening the link proves they
+       own the inbox, so the user gets confirmed, logged in, and all tokens -
+       including session ones - are expired.
     
-    3. The user has not confirmed their email but a password is set.
-       This cannot happen in the default implementation but may be the
-       source of security pitfalls. See the "Mixing magic link and password registration" section of
-       `mix help phx.gen.auth`.
+    3. As 2, with a password set: registered with one (`POST /api/v1/register`)
+       and never confirmed. The password is removed as the email is confirmed.
+       Whoever registered the address chose it before anyone proved they own
+       the inbox, so it may be someone else's, and kept it would sign them into
+       the account its owner has just claimed (the "Mixing magic link and
+       password registration" section of `mix help phx.gen.auth`). The owner
+       sets a new one in settings; the link in the confirmation email confirms
+       the account and keeps the password.
     
   """
   @spec login_user_by_magic_link(String.t()) ::
@@ -1672,13 +1867,13 @@ defmodule Gamend.Accounts do
   end
 
   @doc ~S"""
-    Register a user and send the confirmation email inside a DB transaction.
+    Register a user and queue its confirmation email.
     
-    The function accepts a `confirmation_url_fun` which must be a function of arity 1
-    that receives the encoded token and returns the confirmation URL string.
-    
-    If sending the confirmation email fails the transaction is rolled back and
-    `{:error, reason}` is returned. On success it returns `{:ok, user}`.
+    `confirmation_url_fun` maps an encoded token to the confirmation URL. The
+    email goes out from the `mailers` queue (`Gamend.Accounts.ConfirmationMailer`),
+    enqueued in the transaction that inserts the user: the call returns once
+    both are committed, without waiting on SMTP, and a failed send is retried
+    there. The first user becomes the admin and is confirmed, with no email.
     
   """
   @spec register_user_and_deliver(Gamend.Types.user_registration_attrs(), (String.t() ->
@@ -1704,13 +1899,13 @@ defmodule Gamend.Accounts do
   end
 
   @doc ~S"""
-    Register a user and send the confirmation email inside a DB transaction.
+    Register a user and queue its confirmation email.
     
-    The function accepts a `confirmation_url_fun` which must be a function of arity 1
-    that receives the encoded token and returns the confirmation URL string.
-    
-    If sending the confirmation email fails the transaction is rolled back and
-    `{:error, reason}` is returned. On success it returns `{:ok, user}`.
+    `confirmation_url_fun` maps an encoded token to the confirmation URL. The
+    email goes out from the `mailers` queue (`Gamend.Accounts.ConfirmationMailer`),
+    enqueued in the transaction that inserts the user: the call returns once
+    both are committed, without waiting on SMTP, and a failed send is retried
+    there. The first user becomes the admin and is confirmed, with no email.
     
   """
   @spec register_user_and_deliver(
@@ -1734,6 +1929,69 @@ defmodule Gamend.Accounts do
 
       _ ->
         raise "Gamend.Accounts.register_user_and_deliver/3 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    Register a user with an email and a password and queue the confirmation
+    email, as `register_user_and_deliver/3` does for the browser form: how a
+    game client signs up (`POST /api/v1/register`). The password signs in once
+    the email is confirmed (`Gamend.Accounts.authenticate_by_password/2`).
+    
+  """
+  @spec register_user_with_password_and_deliver(
+          Gamend.Types.user_registration_attrs(),
+          (String.t() -> String.t()),
+          module()
+        ) :: {:ok, Gamend.Accounts.User.t()} | {:error, Ecto.Changeset.t() | term()}
+  def register_user_with_password_and_deliver(
+        _attrs,
+        _confirmation_url_fun,
+        _notifier \\ Gamend.Accounts.UserNotifier
+      ) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        {:ok,
+         %Gamend.Accounts.User{
+           id: 0,
+           email: "",
+           display_name: nil,
+           metadata: %{},
+           is_admin: false,
+           inserted_at: ~U[1970-01-01 00:00:00Z],
+           updated_at: ~U[1970-01-01 00:00:00Z]
+         }}
+
+      _ ->
+        raise "Gamend.Accounts.register_user_with_password_and_deliver/3 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    A player deleting their own account.
+    
+    With `auth.deletion_grace_days` at 0 the account is deleted now, by
+    `delete_user/1`. Otherwise it is scheduled that many days out and signed out
+    everywhere (every session, access, refresh and personal API token), and
+    `Gamend.Retention` deletes it on the day unless its owner signs in on the
+    website first (`cancel_deletion/1`). An account already scheduled keeps its
+    date. The expired session tokens come back so the caller can disconnect
+    their LiveViews.
+    
+    Admin deletions and the retention sweeps call `delete_user/1` and never wait.
+    
+  """
+  @spec request_deletion(Gamend.Accounts.User.t()) ::
+          {:ok, :deleted}
+          | {:ok, {:scheduled, Gamend.Accounts.User.t(), [Gamend.Accounts.UserToken.t()]}}
+          | {:error, Ecto.Changeset.t()}
+  def request_deletion(_user) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        nil
+
+      _ ->
+        raise "Gamend.Accounts.request_deletion/1 is a stub - only available at runtime on Gamend"
     end
   end
 
@@ -1947,8 +2205,9 @@ defmodule Gamend.Accounts do
   @doc ~S"""
     Checks whether the user is in sudo mode.
     
-    The user is in sudo mode when the last authentication was done no further
-    than 20 minutes ago. The limit can be given as second argument in minutes.
+    With one argument, the window is the one a sudo form is submitted in:
+    `sudo_mode_minutes/0` plus ten minutes to fill the form in. The limit can be
+    given as second argument in minutes (negative, as an offset from now).
     
   """
   @spec sudo_mode?(Gamend.Accounts.User.t()) :: boolean()
@@ -1962,13 +2221,7 @@ defmodule Gamend.Accounts do
     end
   end
 
-  @doc ~S"""
-    Checks whether the user is in sudo mode.
-    
-    The user is in sudo mode when the last authentication was done no further
-    than 20 minutes ago. The limit can be given as second argument in minutes.
-    
-  """
+  @doc false
   @spec sudo_mode?(Gamend.Accounts.User.t(), integer()) :: boolean()
   def sudo_mode?(_user, _minutes) do
     case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
@@ -1977,6 +2230,20 @@ defmodule Gamend.Accounts do
 
       _ ->
         raise "Gamend.Accounts.sudo_mode?/2 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    How recently a user must have signed in to open a sudo page (`auth.sudo_mode_minutes`).
+  """
+  @spec sudo_mode_minutes() :: pos_integer()
+  def sudo_mode_minutes() do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        0
+
+      _ ->
+        raise "Gamend.Accounts.sudo_mode_minutes/0 is a stub - only available at runtime on Gamend"
     end
   end
 
@@ -2049,7 +2316,7 @@ defmodule Gamend.Accounts do
   @doc ~S"""
     Unlink an OAuth provider from a user's account.
     
-    provider should be one of :discord, :apple, :google, :facebook.
+    provider should be one of :discord, :apple, :google, :facebook, :github, :steam.
     This will return {:ok, user} when successful or {:error, reason}.
     
     Guard: we only allow unlinking when the user will still have at least
@@ -2059,7 +2326,7 @@ defmodule Gamend.Accounts do
   """
   @spec unlink_provider(
           Gamend.Accounts.User.t(),
-          :discord | :apple | :google | :facebook | :steam
+          :discord | :apple | :google | :facebook | :github | :steam
         ) ::
           {:ok, Gamend.Accounts.User.t()} | {:error, :last_provider | Ecto.Changeset.t() | term()}
   def unlink_provider(_user, _provider) do
@@ -2273,6 +2540,46 @@ defmodule Gamend.Accounts do
 
       _ ->
         raise "Gamend.Accounts.user_activated?/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
+    Whether an account with this id exists.
+    
+    For the contexts that write a row pointing at a user, before they write it.
+    SQLite — the default adapter — does not report *which* constraint an
+    `INSERT` violated, only that one was violated, so
+    `Ecto.Changeset.foreign_key_constraint/2` cannot match it and Ecto raises
+    `Ecto.ConstraintError` instead of returning a changeset. The declarations in
+    those schemas are therefore decorative on SQLite (the adapter's own docs say
+    so), and a bad `user_id` reaching the database surfaced as a 500.
+    
+    Checking first costs one indexed read and gives the caller a real answer.
+    It is not a substitute for the foreign key: the row can still be deleted
+    between this and the write. That race ends where it did before, which is why
+    the constraint stays declared.
+    
+    Returns `false` for a malformed id rather than raising, since these ids come
+    from request bodies and hook arguments.
+    
+    Goes through `get_user/1` rather than a bare `Repo.exists?`, because this sits
+    on the hot write paths — a currency grant, a score submission — and
+    `get_user/1` is cached. A player earning currency during a session was
+    authenticated moments ago, so their row is already in the cache and this costs
+    nothing; `Repo.exists?` would take a connection from the pool every time.
+    Correctness is unchanged: `delete_user/1` invalidates that entry, and a
+    `nil` lookup is never cached (`cache_match/1`), so a missing user is re-checked
+    against the database each time rather than being remembered as absent.
+    
+  """
+  @spec user_exists?(term()) :: boolean()
+  def user_exists?(_id) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        :erlang.phash2(make_ref(), 2) == 0
+
+      _ ->
+        raise "Gamend.Accounts.user_exists?/1 is a stub - only available at runtime on Gamend"
     end
   end
 

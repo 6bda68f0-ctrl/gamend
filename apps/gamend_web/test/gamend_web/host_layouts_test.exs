@@ -25,6 +25,47 @@ defmodule GamendWeb.HostLayoutsTest do
     assert theme["favicon"] == "/images/custom.ico"
   end
 
+  describe "navbar logo" do
+    import Phoenix.LiveViewTest
+
+    defp shell(theme) do
+      render_component(&GamendWeb.HostLayoutShell.app/1, %{
+        flash: %{},
+        theme: Map.merge(%{"title" => "T"}, theme),
+        locale: "en",
+        inner_block: []
+      })
+    end
+
+    # The `<img>` tags in the brand link, in order. The theme toggle further
+    # down the bar uses the same `[[data-theme=dark]_&]` variant, so the
+    # assertions read the tags rather than the page.
+    defp logo_tags(html) do
+      ~r/<img [^>]*>/
+      |> Regex.scan(html)
+      |> List.flatten()
+      |> Enum.filter(&(&1 =~ "logo"))
+    end
+
+    test "one logo serves both themes when no dark one is named" do
+      [light] = logo_tags(shell(%{"logo" => "/images/logo.png"}))
+
+      assert light =~ ~s(src="/images/logo.png")
+      refute light =~ "data-theme"
+    end
+
+    test "logo_dark is swapped in by the theme attribute" do
+      [light, dark] =
+        logo_tags(shell(%{"logo" => "/images/logo.png", "logo_dark" => "/images/logo-dark.png"}))
+
+      assert light =~ ~s(src="/images/logo.png")
+      # A dynamic class attribute escapes the `&`; the browser reads it back.
+      assert light =~ ~r/\[\[data-theme=dark\]_&(amp;)?\]:hidden/
+      assert dark =~ ~s(src="/images/logo-dark.png")
+      assert dark =~ "hidden [[data-theme=dark]_&]:block"
+    end
+  end
+
   ## The shell derives ten assigns from five attrs, and a function component is
   ## stateless, so `assign/3` marks every one of them changed on every render
   ## unless something stops it. Left unstopped, the navbar and the footer

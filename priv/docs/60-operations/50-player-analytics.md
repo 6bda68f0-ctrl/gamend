@@ -17,8 +17,8 @@ numbers appear as soon as players log in.
 | Retention | D1 / D7 / D30 — of the users who registered on day *C*, the share seen again on **exactly** *C+1* / *C+7* / *C+30*; pooled over the last 60 days of cohorts that have reached the horizon | same |
 | Payers | Distinct users with a completed purchase in the last 30 days, and that ÷ MAU | `purchases` |
 | Snapshot | Live counters from every context — players, lobbies, parties, quests, signaling, matchmaking queue, tournaments — composed once, cached a minute | the contexts' `stats/0` |
-| Economy flow | Currency granted / spent per UTC day per ledger `reason` (`treasure`, `unlock_item`, `refill_lives`, …) | `ledger_entries` |
-| Counters | Game-defined per-day counters written with `Analytics.count/3` — `level.started`, `level.finished`, `level.failed`, `level.abandoned`, `lives.blocked_start`, each also sliced `…lang:<code>`, `level.started.mode:<mode>`, `level.started.{solo,coop,tournament}` | `analytics_daily_counts` |
+| Economy flow | Currency granted / spent per UTC day per ledger `reason` — whatever labels your game passes, e.g. `match_reward`, `store_purchase` | `ledger_entries` |
+| Counters | Game-defined per-day counters written with `Analytics.count/3`. Core writes none; the keys are yours, e.g. `level.started`, `level.finished`, sliced by a dimension after a colon (`level.started.mode:ranked`) | `analytics_daily_counts` |
 
 "Seen" is any authenticated contact: a login (session or JWT), a socket
 heartbeat, or an offline→online transition, the same events that move
@@ -42,11 +42,12 @@ the first week". A dash means no cohort has reached that horizon yet, rather tha
   dimension after a colon (`level.started.lang:ja`) so `counts/3` can pull a
   family with `level.started.lang:*`.
 - `client_sessions`: one row per run of the game on a device, written by
-  [client log](/docs/godot-sdk) uploads. Bounded by *players ×
+  [client log](/docs/client-logs) uploads. Bounded by *players ×
   sessions per day*; the log lines themselves are **not** stored here, they go
   out through `Logger` to whatever log store the host runs. Pruned by
-  `client_logs.retention_days` (14), or `retention_flagged_days` (90) for
-  sessions that logged an error.
+  `GAMEND_CLIENT_LOGS_RETENTION_DAYS` (14), or
+  `GAMEND_CLIENT_LOGS_RETENTION_FLAGGED_DAYS` (90) for sessions that logged an
+  error.
 - Everything else is read straight from the owning tables.
 
 Reporting a counter from a plugin:
@@ -64,7 +65,7 @@ Never raises; a bad key is dropped. Call it from paths that already write
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/v1/stats` (public, gated by `PUBLIC_STATS`) | The snapshot: players, activity, lobbies, parties, quests, signaling, matchmaking queue, tournaments |
+| `GET /api/v1/stats` (public, gated by `GAMEND_FEATURES_PUBLIC_STATS`) | The snapshot: players, activity, lobbies, parties, quests, signaling, matchmaking queue, tournaments |
 | `GET /api/v1/admin/analytics` | Summary: DAU / WAU / MAU, stickiness, new users, D1 / D7 / D30, payers |
 | `GET /api/v1/admin/analytics/daily?days=30` | Per-day rows, oldest first: `active`, `new_users`, `d1`, `d7`, `d30` |
 | `GET /api/v1/admin/analytics/snapshot` | The snapshot, regardless of the public gate |
@@ -88,17 +89,14 @@ Already answerable from existing tables (no new plumbing):
 | Revenue per day, ARPPU, refund rate, provider split | `purchases` |
 | Chat volume, share of DAU that chats; moderation load | `chat_messages`, `chat_reports`, `chat_mutes` |
 | Notification read rate; reachable installs by platform | `notifications.read`, `push_tokens` |
-| Cosmetic ownership, upgrade levels, cargo holdings, wallet distribution | `inventory_items`, `wallets` |
+| Item ownership, wallet distribution | `inventory_items`, `wallets` |
 
-Answerable now **only via counters** the game writes (a lobby is deleted at
-level end, so nothing else records it): levels started / finished / failed /
-abandoned per day, per language, per mode; solo vs co-op vs tournament
-starts; starts blocked by empty hearts (pair with `refill_lives` spends for
-the paywall funnel).
+Answerable **only via counters** your game writes: anything about a match or a
+level once it is over, since a lobby is usually deleted when the match ends and
+nothing else records it (matches started / finished / abandoned per day, per
+mode, solo vs group), and the funnel around any gate your game adds.
 
-Still not recorded anywhere; add a counter or a table if you need it:
-session length and peak concurrency history; onboarding funnel steps
-(language chosen → first level → tutorial done); shop opens / SKU views /
-checkout abandons; per-guess accuracy over time (word stats are a per-user
-blob); push delivery/open outcomes; per-user platform, country or acquisition
-channel for segmenting retention.
+Not recorded by core; add a counter or a table if you need it: session length
+and peak concurrency history; onboarding funnel steps; shop opens / SKU views /
+checkout abandons; push delivery/open outcomes; per-user platform, country or
+acquisition channel for segmenting retention.

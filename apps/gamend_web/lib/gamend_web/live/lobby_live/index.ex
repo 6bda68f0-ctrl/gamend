@@ -32,9 +32,7 @@ defmodule GamendWeb.LobbyLive.Index do
     total_count = Lobbies.count_list_lobbies(%{})
 
     total_pages =
-      if lobbies_page_size > 0,
-        do: div(total_count + lobbies_page_size - 1, lobbies_page_size),
-        else: 0
+      LiveHelpers.total_pages(total_count, lobbies_page_size)
 
     memberships_map =
       Enum.into(lobbies, %{}, fn l -> {l.id, Lobbies.list_memberships_for_lobby(l.id)} end)
@@ -131,7 +129,7 @@ defmodule GamendWeb.LobbyLive.Index do
              put_flash(
                socket,
                :error,
-               gettext("Failed") <> ": " <> inspect(reason)
+               LiveHelpers.failure_message(gettext("Failed"), reason)
              )}
         end
 
@@ -231,11 +229,12 @@ defmodule GamendWeb.LobbyLive.Index do
         attrs = %{}
         attrs = if params["title"], do: Map.put(attrs, "title", params["title"]), else: attrs
 
+        # A player-facing form: `String.to_integer/1` here crashed the page on a
+        # non-numeric value. An unparseable one is simply not applied.
         attrs =
-          if params["max_users"] && params["max_users"] != "" do
-            Map.put(attrs, "max_users", String.to_integer(params["max_users"]))
-          else
-            attrs
+          case Gamend.Parse.integer(params["max_users"]) do
+            nil -> attrs
+            max_users -> Map.put(attrs, "max_users", max_users)
           end
 
         attrs =
@@ -282,7 +281,7 @@ defmodule GamendWeb.LobbyLive.Index do
              put_flash(
                socket,
                :error,
-               gettext("Failed") <> ": " <> inspect(reason)
+               LiveHelpers.failure_message(gettext("Failed"), reason)
              )}
         end
 
@@ -317,7 +316,7 @@ defmodule GamendWeb.LobbyLive.Index do
              put_flash(
                socket,
                :error,
-               gettext("Failed") <> ": " <> inspect(reason)
+               LiveHelpers.failure_message(gettext("Failed"), reason)
              )}
         end
 
@@ -412,7 +411,7 @@ defmodule GamendWeb.LobbyLive.Index do
          put_flash(
            socket,
            :error,
-           gettext("Failed") <> ": " <> inspect(reason)
+           LiveHelpers.failure_message(gettext("Failed"), reason)
          )}
     end
   end
@@ -460,7 +459,7 @@ defmodule GamendWeb.LobbyLive.Index do
            put_flash(
              socket,
              :error,
-             gettext("Failed") <> ": " <> inspect(reason)
+             LiveHelpers.failure_message(gettext("Failed"), reason)
            )}
       end
     end
@@ -896,7 +895,7 @@ defmodule GamendWeb.LobbyLive.Index do
                             id={"member-" <> to_string(m.id)}
                             class="flex items-center justify-between py-1"
                           >
-                            <div>{LiveHelpers.public_user_name(m)}</div>
+                            <div><.player_name name={LiveHelpers.public_user_name(m)} /></div>
                             <div class="flex items-center gap-2">
                               <%= if m.id == lobby.host_id do %>
                                 <span class="text-xs text-muted">
@@ -934,7 +933,7 @@ defmodule GamendWeb.LobbyLive.Index do
                             id={"member-" <> to_string(m.id)}
                             class="flex items-center justify-between py-1"
                           >
-                            <div>{LiveHelpers.public_user_name(m)}</div>
+                            <div><.player_name name={LiveHelpers.public_user_name(m)} /></div>
                             <div>
                               <%= if m.id == lobby.host_id do %>
                                 <span class="text-xs text-muted">

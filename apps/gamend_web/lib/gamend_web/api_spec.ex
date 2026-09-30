@@ -3,7 +3,8 @@ defmodule GamendWeb.ApiSpec do
   OpenAPI specification for the Gamend API.
   """
 
-  alias GamendWeb.{Endpoint, Router}
+  alias GamendWeb.Endpoint
+  alias GamendWeb.Schemas.RequestTitles
   alias OpenApiSpex.{Components, Info, OpenApi, Paths, SecurityScheme, Server, Tag}
   @behaviour OpenApi
 
@@ -29,12 +30,13 @@ defmodule GamendWeb.ApiSpec do
         - **Discord OAuth**: Use `/api/v1/auth/discord` flow
         - **Google OAuth**: Use `/api/v1/auth/google` flow
         - **Facebook OAuth**: Use `/api/v1/auth/facebook` flow
+        - **GitHub OAuth**: Use `/api/v1/auth/github` flow
         - **Apple Sign In**: Use `/auth/apple` browser flow or apple sdk flow
         - **Steam (OpenID)**: Use `/api/v1/auth/steam` flow
 
         Both methods return:
-        - `access_token` - Short-lived (15 min), use for API requests
-        - `refresh_token` - Long-lived (30 days), use to get new access tokens
+        - `access_token` - Short-lived (15 min by default), use for API requests; `expires_in` gives its lifetime in seconds
+        - `refresh_token` - Long-lived (30 days by default), use to get new access tokens
 
         ### **1.2 Using Tokens**
         Include the access token in the Authorization header:
@@ -148,7 +150,7 @@ defmodule GamendWeb.ApiSpec do
         - **Rewards**: currencies (Economy) and items (Inventory), paid **exactly once** per period via idempotent grants; `auto_claim` quests pay on completion, others via `POST /me/quests/:key/claim`
         - **My quests**: `GET /me/quests` returns active quests, per-period progress, and a claimable flag; hidden quests appear once completed
         - **Groups**: quests sharing a `group_key` collapse to one entry carrying `group_size`; `?group=<key>` lists that group's members in full
-        - **Catalog**: `GET /quests` and per-user completions `GET /quests/user/:user_id` (gated by `LIST_QUESTS_ENABLED`)
+        - **Catalog**: `GET /quests` and per-user completions `GET /quests/user/:user_id` (gated by `GAMEND_FEATURES_LIST_QUESTS`)
         - **Admin management**: definitions CRUD plus per-user grant/reset/force-claim under `/api/v1/admin/quests`
 
         ## **12. Tournaments**
@@ -205,7 +207,7 @@ defmodule GamendWeb.ApiSpec do
         const userChannel = realtime.joinUserChannel(userId)
         userChannel.on('notification', payload => console.log(payload))
         ```
-        Requires the `phoenix` npm package as a peer dependency: `npm install phoenix`
+        `phoenix` ships as a dependency of the package, so no extra install is needed.
 
         ## **16. Real-time: WebRTC DataChannels**
         For low-latency game data, the server supports WebRTC DataChannels alongside WebSocket. The server acts as a WebRTC peer (not P2P between clients).
@@ -235,7 +237,7 @@ defmodule GamendWeb.ApiSpec do
         ```
         """
       },
-      paths: filter_api_paths(Paths.from_router(Router)),
+      paths: filter_api_paths(Paths.from_router(router())),
       tags: [
         # --- Public API ---
         %Tag{
@@ -318,13 +320,22 @@ defmodule GamendWeb.ApiSpec do
             scheme: "bearer",
             bearerFormat: "JWT",
             description:
-              "JWT access token - obtain from /api/v1/login, /api/v1/auth/discord/callback, /api/v1/auth/google/callback, /api/v1/auth/facebook/callback, or /auth/apple"
+              "JWT access token - obtain from /api/v1/login, /api/v1/auth/discord/callback, /api/v1/auth/google/callback, /api/v1/auth/facebook/callback, /api/v1/auth/github/callback, or /auth/apple"
           }
         }
       }
     }
     |> OpenApiSpex.resolve_schema_modules()
+    |> RequestTitles.put_titles()
   end
+
+  # The same resolution `GamendWeb.Endpoint.dispatch_router/2` uses. It read
+  # `GamendWeb.Router` directly, so a host that adds its own API routes served
+  # them and documented none of them: they were missing from `/api/docs`, from
+  # the generated SDKs, and from the route existence checks in
+  # `mix gamend.api.lint`. Core's own default is unchanged, since that is what
+  # the config falls back to.
+  defp router, do: Application.get_env(:gamend_web, :router, GamendWeb.Router)
 
   defp api_version do
     # The declared setting wins: the image supplies it at runtime, while the

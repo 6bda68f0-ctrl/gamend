@@ -4,17 +4,20 @@ defmodule GamendWeb.StoreLive.Index do
   alias Gamend.Accounts.Scope
   alias Gamend.Payments
   alias Gamend.Payments.ProviderConfig
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
+    user = Scope.user(socket.assigns.current_scope)
+
     {:ok,
      socket
      |> assign(:page_title, gettext("Store"))
      |> assign(:catalog, Payments.list_catalog())
-     |> assign(
-       :owned_entitlement_keys,
-       owned_entitlement_keys(Scope.user(socket.assigns.current_scope))
-     )
+     |> assign(:owned_entitlement_keys, owned_entitlement_keys(user))
+     # Setup details (the payment environment, how to add products, which
+     # products only a game client can buy) are for whoever runs the store.
+     |> assign(:admin?, match?(%{is_admin: true}, user))
      |> assign(:payment_environment, ProviderConfig.environment())
      |> assign(:success_purchase, nil)}
   end
@@ -54,7 +57,7 @@ defmodule GamendWeb.StoreLive.Index do
           <div>
             <h1 class="text-4xl font-black text-base-content/95">{gettext("Store")}</h1>
             <div class="mt-2 flex flex-wrap items-center gap-2 text-sm text-base-content/70">
-              <span class="badge badge-outline">{@payment_environment}</span>
+              <span :if={@admin?} class="badge badge-outline">{@payment_environment}</span>
               <span>{gettext("Subscriptions, one-time items, and consumables.")}</span>
             </div>
           </div>
@@ -86,11 +89,14 @@ defmodule GamendWeb.StoreLive.Index do
         <% end %>
 
         <%= if @catalog == [] do %>
-          <div class="card bg-base-200 p-6 rounded-lg">
+          <div :if={@admin?} class="card bg-base-200 p-6 rounded-lg">
             <div class="font-semibold">{gettext("No products configured.")}</div>
             <div class="mt-2 text-sm text-base-content/70">
               {gettext("Create products and provider SKUs in Admin -> Payments.")}
             </div>
+          </div>
+          <div :if={!@admin?} class="card bg-base-200 p-6 rounded-lg">
+            <div class="font-semibold">{gettext("Nothing is for sale right now.")}</div>
           </div>
         <% else %>
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -105,7 +111,7 @@ defmodule GamendWeb.StoreLive.Index do
                       </div>
                     </div>
                     <span class={["badge badge-sm", kind_badge_class(provider_product.product.kind)]}>
-                      {provider_product.product.kind}
+                      {LiveHelpers.payment_kind_label(provider_product.product.kind)}
                     </span>
                   </div>
 
@@ -132,11 +138,13 @@ defmodule GamendWeb.StoreLive.Index do
                   <div class="grid grid-cols-2 gap-2 text-sm">
                     <div>
                       <div class="text-xs uppercase text-base-content/70">{gettext("Provider")}</div>
-                      <div class="font-medium">{provider_product.provider}</div>
+                      <div class="font-medium">
+                        {LiveHelpers.payment_provider_label(provider_product.provider)}
+                      </div>
                     </div>
                     <div>
                       <div class="text-xs uppercase text-base-content/70">{gettext("Price")}</div>
-                      <div class="font-medium">{format_amount(provider_product)}</div>
+                      <div class="font-medium">{format_amount(provider_product, @admin?)}</div>
                     </div>
                     <div>
                       <div class="text-xs uppercase text-base-content/70">{gettext("SKU")}</div>
@@ -152,7 +160,7 @@ defmodule GamendWeb.StoreLive.Index do
 
                   <div class="mt-auto flex items-center justify-between gap-2 pt-2">
                     <span class="text-xs text-base-content/60">
-                      {download_hint(provider_product.product)}
+                      {download_hint(provider_product.product, @admin?)}
                     </span>
                     <button
                       :if={owned?(provider_product, @owned_entitlement_keys)}
@@ -191,7 +199,7 @@ defmodule GamendWeb.StoreLive.Index do
                       class="btn btn-sm btn-disabled"
                       disabled
                     >
-                      {gettext("API only")}
+                      {if @admin?, do: gettext("API only"), else: gettext("Buy in the game")}
                     </button>
                   </div>
                 </div>
@@ -225,7 +233,7 @@ defmodule GamendWeb.StoreLive.Index do
   defp assign_success_purchase(socket, _params), do: assign(socket, :success_purchase, nil)
 
   defp success_purchase_message(nil) do
-    gettext("Payment is still being processed. Refresh after webhook delivery.")
+    gettext("Your payment is still being processed. Refresh this page in a moment.")
   end
 
   defp success_purchase_message(%{order_id: order_id, status: "completed"}) do
@@ -234,7 +242,7 @@ defmodule GamendWeb.StoreLive.Index do
 
   defp success_purchase_message(%{order_id: order_id, status: status})
        when status in ["pending", "requires_action"] do
-    gettext("Order %{order_id} is waiting for Stripe webhook confirmation.", order_id: order_id)
+    gettext("Order %{order_id} is waiting for payment confirmation.", order_id: order_id)
   end
 
   defp success_purchase_message(%{order_id: order_id, status: "failed"}) do
@@ -264,15 +272,22 @@ defmodule GamendWeb.StoreLive.Index do
     gettext("Checkout failed: %{reason}", reason: message)
   end
 
-  defp checkout_error({reason, _details}) when is_atom(reason),
-    do: gettext("Checkout failed: %{reason}", reason: Atom.to_string(reason))
+  # A `before_purchase` hook that refuses with a string is the game's own words.
+  defp checkout_error(reason) when is_binary(reason) and reason != "",
+    do: gettext("Checkout failed: %{reason}", reason: reason)
 
-  defp checkout_error(reason) when is_atom(reason),
-    do: gettext("Checkout failed: %{reason}", reason: Atom.to_string(reason))
+  defp checkout_error({reason, _details}) when is_atom(reason), do: checkout_error(reason)
 
-  defp checkout_error(reason), do: gettext("Checkout failed: %{reason}", reason: inspect(reason))
+  # Never the raw atom or `inspect/1`: a known reason in words, else the plain
+  # failure.
+  defp checkout_error(reason),
+    do: LiveHelpers.failure_message(gettext("Checkout failed."), reason)
 
-  defp format_amount(%{unit_amount: nil}), do: gettext("Provider")
+  # No price on file: the platform store (Apple, Google, Steam) sets it.
+  defp format_amount(%{unit_amount: nil}, true), do: gettext("Provider")
+  defp format_amount(%{unit_amount: nil}, _admin?), do: "-"
+  defp format_amount(amount, _admin?), do: format_amount(amount)
+
   defp format_amount(%{currency: nil, unit_amount: amount}), do: Integer.to_string(amount)
 
   defp format_amount(%{currency: currency, unit_amount: amount}) do
@@ -341,15 +356,19 @@ defmodule GamendWeb.StoreLive.Index do
       seconds when seconds <= 0 -> gettext("Closed")
       seconds when seconds < 3600 -> gettext("Closes in under an hour")
       seconds when seconds < 86_400 -> gettext("Closes in %{n}h", n: div(seconds, 3600))
-      seconds -> gettext("Closes in %{n} days", n: div(seconds, 86_400))
+      seconds -> closes_in_days(div(seconds, 86_400))
     end
   end
 
-  defp download_hint(product) do
-    if download_config(product) do
-      gettext("Downloadable")
-    else
-      gettext("Grant")
+  defp closes_in_days(days),
+    do: ngettext("Closes in %{count} day", "Closes in %{count} days", days)
+
+  # "Grant" (the item is granted in-game, not downloaded) is setup language.
+  defp download_hint(product, admin?) do
+    cond do
+      download_config(product) -> gettext("Downloadable")
+      admin? -> gettext("Grant")
+      true -> nil
     end
   end
 

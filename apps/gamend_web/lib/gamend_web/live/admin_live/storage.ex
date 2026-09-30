@@ -7,6 +7,7 @@ defmodule GamendWeb.AdminLive.Storage do
   use GamendWeb, :live_view
 
   alias Gamend.Storage
+  alias GamendWeb.LiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -19,7 +20,7 @@ defmodule GamendWeb.AdminLive.Storage do
       |> assign(:upload_path, "")
       |> assign(:adapter, adapter_label())
       # Admin has full control: any file type, at any path, up to the configured
-      # upload limit (LIMIT_MAX_UPLOAD_BYTES).
+      # upload limit (GAMEND_LIMITS_MAX_UPLOAD_BYTES).
       |> allow_upload(:object,
         accept: :any,
         max_entries: 1,
@@ -39,22 +40,14 @@ defmodule GamendWeb.AdminLive.Storage do
      |> reload()}
   end
 
-  def handle_event("prev_page", _params, socket) do
-    {:noreply, socket |> assign(:page, max(socket.assigns.page - 1, 1)) |> reload_objects()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload_objects()}
 
-  def handle_event("next_page", _params, socket) do
-    page = min(socket.assigns.page + 1, max(socket.assigns.total_pages, 1))
-    {:noreply, socket |> assign(:page, page) |> reload_objects()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload_objects()}
 
-  def handle_event("page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:page_size, String.to_integer(size))
-     |> assign(:page, 1)
-     |> reload()}
-  end
+  def handle_event("page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload()}
 
   def handle_event("refresh", _params, socket), do: {:noreply, reload(socket)}
 
@@ -111,32 +104,24 @@ defmodule GamendWeb.AdminLive.Storage do
   defp reload(socket), do: socket |> reload_usage() |> reload_objects()
 
   defp reload_usage(socket) do
-    usage = Storage.usage(prefix: presence(socket.assigns.prefix))
+    usage = Storage.usage(prefix: Gamend.Parse.blank_to_nil(socket.assigns.prefix))
 
     socket
     |> assign(:count, usage.count)
     |> assign(:bytes, usage.bytes)
-    |> assign(:total_pages, ceil_div(usage.count, socket.assigns.page_size))
+    |> assign(:total_pages, LiveHelpers.total_pages(usage.count, socket.assigns.page_size))
   end
 
   defp reload_objects(socket) do
-    offset = (socket.assigns.page - 1) * socket.assigns.page_size
-
     objects =
       Storage.list_objects(
-        prefix: presence(socket.assigns.prefix),
-        offset: offset,
-        limit: socket.assigns.page_size
+        prefix: Gamend.Parse.blank_to_nil(socket.assigns.prefix),
+        page: socket.assigns.page,
+        page_size: socket.assigns.page_size
       )
 
     assign(socket, :objects, objects)
   end
-
-  defp presence(""), do: nil
-  defp presence(value), do: value
-
-  defp ceil_div(_num, 0), do: 0
-  defp ceil_div(num, den), do: div(num + den - 1, den)
 
   defp adapter_label do
     case Storage.adapter() do
@@ -270,7 +255,7 @@ defmodule GamendWeb.AdminLive.Storage do
                   <td>
                     <img
                       :if={image?(obj.key)}
-                      src={Storage.url(obj.key)}
+                      src={Storage.url(obj.key, signed: true)}
                       alt=""
                       class="w-10 h-10 object-cover rounded"
                       loading="lazy"
@@ -283,7 +268,11 @@ defmodule GamendWeb.AdminLive.Storage do
                     <.timestamp at={obj.last_modified} format="full" empty="—" />
                   </td>
                   <td class="text-right whitespace-nowrap">
-                    <a href={Storage.url(obj.key)} download class="btn btn-outline btn-xs">
+                    <a
+                      href={Storage.url(obj.key, signed: true)}
+                      download
+                      class="btn btn-outline btn-xs"
+                    >
                       Download
                     </a>
                     <button

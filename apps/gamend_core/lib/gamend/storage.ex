@@ -83,12 +83,41 @@ defmodule Gamend.Storage do
     label: "Storage"
 
   setting(:adapter, :atom,
+    values: [:local, :s3],
     default: :local,
     doc: "Backend for avatars and uploads: local | s3 (any S3-compatible service)."
   )
 
   setting(:public_url, :string,
     doc: "CDN or base URL serving stored objects, whichever backend is behind it."
+  )
+
+  # What the unauthenticated `GET /storage/<key>` may serve. Avatar and icon
+  # keys carry 16 random bytes, so knowing one is being meant to have it. Admin
+  # uploads go at any path, and a hand-written key like `backups/db.sql` is
+  # guessable, so everything outside these is reached only through the admin
+  # API. A host adds a prefix for keys of its own that are just as random.
+  setting(:public_prefixes, :list,
+    default: ["avatars/", "icons/"],
+    doc:
+      "Key prefixes GET /storage/<key> serves to anyone. Add one only for keys that " <>
+        "carry enough randomness to be unguessable; the rest need the admin API."
+  )
+
+  setting(:upload_ttl_seconds, :integer,
+    default: 600,
+    doc:
+      "How long an upload ticket stays valid, in seconds. Raise it for large uploads " <>
+        "over slow connections."
+  )
+
+  # An S3 bucket with no `public_url` is private, and its objects are reached
+  # through `/storage/<key>`, which redirects to a link signed for this long.
+  setting(:signed_url_seconds, :integer,
+    default: 3600,
+    doc:
+      "Lifetime of the signed link /storage/<key> redirects to, for an S3 bucket with " <>
+        "no public_url. S3 caps it at 604800 (7 days)."
   )
 
   @adapters %{local: Gamend.Storage.Local, s3: Gamend.Storage.S3}
@@ -133,18 +162,61 @@ defmodule Gamend.Storage do
   @spec exists?(Adapter.key()) :: boolean()
   def exists?(key), do: adapter().exists?(key)
 
-  @doc "A readable URL for `key` (public or signed, backend-dependent)."
+  @doc """
+  A readable URL for `key`, safe to store: it does not expire.
+
+  For an S3 bucket with no `public_url` that is `/storage/<key>`, which
+  redirects to a freshly signed link. Pass `signed: true` for the signed link
+  itself, which lasts `signed_url_seconds` and must not be stored.
+  """
   @spec url(Adapter.key(), keyword()) :: String.t()
   def url(key, opts \\ []), do: adapter().url(key, opts)
+
+  @doc """
+  The key prefixes `GET /storage/<key>` serves (`public_prefixes`), each
+  ending in `/` so `pdf` cannot also admit `pdfs-private/`.
+  """
+  @spec public_prefixes() :: [String.t()]
+  def public_prefixes do
+    __MODULE__
+    |> Gamend.Settings.get(:public_prefixes)
+    |> Enum.reject(&(&1 in [nil, "", "/"]))
+    |> Enum.map(&if(String.ends_with?(&1, "/"), do: &1, else: &1 <> "/"))
+  end
+
+  @doc "Seconds an upload ticket stays valid (`upload_ttl_seconds`)."
+  @spec upload_ttl_seconds() :: pos_integer()
+  def upload_ttl_seconds, do: max(Gamend.Settings.get(__MODULE__, :upload_ttl_seconds), 1)
+
+  @doc "Seconds a signed read link stays valid (`signed_url_seconds`), at most S3's 7 days."
+  @spec signed_url_seconds() :: pos_integer()
+  def signed_url_seconds,
+    do: Gamend.Settings.get(__MODULE__, :signed_url_seconds) |> max(1) |> min(604_800)
 
   @doc "An upload ticket for the client (see the module doc)."
   @spec presigned_upload(Adapter.key(), keyword()) ::
           {:ok, Adapter.presigned()} | {:error, term()}
   def presigned_upload(key, opts \\ []), do: adapter().presigned_upload(key, opts)
 
-  @doc "One page of stored objects. Opts: `:prefix`, `:offset`, `:limit` (admin use)."
+  @doc """
+  One page of stored objects (admin use). Opts: `:prefix`, and `:page` and
+  `:page_size` -- clamped through `Gamend.Limits` like every other listing --
+  or the adapter's own `:offset` and `:limit`.
+  """
   @spec list_objects(keyword()) :: [Adapter.object()]
-  def list_objects(opts \\ []), do: adapter().list(opts)
+  def list_objects(opts \\ []) do
+    if Keyword.has_key?(opts, :page) or Keyword.has_key?(opts, :page_size) do
+      page = Gamend.Limits.clamp_page(Keyword.get(opts, :page))
+      size = Gamend.Limits.clamp_page_size(Keyword.get(opts, :page_size))
+
+      opts
+      |> Keyword.drop([:page, :page_size])
+      |> Keyword.merge(offset: (page - 1) * size, limit: size)
+      |> adapter().list()
+    else
+      adapter().list(opts)
+    end
+  end
 
   @doc "Total object count and byte size. Opts: `:prefix`."
   @spec usage(keyword()) :: %{count: non_neg_integer(), bytes: non_neg_integer()}
@@ -197,7 +269,7 @@ defmodule Gamend.Storage do
   Validate an upload's content type and size before issuing a ticket.
 
   Options: `:content_types` (allow-list, defaults to common images),
-  `:max_bytes` (defaults to `LIMIT_MAX_UPLOAD_BYTES`).
+  `:max_bytes` (defaults to `GAMEND_LIMITS_MAX_UPLOAD_BYTES`).
   """
   @spec validate_upload(String.t(), non_neg_integer(), keyword()) ::
           :ok | {:error, :unsupported_content_type | :too_large}

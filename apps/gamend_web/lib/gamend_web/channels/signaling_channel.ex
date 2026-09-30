@@ -49,15 +49,11 @@ defmodule GamendWeb.SignalingChannel do
 
   alias Gamend.Presence
   alias Gamend.Signaling
+  alias GamendWeb.ChannelEvents
 
-  # WebSocket message rate limits (per user) — defaults, overridden by config
-  @default_ws_rate_limit 300
-  @default_ws_rate_window :timer.seconds(10)
-
-  # Separate ICE candidate budget — prevents ICE flooding from starving
-  # other channel events. A typical WebRTC session sends 5–30 candidates.
-  @default_ice_rate_limit 150
-  @default_ice_rate_window :timer.seconds(30)
+  # Per-user message and ICE budgets are the `signaling_*` settings on
+  # GamendWeb.Plugs.RateLimiter. ICE has its own so a flood of candidates cannot
+  # starve other channel events; a typical WebRTC session sends 5–30.
 
   @impl true
   def join("signaling:" <> room_id, _payload, socket) do
@@ -259,13 +255,8 @@ defmodule GamendWeb.SignalingChannel do
   end
 
   @impl true
-  def handle_in(event, _payload, socket) do
-    Logger.debug(fn ->
-      "SignalingChannel: unknown event=#{truncate_event(event)} room=#{socket.assigns[:signaling_room] || "nil"} user=#{socket.assigns[:signaling_user_id] || "nil"}"
-    end)
-
-    {:reply, {:error, %{error: "unknown_event"}}, socket}
-  end
+  def handle_in(event, _payload, socket),
+    do: ChannelEvents.unknown(event, socket, room: :signaling_room, user: :signaling_user_id)
 
   # ── Presence ─────────────────────────────────────────────────────────────
 
@@ -431,12 +422,10 @@ defmodule GamendWeb.SignalingChannel do
   # ── WebSocket rate limiting ─────────────────────────────────────────────
 
   defp check_ws_rate_limit(socket) do
-    config = Application.get_env(:gamend_web, GamendWeb.Plugs.RateLimiter, [])
-
-    if Keyword.get(config, :enabled, true) do
+    if rate_setting(:enabled) do
       user_id = socket.assigns.current_scope.user_id
-      limit = Keyword.get(config, :signaling_ws_limit, @default_ws_rate_limit)
-      window = Keyword.get(config, :signaling_ws_window, @default_ws_rate_window)
+      limit = rate_setting(:signaling_ws_limit)
+      window = rate_setting(:signaling_ws_window_ms)
 
       case GamendWeb.RateLimit.hit("signaling_ws:#{user_id}", window, limit) do
         {:allow, _count} ->
@@ -455,12 +444,10 @@ defmodule GamendWeb.SignalingChannel do
   end
 
   defp check_ice_rate_limit(socket) do
-    config = Application.get_env(:gamend_web, GamendWeb.Plugs.RateLimiter, [])
-
-    if Keyword.get(config, :enabled, true) do
+    if rate_setting(:enabled) do
       user_id = socket.assigns.current_scope.user_id
-      limit = Keyword.get(config, :signaling_ice_limit, @default_ice_rate_limit)
-      window = Keyword.get(config, :signaling_ice_window, @default_ice_rate_window)
+      limit = rate_setting(:signaling_ice_limit)
+      window = rate_setting(:signaling_ice_window_ms)
 
       case GamendWeb.RateLimit.hit("signaling_ice:#{user_id}", window, limit) do
         {:allow, _count} ->
@@ -486,10 +473,6 @@ defmodule GamendWeb.SignalingChannel do
   # 128 KB event name, so one socket could drive unbounded warning-level volume
   # made of attacker-controlled text into the rotating log and the admin buffer.
   # Client-chosen, so never logged whole.
-  defp truncate_event(event) when is_binary(event),
-    do: binary_part(event, 0, min(byte_size(event), 64))
-
-  defp truncate_event(event), do: inspect(event)
 
   # SDP and ICE candidates are relayed verbatim to other peers, so bound them
   # here rather than trusting whatever a frame can carry.
@@ -511,4 +494,6 @@ defmodule GamendWeb.SignalingChannel do
 
   defp validate_signal_payload(_value, socket),
     do: {:reply, {:error, %{error: "invalid_payload"}}, socket}
+
+  defp rate_setting(key), do: Gamend.Settings.get(GamendWeb.Plugs.RateLimiter, key)
 end

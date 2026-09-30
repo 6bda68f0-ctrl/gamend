@@ -53,7 +53,8 @@ defmodule GamendWeb.ProtobufBenchTest do
            discord: true,
            apple: false,
            steam: false,
-           device: true
+           device: true,
+           github: false
          },
          has_password: true
        }},

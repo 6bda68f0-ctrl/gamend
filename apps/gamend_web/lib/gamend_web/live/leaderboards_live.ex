@@ -285,7 +285,7 @@ defmodule GamendWeb.LeaderboardsLive do
       <div class="card-body">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h2 class="card-title">
-            {gettext("Leaderboards")}
+            {gettext("Rankings")}
             <span class="text-base-content/70 font-normal text-base">({@records_count})</span>
           </h2>
 
@@ -341,7 +341,9 @@ defmodule GamendWeb.LeaderboardsLive do
                       <span class={[
                         record.user_id != nil && record.user_id == @current_user_id && "font-bold"
                       ]}>
-                        {record.label || LiveHelpers.public_user_name(record.user || record.user_id)}
+                        <.player_name name={
+                          record.label || LiveHelpers.public_user_name(record.user || record.user_id)
+                        } />
                       </span>
                       <.user_title user={record.user} />
                     </div>
@@ -385,27 +387,14 @@ defmodule GamendWeb.LeaderboardsLive do
   # ---------------------------------------------------------------------------
 
   @impl true
-  def handle_event("prev_page", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:page, max(1, socket.assigns.page - 1))
-     |> reload_groups()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> reload_groups()}
 
-  def handle_event("next_page", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:page, socket.assigns.page + 1)
-     |> reload_groups()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> reload_groups()}
 
-  def handle_event("leaderboards_page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:page_size, String.to_integer(size))
-     |> assign(:page, 1)
-     |> reload_groups()}
-  end
+  def handle_event("leaderboards_page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> reload_groups()}
 
   def handle_event("prev_season", _, socket) do
     # Go to older season (higher index)
@@ -425,19 +414,11 @@ defmodule GamendWeb.LeaderboardsLive do
     {:noreply, push_patch(socket, to: leaderboard_path(leaderboard))}
   end
 
-  def handle_event("records_prev", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:records_page, max(1, socket.assigns.records_page - 1))
-     |> reload_records()}
-  end
+  def handle_event("records_prev", _, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page(:records_page) |> reload_records()}
 
-  def handle_event("records_next", _, socket) do
-    {:noreply,
-     socket
-     |> assign(:records_page, socket.assigns.records_page + 1)
-     |> reload_records()}
-  end
+  def handle_event("records_next", _, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page(:records_page) |> reload_records()}
 
   def handle_event("search", %{"search" => term}, socket) do
     {:noreply,
@@ -457,7 +438,7 @@ defmodule GamendWeb.LeaderboardsLive do
 
     groups = Leaderboards.list_leaderboard_groups(page: page, page_size: page_size)
     count = Leaderboards.count_leaderboard_groups()
-    total_pages = max(1, div(count + page_size - 1, page_size))
+    total_pages = max(1, LiveHelpers.total_pages(count, page_size))
 
     socket
     |> assign(:groups, ContentText.translate(groups))
@@ -473,7 +454,7 @@ defmodule GamendWeb.LeaderboardsLive do
 
     records = Leaderboards.list_records(lb.id, page: page, page_size: page_size, search: search)
     count = Leaderboards.count_records(lb.id, search: search)
-    total_pages = max(1, div(count + page_size - 1, page_size))
+    total_pages = max(1, LiveHelpers.total_pages(count, page_size))
 
     socket
     |> assign(:records, records)

@@ -19,9 +19,6 @@ defmodule GamendWeb.Api.V1.HealthController do
   )
 
   def index(conn, _params) do
-    json(conn, %{
-      status: "ok",
-      timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
-    })
+    reply_data(conn, %{status: "ok", timestamp: DateTime.utc_now() |> DateTime.to_iso8601()})
   end
 end

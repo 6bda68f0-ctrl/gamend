@@ -42,9 +42,28 @@ defmodule GamendWeb.HostSupervision do
   Must run before `children/1` is supervised: the Schedule tick reads the
   registry `Gamend.Schedule.start_link/0` creates, and the ban/geo plugs
   read theirs on the first request. Safe to call more than once.
+
+  ## Options
+
+    * `:host_app` — the host's OTP app, scanned for `Gamend.Settings.Provider`
+      declarations. Defaults to the `:host_static_app` config, which a host
+      already sets to name itself.
   """
-  @spec init_runtime() :: :ok
-  def init_runtime do
+  @spec init_runtime(keyword()) :: :ok
+  def init_runtime(opts \\ []) do
+    # Before validation, not after: a setting the host declared is invisible
+    # until its app is scanned, and an invisible setting is the bad kind of
+    # broken. `Gamend.Settings.apps/0` is core's two apps plus whatever is
+    # registered, so a host app that declares settings and never registers
+    # itself gets no boot validation, no admin Settings row, and nothing in
+    # `mix gamend.settings.env_example` — while `Settings.get/2` quietly keeps
+    # answering with the compiled default. Someone sets the env var, nothing
+    # happens, and nothing says why.
+    #
+    # Every host hit this, so it is core's job rather than a line each fork has
+    # to know to write.
+    register_host_app(opts)
+
     # Before anything starts: a missing required setting should stop the boot
     # here, with a list of what is missing, rather than surface later as a
     # crash-loop in whichever child needed it.
@@ -61,6 +80,21 @@ defmodule GamendWeb.HostSupervision do
     GeoCountry.init_table()
     # Word blocklist + active mutes, read on every outgoing chat message.
     ModerationCache.init_table()
+
+    :ok
+  end
+
+  # `:gamend_web` is the default of `:host_static_app` and is already scanned,
+  # so an unconfigured host registers nothing and nothing changes for it.
+  defp register_host_app(opts) do
+    host_app =
+      Keyword.get_lazy(opts, :host_app, fn ->
+        GamendWeb.host_app()
+      end)
+
+    if host_app not in Gamend.Settings.apps() do
+      Gamend.Settings.add_app(host_app)
+    end
 
     :ok
   end
@@ -176,7 +210,11 @@ defmodule GamendWeb.HostSupervision do
         # only one node runs it and start_link returns :ignore on the others.
         Gamend.LobbySnapshots.Writer,
         # Signaling relay for WebRTC user-to-user and client-server topologies
-        {Gamend.Presence, pool_size: pool_size(:presence_pool_size)}
+        {Gamend.Presence, pool_size: pool_size(:presence_pool_size)},
+        # Cuts the theme's srcset width variants for a project's own static
+        # files, at boot and after a theme reload. Its first pass runs after
+        # init returns, so ImageMagick never holds up the boot.
+        GamendWeb.ResponsiveImages
       ] ++
       extra
   end

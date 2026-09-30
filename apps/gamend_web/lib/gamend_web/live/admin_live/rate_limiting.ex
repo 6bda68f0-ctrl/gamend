@@ -21,8 +21,9 @@ defmodule GamendWeb.AdminLive.RateLimiting do
           </p>
         </div>
 
-        <%!-- Summary cards --%>
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <%!-- Summary cards. There is no "Hammer banned" count: Hammer only
+              counts, and bans live in IpBan's own table — the first card. --%>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div class="card bg-base-200 p-4">
             <div class="text-xs text-base-content/60">Active IP Bans</div>
             <div class="text-2xl font-bold">{length(@ip_bans)}</div>
@@ -34,15 +35,6 @@ defmodule GamendWeb.AdminLive.RateLimiting do
               @rate_stats.limited > 0 && "text-warning"
             ]}>
               {@rate_stats.limited}
-            </div>
-          </div>
-          <div class="card bg-base-200 p-4">
-            <div class="text-xs text-base-content/60">Hammer Banned</div>
-            <div class={[
-              "text-2xl font-bold",
-              @rate_stats.banned > 0 && "text-error"
-            ]}>
-              {@rate_stats.banned}
             </div>
           </div>
           <div class="card bg-base-200 p-4">
@@ -91,7 +83,7 @@ defmodule GamendWeb.AdminLive.RateLimiting do
           <div class="card-body">
             <h2 class="card-title text-lg">Configuration</h2>
             <p class="text-xs text-base-content/60 mb-3">
-              Rate limit settings (set via RATE_LIMIT_* env vars — restart required to change).
+              Rate limit settings (set via GAMEND_RATELIMIT_* env vars — restart required to change).
             </p>
             <div class="overflow-x-auto">
               <table class="table table-sm">
@@ -150,11 +142,15 @@ defmodule GamendWeb.AdminLive.RateLimiting do
             <h2 class="card-title text-lg">
               Rate Limit Load — All Tracked IPs
               <span class="text-xs font-normal text-base-content/60">
-                ({length(@rate_stats.usage)} entries, auto-refreshes every 5s)
+                ({ngettext("%{count} entry", "%{count} entries", length(@rate_stats.usage))}, auto-refreshes every 5s)
               </span>
             </h2>
             <p class="text-xs text-base-content/60">
               All IPs with active Hammer bucket entries, sorted by usage (descending).
+            </p>
+            <p :if={not @ets_backend?} class="text-xs text-warning">
+              The redis backend keeps its counters in Redis, which this page cannot read, so
+              no live rows show here. Rate-limit denials are still counted on the admin dashboard.
             </p>
 
             <div class="overflow-x-auto mt-2 max-h-96 overflow-y-auto">
@@ -179,7 +175,7 @@ defmodule GamendWeb.AdminLive.RateLimiting do
                       ]}>
                         {type_label(type)}
                       </span>
-                      {if type in ["ws", "dc", "ice"], do: "User #{ip}", else: ip}
+                      {if user_bucket?(type), do: "User #{ip}", else: ip}
                     </td>
                     <td class="text-right">
                       <div class="flex items-center justify-end gap-2">
@@ -349,19 +345,19 @@ defmodule GamendWeb.AdminLive.RateLimiting do
   def mount(_params, _session, socket) do
     if connected?(socket), do: schedule_refresh()
 
-    rl_config = Application.get_env(:gamend_web, GamendWeb.Plugs.RateLimiter, [])
-
+    # The values the plug and channels enforce. These were `Keyword.get` reads
+    # with their own fallbacks (1200/30/300/600), not the declared defaults.
     config = %{
-      general_limit: Keyword.get(rl_config, :general_limit, 1200),
-      general_window: Keyword.get(rl_config, :general_window_ms, 60_000),
-      auth_limit: Keyword.get(rl_config, :auth_limit, 30),
-      auth_window: Keyword.get(rl_config, :auth_window_ms, 60_000),
-      ws_limit: Keyword.get(rl_config, :ws_limit, 300),
-      ws_window: Keyword.get(rl_config, :ws_window_ms, 10_000),
-      dc_limit: Keyword.get(rl_config, :dc_limit, 600),
-      dc_window: Keyword.get(rl_config, :dc_window_ms, 10_000),
-      ice_limit: Keyword.get(rl_config, :ice_limit, 150),
-      ice_window: Keyword.get(rl_config, :ice_window_ms, 30_000),
+      general_limit: rate_setting(:general_limit),
+      general_window: rate_setting(:general_window_ms),
+      auth_limit: rate_setting(:auth_limit),
+      auth_window: rate_setting(:auth_window_ms),
+      ws_limit: rate_setting(:ws_limit),
+      ws_window: rate_setting(:ws_window_ms),
+      dc_limit: rate_setting(:dc_limit),
+      dc_window: rate_setting(:dc_window_ms),
+      ice_limit: rate_setting(:ice_limit),
+      ice_window: rate_setting(:ice_window_ms),
       max_channels: 1,
       max_message_size: 65_536
     }
@@ -369,6 +365,7 @@ defmodule GamendWeb.AdminLive.RateLimiting do
     {:ok,
      assign(socket,
        config: config,
+       ets_backend?: GamendWeb.RateLimit.backend() == GamendWeb.RateLimit.ETS,
        ip_bans: IpBan.list_bans(),
        ban_log: IpBan.list_log(),
        rate_stats: build_rate_limit_stats()
@@ -412,7 +409,7 @@ defmodule GamendWeb.AdminLive.RateLimiting do
        socket
        |> assign(:ip_bans, IpBan.list_bans())
        |> assign(:ban_log, IpBan.list_log())
-       |> put_flash(:info, "Banned IP #{ip_str}")}
+       |> put_flash(:info, "Banned #{GamendWeb.RateLimit.ip_key(ip_str)}")}
     end
   end
 
@@ -431,40 +428,35 @@ defmodule GamendWeb.AdminLive.RateLimiting do
 
   defp schedule_refresh, do: Process.send_after(self(), :refresh, @refresh_interval)
 
+  @empty_stats %{limited: 0, usage: [], by_type: %{}}
+
+  # Only the ETS backend's counters can be read from here; with Redis the page
+  # says so above the table.
   defp build_rate_limit_stats do
-    now_ms = :os.system_time(:millisecond)
+    if GamendWeb.RateLimit.backend() == GamendWeb.RateLimit.ETS,
+      do: build_rate_limit_stats(GamendWeb.RateLimit.ETS),
+      else: @empty_stats
+  end
 
-    :ets.tab2list(GamendWeb.RateLimit)
+  # Hammer names its ETS table after the backend module. This read
+  # `GamendWeb.RateLimit`, a table that does not exist: tab2list raised, the
+  # rescue answered zeros, and every live number on the page stayed 0.
+  defp build_rate_limit_stats(table) do
+    limits = bucket_limits()
+
+    :ets.tab2list(table)
     |> Enum.reduce(
-      %{banned: 0, limited: 0, usage: [], banned_ips: [], by_type: %{}},
+      %{limited: 0, usage: []},
       fn
-        {{key, _window}, count, expiry}, acc when is_binary(key) ->
-          cond do
-            String.starts_with?(key, "ip_ban:") ->
-              ip = String.replace_prefix(key, "ip_ban:", "")
-              remaining = max(0, div(expiry - now_ms, 1000))
-              remaining_str = "#{div(remaining, 60)}m #{rem(remaining, 60)}s"
-              %{acc | banned: acc.banned + 1, banned_ips: [{ip, remaining_str} | acc.banned_ips]}
-
-            String.contains?(key, ":") ->
-              [type, ip] = String.split(key, ":", parts: 2)
-
-              limit =
-                case type do
-                  "auth" -> 10
-                  "dc" -> 300
-                  "ws" -> 100
-                  "ice" -> 50
-                  "lv_auth" -> 10
-                  "lv_general" -> 120
-                  _ -> 120
-                end
-
+        {{key, _window}, count, _expiry}, acc when is_binary(key) ->
+          case String.split(key, ":", parts: 2) do
+            [type, ip] ->
+              limit = Map.get(limits, type, limits["general"])
               limited_inc = if count >= limit, do: 1, else: 0
               usage = [{type, ip, count, limit} | acc.usage]
               %{acc | limited: acc.limited + limited_inc, usage: usage}
 
-            true ->
+            _ ->
               acc
           end
 
@@ -501,8 +493,43 @@ defmodule GamendWeb.AdminLive.RateLimiting do
       Map.put(stats, :by_type, by_type)
     end)
   rescue
-    _ -> %{banned: 0, limited: 0, usage: [], banned_ips: [], by_type: %{}}
+    _ -> @empty_stats
   end
+
+  defp rate_setting(key), do: Gamend.Settings.get(GamendWeb.Plugs.RateLimiter, key)
+
+  # The limit each bucket prefix is enforced at, read from where the enforcing
+  # code reads it. `lv_*` are the LiveView login/register buckets
+  # (`GamendWeb.LiveHelpers.check_rate_limit/2`), on the HTTP settings.
+  defp bucket_limits do
+    general = rate_setting(:general_limit)
+
+    %{
+      "general" => general,
+      "auth" => rate_setting(:auth_limit),
+      "lv_general" => general,
+      "lv_auth" => rate_setting(:auth_limit),
+      "client_logs" => rate_setting(:client_logs_limit),
+      "ws" => rate_setting(:ws_limit),
+      "dc" => rate_setting(:dc_limit),
+      "ice" => rate_setting(:ice_limit),
+      "signaling_ws" => rate_setting(:signaling_ws_limit),
+      "signaling_ice" => rate_setting(:signaling_ice_limit),
+      "chatd" => positive_limit(:max_chat_messages_per_day, general),
+      "chatrep" => positive_limit(:max_chat_reports_per_user_per_day, general)
+    }
+  end
+
+  defp positive_limit(key, fallback) do
+    case Gamend.Limits.get(key) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> fallback
+    end
+  end
+
+  # Buckets keyed by user id rather than IP.
+  defp user_bucket?(type),
+    do: type in ~w(ws dc ice signaling_ws signaling_ice chatd chatrep)
 
   defp bucket_types do
     [
@@ -528,6 +555,11 @@ defmodule GamendWeb.AdminLive.RateLimiting do
   defp type_label("ice"), do: "ICE"
   defp type_label("lv_auth"), do: "LV Auth"
   defp type_label("lv_general"), do: "LV General"
+  defp type_label("client_logs"), do: "Client logs"
+  defp type_label("signaling_ws"), do: "Signaling"
+  defp type_label("signaling_ice"), do: "Signaling ICE"
+  defp type_label("chatd"), do: "Chat/day"
+  defp type_label("chatrep"), do: "Reports/day"
   defp type_label(_), do: "HTTP"
 
   defp format_ban_ttl(expires_mono) do

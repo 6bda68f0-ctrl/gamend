@@ -24,19 +24,23 @@ defmodule Gamend.Repo.Migrations.RenameDeadlineToDeadlineAt do
     end
   end
 
+  # `log: false`: a lookup, not a change. The migrator shows these at debug
+  # level even under `--quiet`, so every fresh test database printed them.
   defp column_exists?(table, column) do
     %{rows: rows} =
       case repo().__adapter__() do
         Ecto.Adapters.SQLite3 ->
           repo().query!(
             "SELECT 1 FROM pragma_table_info(?) WHERE name = ?",
-            [to_string(table), column]
+            [to_string(table), column],
+            log: false
           )
 
         _postgres ->
           repo().query!(
             "SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2",
-            [to_string(table), column]
+            [to_string(table), column],
+            log: false
           )
       end
 

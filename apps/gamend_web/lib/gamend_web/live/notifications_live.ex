@@ -24,10 +24,10 @@ defmodule GamendWeb.NotificationsLive do
               <button
                 type="button"
                 phx-click="delete_all"
-                data-confirm={gettext("Delete?")}
+                data-confirm={gettext("Delete all notifications?")}
                 class="btn btn-sm btn-outline btn-error"
               >
-                {gettext("Delete")}
+                {gettext("Delete all")}
               </button>
             <% end %>
           </div>
@@ -67,9 +67,9 @@ defmodule GamendWeb.NotificationsLive do
                             {gettext("Chat")}
                           </span>
                         <% Ecto.assoc_loaded?(n.sender) && n.sender -> %>
-                          {LiveHelpers.public_user_name(n.sender)}
+                          <.player_name name={LiveHelpers.public_user_name(n.sender)} />
                         <% true -> %>
-                          {"User #{n.sender_id}"}
+                          <.player_name name={LiveHelpers.public_user_name(n.sender_id)} />
                       <% end %>
                     </td>
                     <td class="text-sm whitespace-nowrap">
@@ -139,23 +139,20 @@ defmodule GamendWeb.NotificationsLive do
   end
 
   @impl true
-  def handle_event("prev_page", _params, socket) do
-    page = max(1, socket.assigns.notif_page - 1)
-    {:noreply, socket |> assign(:notif_page, page) |> reload_notifications()}
-  end
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page(:notif_page) |> reload_notifications()}
 
-  def handle_event("next_page", _params, socket) do
-    page = socket.assigns.notif_page + 1
-    {:noreply, socket |> assign(:notif_page, page) |> reload_notifications()}
-  end
+  def handle_event("next_page", _params, socket),
+    do:
+      {:noreply,
+       socket |> LiveHelpers.next_page(:notif_page, :notif_total_pages) |> reload_notifications()}
 
-  def handle_event("notif_page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(:notif_page_size, String.to_integer(size))
-     |> assign(:notif_page, 1)
-     |> reload_notifications()}
-  end
+  def handle_event("notif_page_size", %{"size" => size}, socket),
+    do:
+      {:noreply,
+       socket
+       |> LiveHelpers.put_page_size(size, size_key: :notif_page_size, page_key: :notif_page)
+       |> reload_notifications()}
 
   def handle_event("delete", %{"id" => id}, socket) do
     user = Scope.user(socket.assigns.current_scope)
@@ -263,7 +260,7 @@ defmodule GamendWeb.NotificationsLive do
     notifications = Notifications.list_notifications(user.id, page: page, page_size: page_size)
     count = Notifications.count_notifications(user.id)
     unread_count = Notifications.count_unread_notifications(user.id)
-    total_pages = if page_size > 0, do: div(count + page_size - 1, page_size), else: 0
+    total_pages = LiveHelpers.total_pages(count, page_size)
 
     socket
     |> assign(:notifications, notifications)
@@ -291,7 +288,7 @@ defmodule GamendWeb.NotificationsLive do
     name = n.metadata["quest_title"] || ""
 
     if n.metadata["kind"] == "achievement" do
-      dgettext("notifications", "Achievement Unlocked: %{name}", name: name)
+      dgettext("notifications", "Achievement unlocked: %{name}", name: name)
     else
       dgettext("notifications", "Quest completed: %{name}", name: name)
     end

@@ -4,7 +4,7 @@ icon: hero-square-3-stack-3d
 
 # Elixir App Starter
 
-A ready-made starter repository. Instead of assembling this by hand, start from the maintained example repository: [github.com/appsinacup/gamend_starter](https://github.com/appsinacup/gamend_starter). Clone it, run it locally with `mix dev.start`, then customize. To deploy it, follow the [Deployment](/docs/deployment) guide.
+Instead of assembling a host app by hand, start from the maintained example repository: [github.com/appsinacup/gamend_starter](https://github.com/appsinacup/gamend_starter). Clone it, run it locally with `mix dev.start`, then customize. To deploy it, follow the [Deployment](/docs/deployment) guide.
 
 ## Recommended project shape
 
@@ -20,27 +20,27 @@ my_game/
       application.ex
       router.ex
     gamend_web/
-      endpoint.ex
-      components/
+      controllers/
       live/
 
-# Your app owns the host/runtime layer.
-# Shared functionality comes from gamend_core and gamend_web deps.
+# Your app owns the router, supervision tree, config and host pages.
+# The endpoint (GamendWeb.Endpoint) and shared functionality
+# come from the gamend_core and gamend_web deps.
 ```
 
 ## Dependency boundary
 
-A new starter app should depend on gamend_core and gamend_web, while keeping its own host code, endpoint, router, assets, config, and branding files in the new repository.
+A new starter app should depend on gamend_core and gamend_web, while keeping its own host code, router, assets, config, and branding files in the new repository. The endpoint is not yours: `GamendWeb.Endpoint` ships with gamend_web and serves your router.
 
 | Keep in your app | Pull from dependencies |
 |---|---|
-| Host router and endpoint | Domain logic from gamend_core |
-| Host-owned layouts, pages, branding, and runtime config | Reusable controllers, LiveViews, channels, and plugs from gamend_web |
+| Host router and application (supervision tree) | Domain logic from gamend_core |
+| Host-owned layouts, pages, branding, and runtime config | The endpoint, reusable controllers, LiveViews, channels, and plugs from gamend_web |
 | Host app assets/config plus release and deploy files | Schema/context updates from upstream releases |
 
 ## Minimal mix.exs shape
 
-The starter app should be a normal Mix project, not another umbrella root. Replace the current in_umbrella deps with versioned or path-based deps, and keep heroicons as a direct dependency because the published web package cannot declare it.
+The starter app should be a normal Mix project, not another umbrella root. Use versioned Hex deps, or path deps to a sibling gamend checkout, and keep heroicons as a direct dependency because the published web package cannot declare it.
 
 ```elixir
 defp deps do

@@ -35,7 +35,7 @@ A party never trickles into a lobby one member at a time. The lobby endpoints th
 
 Two preconditions guard every variant: no member may already be in a lobby (`member_in_lobby`), and every member must be recently active (`members_offline`) - a party should not reserve seats for people who are not there. The party itself survives: when the lobby ends, the party is still standing.
 
-In matchmaking a party queues as one unit and is never split - the leader queues for everybody and the whole party is seated together or not at all. The leader can also open a ready board over the party with POST /parties/ready_check (DELETE cancels); members answer through the same `/me/ready_check` surface as lobby checks, and the `ready_check_*` events arrive on the party channel. Both are covered in [/docs/matchmaking](/docs/matchmaking).
+In matchmaking a party queues as one unit and is never split - the leader queues for everybody and the whole party is seated together or not at all. The leader can also open a ready board over the party with POST /parties/ready_check (DELETE cancels); members answer through the same `/me/ready_check` surface as lobby checks, passing `"scope": "party"`, and the `ready_check_*` events arrive on the party channel. Both are covered in [/docs/matchmaking](/docs/matchmaking).
 
 ## HTTP API
 
@@ -43,7 +43,7 @@ Endpoints live under `/api/v1/parties` - see [/api/docs](/api/docs). What the sp
 
 ## Realtime events
 
-Members listen on `party:{party_id}`: `updated`, `member_joined`, `member_left`, `member_online`, `member_offline`, `member_updated`, `disbanded`, the four `ready_check_*` events and the three `chat_message_*` events. Invite outcomes go to the *sender's* `user:{user_id}` channel instead: `party_invite_accepted`, `party_invite_declined`, `party_invite_cancelled`. The recipient's side of an invite is a `notification_created` whose `metadata.type` is `party_invite`.
+Members listen on `party:{party_id}`: `updated`, `member_joined`, `member_left`, `member_online`, `member_offline`, `member_updated`, `disbanded`, the four `ready_check_*` events and the three `chat_message_*` events. Invite outcomes go to the *sender's* `user:{user_id}` channel instead: `party_invite_accepted` and `party_invite_declined`. The recipient's side of an invite is a `notification_created` whose `metadata.type` is `party_invite`, and `party_invite_cancelled` on the *recipient's* `user:{user_id}` channel when the leader withdraws it.
 
 ## Server scripting
 

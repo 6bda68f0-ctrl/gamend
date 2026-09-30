@@ -152,30 +152,14 @@ defmodule GamendWeb.GroupsLive do
      |> load_groups()}
   end
 
-  def handle_event("prev_page", _params, socket) do
-    page = max(1, socket.assigns.page - 1)
+  def handle_event("prev_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page() |> load_groups()}
 
-    {:noreply,
-     socket
-     |> assign(page: page)
-     |> load_groups()}
-  end
+  def handle_event("next_page", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page() |> load_groups()}
 
-  def handle_event("next_page", _params, socket) do
-    page = socket.assigns.page + 1
-
-    {:noreply,
-     socket
-     |> assign(page: page)
-     |> load_groups()}
-  end
-
-  def handle_event("groups_page_size", %{"size" => size}, socket) do
-    {:noreply,
-     socket
-     |> assign(page_size: String.to_integer(size), page: 1)
-     |> load_groups()}
-  end
+  def handle_event("groups_page_size", %{"size" => size}, socket),
+    do: {:noreply, socket |> LiveHelpers.put_page_size(size) |> load_groups()}
 
   def handle_event("view_group", %{"id" => id}, socket) do
     {:noreply, push_patch(socket, to: ~p"/groups/#{id}")}
@@ -270,15 +254,11 @@ defmodule GamendWeb.GroupsLive do
     end
   end
 
-  def handle_event("members_prev", _params, socket) do
-    page = max(1, socket.assigns.members_page - 1)
-    {:noreply, load_members(assign(socket, members_page: page))}
-  end
+  def handle_event("members_prev", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.prev_page(:members_page) |> load_members()}
 
-  def handle_event("members_next", _params, socket) do
-    page = socket.assigns.members_page + 1
-    {:noreply, load_members(assign(socket, members_page: page))}
-  end
+  def handle_event("members_next", _params, socket),
+    do: {:noreply, socket |> LiveHelpers.next_page(:members_page) |> load_members()}
 
   def handle_event("search_members", %{"search" => term}, socket) do
     {:noreply, load_members(assign(socket, members_search: term, members_page: 1))}
@@ -360,9 +340,7 @@ defmodule GamendWeb.GroupsLive do
     total_count = Groups.count_list_groups(filters)
 
     total_pages =
-      if socket.assigns.page_size > 0,
-        do: div(total_count + socket.assigns.page_size - 1, socket.assigns.page_size),
-        else: 0
+      LiveHelpers.total_pages(total_count, socket.assigns.page_size)
 
     # Build a map of member counts per group
     member_counts = Enum.into(groups, %{}, fn g -> {g.id, Groups.count_group_members(g.id)} end)
@@ -398,12 +376,10 @@ defmodule GamendWeb.GroupsLive do
           selected_members: members,
           members_total: Groups.count_group_members(group.id),
           members_matched: matched,
-          members_total_pages: ceil_div(matched, @page_size)
+          members_total_pages: LiveHelpers.total_pages(matched, @page_size)
         )
     end
   end
-
-  defp ceil_div(num, den), do: div(num + den - 1, den)
 
   defp maybe_refresh_selected(socket, group_id) do
     case socket.assigns.selected_group do
@@ -474,14 +450,14 @@ defmodule GamendWeb.GroupsLive do
     </div>
 
     <div class="flex gap-2 items-center" id="groups-sort">
-      <span class="text-sm text-base-content/60">{gettext("Status")}:</span>
+      <span class="text-sm text-base-content/60">{gettext("Sort by:")}</span>
       <button
         :for={
           {label, value} <- [
             {gettext("Date"), "updated_at"},
             {gettext("Newest"), "inserted_at"},
             {gettext("Name"), "title"},
-            {gettext("Members"), "max_members"}
+            {gettext("Max members"), "max_members"}
           ]
         }
         phx-click="sort_by"
@@ -671,7 +647,7 @@ defmodule GamendWeb.GroupsLive do
                     <.user_avatar user={member.user} class="w-8 h-8" />
                     <.presence_dot status={PresenceStatus.status(member.user)} />
                     <span>
-                      {LiveHelpers.public_user_name(member.user)}
+                      <.player_name name={LiveHelpers.public_user_name(member.user)} />
                     </span>
                   </div>
                 </td>
