@@ -22,7 +22,7 @@ defmodule GamendWeb.HostLayoutNavigation do
       <.main_nav_links
         links={@primary_links}
         current_path={@current_path}
-        inactive_class="btn-outline"
+        inactive_class="btn-surface"
       />
 
       <%= if @current_scope do %>
@@ -31,7 +31,7 @@ defmodule GamendWeb.HostLayoutNavigation do
           <.main_nav_links
             links={@authenticated_links}
             current_path={@current_path}
-            inactive_class="btn-outline"
+            inactive_class="btn-surface"
           />
         <% end %>
       <% else %>
@@ -40,7 +40,7 @@ defmodule GamendWeb.HostLayoutNavigation do
           <.main_nav_links
             links={@guest_links}
             current_path={@current_path}
-            inactive_class="btn-outline"
+            inactive_class="btn-surface"
           />
         <% end %>
 
@@ -54,7 +54,7 @@ defmodule GamendWeb.HostLayoutNavigation do
                 here?(@current_path, "/users/log_in") or
                   here?(@current_path, "/users/register"),
                 do: "btn-primary",
-                else: "btn-outline"
+                else: "btn-surface"
               )
             ]}>
               <.icon name="hero-user-circle-solid" class="w-4 h-4" />
@@ -140,7 +140,7 @@ defmodule GamendWeb.HostLayoutNavigation do
             here?(@current_path, "/notifications") or
             here?(@current_path, "/chat"),
           do: "btn-primary",
-          else: "btn-outline"
+          else: "btn-surface"
         )
       ]}>
         <.user_avatar user={Scope.user(@current_scope)} class="w-6 h-6" />
@@ -380,13 +380,14 @@ defmodule GamendWeb.HostLayoutNavigation do
       <%!-- `priority`: this flag is in the header of every page, so a lazy one
             pops in after the label on each refresh, and a merely eager one
             queues behind whatever that page is full of. --%>
-      <label for="lang-modal" class="btn gap-1 list-none btn-outline cursor-pointer sm:hidden">
+      <%!-- A phone shows the flag alone, one icon, so `btn-ghost`. --%>
+      <label for="lang-modal" class="btn gap-1 list-none btn-ghost cursor-pointer sm:hidden">
         <.flag code={@flag_code} priority class="rounded-[2px] ring-1 ring-base-content/10" />
         <.icon name="hero-chevron-down-solid" class="w-3 h-3" />
       </label>
 
       <details class="dropdown dropdown-end hidden sm:block" data-navbar-dropdown>
-        <summary class="btn gap-1 list-none btn-outline">
+        <summary class="btn btn-surface gap-1 list-none">
           <.flag code={@flag_code} priority class="rounded-[2px] ring-1 ring-base-content/10" />
           {@label}
           <.icon name="hero-chevron-down-solid" class="w-3 h-3" />

@@ -12,7 +12,7 @@ defmodule GamendWeb.AdminLive.Connections do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="space-y-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">&larr; Back to Admin</.link>
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">&larr; Back to Admin</.link>
 
         <%!-- Summary cards --%>
         <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
@@ -231,7 +231,7 @@ defmodule GamendWeb.AdminLive.Connections do
                 phx-value-filter={value}
                 class={[
                   "btn btn-sm",
-                  if(@conn_filter == value, do: "btn-primary", else: "btn-outline")
+                  if(@conn_filter == value, do: "btn-primary", else: "btn-surface")
                 ]}
               >
                 {label}

@@ -692,7 +692,7 @@ defmodule GamendWeb.LobbyLive.Index do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="p-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-4">
           <div class="card bg-base-200 p-4 rounded-lg">
@@ -750,7 +750,7 @@ defmodule GamendWeb.LobbyLive.Index do
                           <button
                             phx-click="start_manage"
                             phx-value-id={lobby.id}
-                            class="btn btn-outline btn-sm"
+                            class="btn btn-surface btn-sm"
                           >
                             {gettext("Edit")}
                           </button>
@@ -915,7 +915,7 @@ defmodule GamendWeb.LobbyLive.Index do
                                     phx-click="kick"
                                     phx-value-lobby_id={lobby.id}
                                     phx-value-target_id={m.id}
-                                    class="btn btn-xs btn-outline"
+                                    class="btn btn-surface btn-xs"
                                   >
                                     {gettext("Kick")}
                                   </button>

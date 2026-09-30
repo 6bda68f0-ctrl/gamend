@@ -116,6 +116,21 @@ defmodule GamendWeb.BlogLayoutTest do
       assert html =~ ~r/<img[^>]*src="\/img\/cover.png"[^>]*fetchpriority="high"/
       assert html =~ ~s(<img loading="lazy" src="/b.png">)
     end
+
+    test "leaves the way back to the breadcrumb" do
+      html =
+        render_component(&ContentPages.blog_post/1,
+          flash: %{},
+          post: %{slug: "two", title: "Two", date: ~D[2026-09-01], excerpt: "x", lede: ""},
+          html: "<p>Body.</p>",
+          prev: %{slug: "one", title: "One"},
+          next: %{slug: "three", title: "Three"}
+        )
+
+      refute html =~ ~s(href="/blog")
+      assert html =~ ~s(href="/blog/one")
+      assert html =~ ~s(href="/blog/three")
+    end
   end
 
   describe "eager_opening_image/1" do

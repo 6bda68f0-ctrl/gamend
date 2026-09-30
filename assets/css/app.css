@@ -164,6 +164,21 @@
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
+/* `btn-surface`: the secondary button, beside `btn-primary`. The page's own
+   colour behind a dark hairline, the front page's second call to action; it
+   replaced `btn-outline`'s white border (2026-09-30). Built the way daisyUI
+   builds `btn-primary`: it only sets the colour variables, and `btn` derives
+   the fill, the depth shadow and the hover from them, so sizes and states
+   work as they do on any daisyUI button. A `@utility` so `sm:btn-surface`
+   works (a `btn-ghost` on a phone, this from `sm` up). Not `btn-secondary`:
+   that is daisyUI's secondary colour. Core's templates use it, so every host
+   stylesheet declares it. */
+@utility btn-surface {
+  --btn-color: var(--color-base-100);
+  --btn-fg: var(--color-base-content);
+  --btn-border: var(--color-base-300);
+}
+
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 .card.collapsed .card-body > :not(.card-title):not(.card-actions) {

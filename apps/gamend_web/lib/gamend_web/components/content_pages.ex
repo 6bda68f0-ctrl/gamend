@@ -109,7 +109,7 @@ defmodule GamendWeb.ContentPages do
       <div class="flex flex-row items-center justify-between gap-3">
         <h1 class="text-4xl font-black text-base-content/95">{@title}</h1>
 
-        <.link :if={@sibling_path} href={@sibling_path} class="btn btn-outline btn-sm">
+        <.link :if={@sibling_path} href={@sibling_path} class="btn btn-surface btn-sm">
           <.icon name={@sibling_icon} class="size-4" />
           {@sibling_label}
         </.link>
@@ -280,10 +280,6 @@ defmodule GamendWeb.ContentPages do
         <article class="space-y-10">
           <div class="space-y-4">
             <div class="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.2em] text-base-content/70">
-              <.link navigate={~p"/blog"} class="transition-colors hover:text-primary">
-                {gettext("Blog")}
-              </.link>
-              <span>/</span>
               <span><.timestamp at={@post.date} format="date" /></span>
               <span :if={@post[:reading_minutes]}>
                 · {reading_time(@post.reading_minutes)}

@@ -31,97 +31,97 @@ defmodule GamendWeb.AdminLive.Index do
         </div>
 
         <div class="flex gap-4 flex-wrap">
-          <.link navigate={~p"/admin/config"} class="btn btn-outline">
+          <.link navigate={~p"/admin/config"} class="btn btn-surface">
             Configuration
           </.link>
-          <.link navigate={~p"/admin/settings"} class="btn btn-outline">
+          <.link navigate={~p"/admin/settings"} class="btn btn-surface">
             Settings
           </.link>
-          <.link navigate={~p"/admin/kv"} class="btn btn-outline">
+          <.link navigate={~p"/admin/kv"} class="btn btn-surface">
             KV ({@kv_count})
           </.link>
-          <.link navigate={~p"/admin/users"} class="btn btn-outline">
+          <.link navigate={~p"/admin/users"} class="btn btn-surface">
             Users ({@users_count})
           </.link>
-          <.link navigate={~p"/admin/lobbies"} class="btn btn-outline">
+          <.link navigate={~p"/admin/lobbies"} class="btn btn-surface">
             Lobbies ({@lobbies_count})
           </.link>
-          <.link navigate={~p"/admin/leaderboards"} class="btn btn-outline">
+          <.link navigate={~p"/admin/leaderboards"} class="btn btn-surface">
             Leaderboards ({@leaderboards_count})
           </.link>
-          <.link navigate={~p"/admin/tournaments"} class="btn btn-outline">
+          <.link navigate={~p"/admin/tournaments"} class="btn btn-surface">
             Tournaments ({@tournaments_count})
           </.link>
-          <.link navigate={~p"/admin/matchmaking"} class="btn btn-outline">
+          <.link navigate={~p"/admin/matchmaking"} class="btn btn-surface">
             Matchmaking ({@matchmaking_stats.queued})
           </.link>
-          <.link navigate={~p"/admin/sessions"} class="btn btn-outline">
+          <.link navigate={~p"/admin/sessions"} class="btn btn-surface">
             Sessions ({@sessions_count})
           </.link>
-          <.link navigate={~p"/admin/notifications"} class="btn btn-outline">
+          <.link navigate={~p"/admin/notifications"} class="btn btn-surface">
             Notifications ({@notifications_count})
           </.link>
-          <.link navigate={~p"/admin/push"} class="btn btn-outline">
+          <.link navigate={~p"/admin/push"} class="btn btn-surface">
             Push Devices ({@push_stats.live})
           </.link>
-          <.link navigate={~p"/admin/groups"} class="btn btn-outline">
+          <.link navigate={~p"/admin/groups"} class="btn btn-surface">
             Groups ({@groups_count})
           </.link>
-          <.link navigate={~p"/admin/blacklist"} class="btn btn-outline">
+          <.link navigate={~p"/admin/blacklist"} class="btn btn-surface">
             Blacklist ({@blacklist_count})
           </.link>
-          <.link navigate={~p"/admin/friends"} class="btn btn-outline">
+          <.link navigate={~p"/admin/friends"} class="btn btn-surface">
             Friends ({@friends_count})
           </.link>
-          <.link navigate={~p"/admin/parties"} class="btn btn-outline">
+          <.link navigate={~p"/admin/parties"} class="btn btn-surface">
             Parties ({@parties_count})
           </.link>
-          <.link navigate={~p"/admin/chat"} class="btn btn-outline">
+          <.link navigate={~p"/admin/chat"} class="btn btn-surface">
             Chat ({@chat_count})
           </.link>
-          <.link navigate={~p"/admin/chat/reports"} class="btn btn-outline">
+          <.link navigate={~p"/admin/chat/reports"} class="btn btn-surface">
             Reports ({@open_reports})
           </.link>
-          <.link navigate={~p"/admin/quests"} class="btn btn-outline">
+          <.link navigate={~p"/admin/quests"} class="btn btn-surface">
             Quests ({@quest_stats.definitions})
           </.link>
-          <.link navigate={~p"/admin/payments"} class="btn btn-outline">
+          <.link navigate={~p"/admin/payments"} class="btn btn-surface">
             Payments ({@payments_stats.purchases})
           </.link>
-          <.link navigate={~p"/admin/connections"} class="btn btn-outline">
+          <.link navigate={~p"/admin/connections"} class="btn btn-surface">
             Connections ({@conn_stats.total_connections})
           </.link>
-          <.link navigate={~p"/admin/rate_limiting"} class="btn btn-outline">
+          <.link navigate={~p"/admin/rate_limiting"} class="btn btn-surface">
             Rate Limiting ({@rate_stats.limited})
           </.link>
-          <.link navigate={~p"/admin/logs"} class="btn btn-outline">
+          <.link navigate={~p"/admin/logs"} class="btn btn-surface">
             Logs ({ngettext("%{count} error", "%{count} errors", @log_recent_errors)}/1h)
           </.link>
-          <.link navigate={~p"/admin/lobby_snapshots"} class="btn btn-outline">
+          <.link navigate={~p"/admin/lobby_snapshots"} class="btn btn-surface">
             Lobby Snapshots ({@lobby_snapshot_runs.total})
           </.link>
-          <.link navigate={~p"/admin/geo"} class="btn btn-outline">
+          <.link navigate={~p"/admin/geo"} class="btn btn-surface">
             Geo Traffic ({format_number(@geo_total_1h)}/1h)
           </.link>
-          <.link navigate={~p"/admin/system"} class="btn btn-outline">
+          <.link navigate={~p"/admin/system"} class="btn btn-surface">
             System
           </.link>
-          <.link navigate={~p"/admin/retention"} class="btn btn-outline">
+          <.link navigate={~p"/admin/retention"} class="btn btn-surface">
             Retention
           </.link>
-          <.link navigate={~p"/admin/runtime"} class="btn btn-outline">
+          <.link navigate={~p"/admin/runtime"} class="btn btn-surface">
             Runtime
           </.link>
-          <.link href={~p"/admin/oban"} class="btn btn-outline">
+          <.link href={~p"/admin/oban"} class="btn btn-surface">
             Jobs ({@oban_stats.total})
           </.link>
-          <.link navigate={~p"/admin/storage"} class="btn btn-outline">
+          <.link navigate={~p"/admin/storage"} class="btn btn-surface">
             Storage ({@storage_info.adapter})
           </.link>
-          <.link navigate={~p"/admin/economy"} class="btn btn-outline">
+          <.link navigate={~p"/admin/economy"} class="btn btn-surface">
             Economy ({@economy_stats.wallets})
           </.link>
-          <.link navigate={~p"/admin/analytics"} class="btn btn-outline">
+          <.link navigate={~p"/admin/analytics"} class="btn btn-surface">
             Analytics (DAU {@analytics_stats.dau})
           </.link>
         </div>

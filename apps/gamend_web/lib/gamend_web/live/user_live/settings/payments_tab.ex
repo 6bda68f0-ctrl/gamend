@@ -42,7 +42,7 @@ defmodule GamendWeb.UserLive.Settings.PaymentsTab do
               id="open-stripe-portal"
               type="button"
               phx-click="open_stripe_portal"
-              class="btn btn-sm btn-outline"
+              class="btn btn-surface btn-sm"
             >
               {gettext("Manage billing")}
             </button>

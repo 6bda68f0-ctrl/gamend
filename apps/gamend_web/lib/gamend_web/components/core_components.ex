@@ -618,7 +618,7 @@ defmodule GamendWeb.CoreComponents do
         <%!-- The back button sits ON the title line, not above it as a stray
               text link: one place, one shape, on every page that has a parent. --%>
         <div :if={@back} class="flex flex-wrap items-center gap-3">
-          <.link navigate={@back} class="btn btn-outline btn-sm">
+          <.link navigate={@back} class="btn btn-surface btn-sm">
             <.icon name="hero-arrow-left-solid" class="size-4" />
             {@back_label || gettext("Back")}
           </.link>

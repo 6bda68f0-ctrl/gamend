@@ -119,7 +119,7 @@ defmodule GamendWeb.AdminLive.Settings do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="space-y-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
         <div>
           <h1 class="text-3xl font-bold">Settings</h1>
