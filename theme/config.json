@@ -442,6 +442,10 @@
             "href": "/api/docs"
           },
           {
+            "label": "UI elements",
+            "href": "/ui"
+          },
+          {
             "label": "Elixir Docs",
             "href": "https://docs.gamend.org/",
             "external": true

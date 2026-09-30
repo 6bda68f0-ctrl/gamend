@@ -54,7 +54,7 @@ defmodule GamendWeb.Plugs.LocalePath do
   # translations that do not exist invites duplicate-content penalties.
   @default_localized_paths ~w(
     / /about /contact /credits /screenshots /translators
-    /blog /changelog /roadmap /privacy /terms /data_deletion
+    /blog /changelog /roadmap /privacy /terms /data_deletion /ui
   )
 
   def init(opts), do: opts

@@ -77,6 +77,10 @@ defmodule GamendCore.MixProject do
       # crontab was pulled in transitively by quantum; the Schedule tick worker
       # still parses/matches cron expressions with it.
       {:crontab, "~> 1.1"},
+      # IANA time zone database for the reader's local day
+      # (`Gamend.Accounts.TimeZone`). Passed explicitly to `DateTime.shift_zone/3`,
+      # so no host has to set `:elixir, :time_zone_database`.
+      {:tz, "~> 0.28"},
       {:corsica, "~> 2.0"},
       {:mdex, "~> 0.13"},
       # Syntax highlighting engine MDEx delegates to; without it fenced code

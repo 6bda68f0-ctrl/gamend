@@ -42,6 +42,16 @@ defmodule GamendWeb.PageController do
     |> render(:data_deletion)
   end
 
+  # The site's building blocks on one page, each captioned with the classes
+  # that draw it, so a new screen copies them instead of inventing a look. A
+  # reference rather than content, so not worth indexing.
+  def ui(conn, _params) do
+    conn
+    |> assign(:page_title, gettext("UI elements"))
+    |> assign(:robots, "noindex, follow")
+    |> render(:ui)
+  end
+
   def terms(conn, _params) do
     conn
     |> assign(:page_title, gettext("Terms"))
