@@ -26,6 +26,7 @@ defmodule Gamend.Notifications.Types do
     "group_join_request_approved" => "A group join request was approved",
     "group_join_request_rejected" => "A group join request was rejected",
     "group_kicked" => "Removed from a group",
+    "group_deleted" => "A group you were in was deleted",
     "group_promoted" => "Promoted within a group",
     "group_demoted" => "Demoted within a group",
     "party_invite" => "Invited to a party",

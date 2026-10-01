@@ -3254,3 +3254,127 @@ msgstr "Az ezzel a linkkel történő megerősítés törli a jelszót, amellyel
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} perc olvasás"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Fiók és biztonság"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "A fiókkal kapcsolatos üzeneteket, például a bejelentkezési linkeket, mindig elküldjük."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Automatikus (ez az eszköz): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Csetüzenetek"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Válaszd ki, mit küldjünk neked"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Válaszd ki, mit küldjünk neked: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Válaszd ki, miről és hol szóljunk neked."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "Kész. Nem kapsz több e-mailt erről: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "Kész. E-mailben már csak a fiókodról szóló üzeneteket küldjük."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "Küldj e-mailt: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "E-mail-beállítások"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "E-mailek erről: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Barátok és csoportok"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "Az oldalon"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Telefon"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Küldetések és jutalmak"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Beállítások"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Leiratkozás minden e-mailről"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Leiratkozás ezekről az e-mailekről"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Ezekről az e-mailekről leiratkozás: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Ez a link nem működik. Jelentkezz be, és válaszd ki, mit küldjünk neked."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Időzóna"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "E-mailek visszakapcsolása"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Értesítések visszakapcsolása"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Minden e-mail kikapcsolása"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Minden telefonos értesítés kikapcsolása"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Minden kikapcsolása"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Telefonos értesítések visszakapcsolása"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Egyik ilyen e-mailt sem kapod."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Azért kapod ezt az e-mailt, mert bekapcsoltad az e-maileket ehhez: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "A napod és az emlékeztetőid ehhez igazodnak."

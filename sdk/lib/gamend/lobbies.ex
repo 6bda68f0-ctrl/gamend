@@ -341,7 +341,7 @@ defmodule Gamend.Lobbies do
 
   @doc false
   @spec delete_lobby(Gamend.Lobbies.Lobby.t()) ::
-          {:ok, Gamend.Lobbies.Lobby.t()} | {:error, Ecto.Changeset.t() | term()}
+          {:ok, Gamend.Lobbies.Lobby.t()} | {:error, :not_found | {:hook_rejected, term()}}
   def delete_lobby(_lobby) do
     case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
       :placeholder ->
@@ -1239,7 +1239,7 @@ defmodule Gamend.Lobbies do
     
   """
   @spec write_webrtc_config(Gamend.Lobbies.Lobby.t(), map()) ::
-          {:ok, Gamend.Lobbies.Lobby.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Gamend.Lobbies.Lobby.t()} | {:error, Ecto.Changeset.t() | :not_found}
   def write_webrtc_config(_lobby, _changes) do
     case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
       :placeholder ->

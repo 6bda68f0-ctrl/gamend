@@ -189,15 +189,18 @@ defmodule Gamend.Accounts.Sessions do
   end
 
   @doc false
-  @spec delete_user_token(UserToken.t()) :: {:ok, UserToken.t()} | {:error, Ecto.Changeset.t()}
+  @spec delete_user_token(UserToken.t()) ::
+          {:ok, UserToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def delete_user_token(%UserToken{} = token) do
-    case Repo.delete(token) do
-      {:ok, _} = ok ->
-        _ = Gamend.Cache.invalidate({:accounts, :user_token, token.id})
-        ok
+    # The token may come from the cache, and a sign-out or a revoke deletes
+    # tokens with one query that leaves each cached copy behind.
+    case Repo.rescue_stale(:not_found, fn -> Repo.delete(token) end) do
+      {:error, %Ecto.Changeset{}} = error ->
+        error
 
-      other ->
-        other
+      result ->
+        _ = Gamend.Cache.invalidate({:accounts, :user_token, token.id})
+        result
     end
   end
 

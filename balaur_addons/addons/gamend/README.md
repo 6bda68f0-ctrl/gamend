@@ -13,7 +13,7 @@ let reply = task::wait(gamend::lobbies::quick_join(this.node, #{
 if e["kind"] == gamend::events::lobby::MEMBER_JOINED { }
 ```
 
-259 operations in 40 modules, and 90 realtime events.
+260 operations in 40 modules, and 90 realtime events.
 
 Beside the generated modules and `events.rn`, written by hand:
 
@@ -343,6 +343,7 @@ Groups.
 | `create_group(node, params)` | `POST /api/v1/groups` | Create a group |
 | `create_group_icon_upload_url(node, id, params)` | `POST /api/v1/groups/{id}/icon/upload_url` | Request a group icon upload ticket (admin only) |
 | `decline_group_invite(node, invite_id)` | `POST /api/v1/groups/invitations/{invite_id}/decline` | Decline a group invitation |
+| `delete_group(node, id)` | `DELETE /api/v1/groups/{id}` | Delete a group (admin only) |
 | `demote_group_member(node, id, params)` | `POST /api/v1/groups/{id}/demote` | Demote admin to member |
 | `get_group(node, id)` | `GET /api/v1/groups/{id}` | Get group details |
 | `invite_to_group(node, id, params)` | `POST /api/v1/groups/{id}/invite` | Invite a user to a group (admin only) |

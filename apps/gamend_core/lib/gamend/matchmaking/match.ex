@@ -56,14 +56,7 @@ defmodule Gamend.Matchmaking.Match do
 
     if failed == [] do
       _ = Lobbies.update_lobby(lobby, %{is_locked: true})
-      :ok = Matchmaking.assign_lobby(tickets, lobby.id)
-      Broadcast.match_found(tickets, lobby.id)
-
-      Gamend.Async.run(fn ->
-        Gamend.Hooks.internal_call(:after_matchmaking_matched, [tickets, lobby.id])
-      end)
-
-      {:ok, lobby.id}
+      announce_match(tickets, lobby)
     else
       # A player could not be seated (banned, already in a lobby, ...). Drop
       # the half-built lobby, cancel the unseatable tickets, and requeue the
@@ -79,6 +72,25 @@ defmodule Gamend.Matchmaking.Match do
       _ = tickets |> Enum.reject(&MapSet.member?(failed_ids, &1.id)) |> Matchmaking.requeue()
 
       {:error, :join_failed}
+    end
+  end
+
+  # The lobby was deleted after its players were seated (an admin, retention):
+  # there is no match to announce, so the tickets wait for the next sweep.
+  defp announce_match(tickets, lobby) do
+    case Matchmaking.assign_lobby(tickets, lobby.id) do
+      :ok ->
+        Broadcast.match_found(tickets, lobby.id)
+
+        Gamend.Async.run(fn ->
+          Gamend.Hooks.internal_call(:after_matchmaking_matched, [tickets, lobby.id])
+        end)
+
+        {:ok, lobby.id}
+
+      {:error, :not_found} = gone ->
+        _ = Matchmaking.requeue(tickets)
+        gone
     end
   end
 end

@@ -46,8 +46,9 @@ defmodule Gamend.Retention do
   context's validity, personal API tokens that can no longer authenticate
   (expired, or older than their owner's last credential change), login
   lockouts whose window and lock have run out, accounts past the deletion date
-  their owner's request set (`GAMEND_AUTH_DELETION_GRACE_DAYS`), and stored
-  avatars whose owner no longer exists are always
+  their owner's request set (`GAMEND_AUTH_DELETION_GRACE_DAYS`), stored
+  avatars whose owner no longer exists, and the chat of a lobby, group or party
+  that no longer exists are always
   removed (independent of the env vars above). Deletes are idempotent, so
   running on several instances at once is harmless; each class is batched and
   failure-isolated, and emits `[:gamend, :retention, :pruned]` telemetry with
@@ -351,7 +352,8 @@ defmodule Gamend.Retention do
       unconfirmed_users: &prune_unconfirmed_users/0,
       inactive_user_warnings: &warn_inactive_users/0,
       inactive_users: &prune_inactive_users/0,
-      orphaned_avatars: &prune_orphaned_avatars/0
+      orphaned_avatars: &prune_orphaned_avatars/0,
+      orphaned_chat: &prune_orphaned_chat/0
     }
   end
 
@@ -985,6 +987,31 @@ defmodule Gamend.Retention do
 
       if length(ids) < batch(), do: acc + count, else: delete_in_batches(queryable, acc + count)
     end
+  end
+
+  # Chat whose lobby, group or party is gone. A delete cleans its chat up after
+  # committing, so a message sent in that moment lands after the cleanup; a
+  # conversation has no foreign key to stop it, as one column names three kinds
+  # of parent. One statement per kind finds them.
+  defp prune_orphaned_chat do
+    for {chat_type, parent} <- [
+          {"lobby", Lobby},
+          {"group", Gamend.Groups.Group},
+          {"party", Gamend.Parties.Party}
+        ],
+        schema <- [Gamend.Chat.Message, Gamend.Chat.ReadCursor],
+        reduce: 0 do
+      deleted -> deleted + delete_in_batches(orphaned_chat(schema, chat_type, parent))
+    end
+  end
+
+  defp orphaned_chat(schema, chat_type, parent) do
+    from(c in schema,
+      as: :chat,
+      where:
+        c.chat_type == ^chat_type and
+          not exists(from(p in parent, where: p.id == parent_as(:chat).chat_ref_id, select: 1))
+    )
   end
 
   # Token contexts expire on different clocks, so the window lives in

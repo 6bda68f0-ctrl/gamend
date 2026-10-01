@@ -39,9 +39,12 @@ defmodule GamendWeb.GroupChannel do
   def join("group:" <> group_id_str, _payload, socket) do
     current_scope = Map.get(socket.assigns, :current_scope)
 
+    # The group is read after the membership check: deleted in between, the
+    # join is refused like any other, where a `get_group!` crashed it.
     with {:ok, group_id} <- Ecto.UUID.cast(group_id_str),
          %Scope{user_id: user_id} <- current_scope,
-         true <- Groups.member?(group_id, user_id) do
+         true <- Groups.member?(group_id, user_id),
+         %Groups.Group{} = group <- Groups.get_group(group_id) do
       Chat.subscribe_group_chat(group_id)
 
       GamendWeb.ConnectionTracker.register(:group_channel, %{
@@ -49,7 +52,6 @@ defmodule GamendWeb.GroupChannel do
         user_id: user_id
       })
 
-      group = Groups.get_group!(group_id)
       send(self(), {:after_join, group})
 
       {:ok, assign(socket, :group_id, group_id)}

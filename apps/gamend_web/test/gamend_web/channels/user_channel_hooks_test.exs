@@ -73,6 +73,8 @@ defmodule GamendWeb.UserChannelHooksTest do
           def on_custom_hook(_hook, _args), do: {:error, :not_implemented}
 
           def echo(val), do: val
+          def boom, do: raise("secret detail")
+          def refuse(n) when is_integer(n), do: {:error, {:not_enough_gold, n}}
 
           def greet do
             user = Gamend.Hooks.caller_user()
@@ -138,6 +140,25 @@ defmodule GamendWeb.UserChannelHooksTest do
     ref = push(socket, "call_hook", %{"plugin" => plugin, "fn" => "greet", "args" => []})
     assert_reply ref, :ok, %{data: %{user_id: user_id}}
     assert user_id == user.id
+  end
+
+  test "call_hook answers a raising hook with the code alone", %{socket: socket, plugin: plugin} do
+    ExUnit.CaptureLog.capture_log(fn ->
+      ref = push(socket, "call_hook", %{"plugin" => plugin, "fn" => "boom", "args" => []})
+      assert_reply ref, :error, reply
+      assert reply == %{error: "exception"}
+    end)
+  end
+
+  test "call_hook answers a tagged refusal with its code and detail", %{
+    socket: socket,
+    plugin: plugin
+  } do
+    ref = push(socket, "call_hook", %{"plugin" => plugin, "fn" => "refuse", "args" => [3]})
+    assert_reply ref, :error, %{error: "not_enough_gold", message: "3"}
+
+    ref = push(socket, "call_hook", %{"plugin" => plugin, "fn" => "refuse", "args" => ["x"]})
+    assert_reply ref, :error, %{error: "function_clause", message: _}
   end
 
   test "call_hook rejects reserved hook names", %{socket: socket, plugin: plugin} do

@@ -58,6 +58,7 @@ defmodule GamendWeb.UserChannel do
   alias Gamend.Parties
   alias GamendWeb.ChannelEvents
   alias GamendWeb.ChannelUpdates
+  alias GamendWeb.HookErrors
   alias GamendWeb.Plugs.ClientSession
   alias GamendWeb.Serializers
 
@@ -129,8 +130,10 @@ defmodule GamendWeb.UserChannel do
           {:error, reason} when is_atom(reason) or is_binary(reason) ->
             {:reply, {:error, %{error: to_string(reason)}}, socket}
 
+          # A crash or a tagged refusal: the same code the HTTP call answers,
+          # never the inspected term (a crash's message is the server's business).
           {:error, reason} ->
-            {:reply, {:error, %{error: inspect(reason)}}, socket}
+            {:reply, {:error, HookErrors.reply(reason)}, socket}
         end
       end
     end

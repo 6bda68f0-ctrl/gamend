@@ -320,6 +320,36 @@ defmodule Gamend.QuestsTest do
       assert [%{quest: %{key: key}, tier: 1}] = Quests.chain(nil, quest.key)
       assert key == quest.key
     end
+
+    test "an event for a quest deleted as it is read advances nothing and writes no progress" do
+      # An event no other quest listens to, so the catalogue read misses the
+      # cache and really selects from quests.
+      event = "vanishing_#{System.unique_integer([:positive])}"
+      quest = create_quest(%{objectives: [%{event: event, target: 2}]})
+      user = user_fixture()
+      test_pid = self()
+      handler = {__MODULE__, :delete_quest_after_read, System.unique_integer()}
+
+      :telemetry.attach(
+        handler,
+        [:gamend, :repo, :query],
+        fn _event, _measurements, meta, _config ->
+          if self() == test_pid and meta[:source] == "quests" and !Process.get(:quest_deleted) do
+            Process.put(:quest_deleted, true)
+            Repo.delete_all(from q in Quest, where: q.id == ^quest.id)
+          end
+        end,
+        nil
+      )
+
+      result = Quests.report_event(user.id, event)
+      :telemetry.detach(handler)
+
+      assert Process.get(:quest_deleted)
+      assert result == {:ok, []}
+      assert Repo.get(Quest, quest.id) == nil
+      assert Repo.all(from p in QuestProgress, where: p.user_id == ^user.id) == []
+    end
   end
 
   describe "periods" do

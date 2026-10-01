@@ -5,6 +5,7 @@ defmodule GamendWeb.AdminLive.Users do
   alias Gamend.Accounts.LoginLockouts
   alias Gamend.Accounts.User
   alias Gamend.Async
+  alias GamendWeb.AdminLive.Shared
   alias GamendWeb.LiveHelpers
 
   @impl true
@@ -692,40 +693,42 @@ defmodule GamendWeb.AdminLive.Users do
 
   @impl true
   def handle_event("edit_user", %{"id" => id}, socket) do
-    user = Accounts.get_user!(id)
-    changeset = User.admin_changeset(user, %{})
-    form = to_form(changeset, as: "user")
-    tokens = Accounts.list_user_tokens(user.id)
+    Shared.with_record(socket, Accounts.get_user(id), fn user ->
+      form = user |> User.admin_changeset(%{}) |> to_form(as: "user")
 
-    {:noreply,
-     socket
-     |> assign(:selected_user, user)
-     |> assign(:form, form)
-     |> assign(:user_tokens, tokens)
-     |> assign(:login_locked, login_locked?(user))}
+      {:noreply,
+       socket
+       |> assign(:selected_user, user)
+       |> assign(:form, form)
+       |> assign(:user_tokens, Accounts.list_user_tokens(user.id))
+       |> assign(:login_locked, login_locked?(user))}
+    end)
   end
 
   def handle_event("cancel_user_deletion", %{"id" => id}, socket) do
-    case Accounts.cancel_deletion(Accounts.get_user!(id)) do
-      {:ok, user} ->
-        {:noreply,
-         socket
-         |> assign(:selected_user, user)
-         |> put_flash(:info, "The account will not be deleted")}
+    Shared.with_record(socket, Accounts.get_user(id), fn user ->
+      case Accounts.cancel_deletion(user) do
+        {:ok, user} ->
+          {:noreply,
+           socket
+           |> assign(:selected_user, user)
+           |> put_flash(:info, "The account will not be deleted")}
 
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed")}
-    end
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Failed")}
+      end
+    end)
   end
 
   def handle_event("unlock_login", %{"id" => id}, socket) do
-    user = Accounts.get_user!(id)
-    :ok = LoginLockouts.clear(user.email)
+    Shared.with_record(socket, Accounts.get_user(id), fn user ->
+      :ok = LoginLockouts.clear(user.email)
 
-    {:noreply,
-     socket
-     |> assign(:login_locked, false)
-     |> put_flash(:info, "Password sign-in unlocked")}
+      {:noreply,
+       socket
+       |> assign(:login_locked, false)
+       |> put_flash(:info, "Password sign-in unlocked")}
+    end)
   end
 
   # Search / filter handlers
@@ -838,8 +841,10 @@ defmodule GamendWeb.AdminLive.Users do
   end
 
   def handle_event("revoke_token", %{"id" => id}, socket) do
-    token = Accounts.get_user_token!(id)
-    Accounts.delete_user_token(token)
+    # Already gone (signed out, expired) is what revoking asks for.
+    with %{} = token <- Accounts.get_user_token(id),
+         do: Accounts.delete_user_token(token)
+
     user = socket.assigns.selected_user
     tokens = Accounts.list_user_tokens(user.id)
 
@@ -873,52 +878,7 @@ defmodule GamendWeb.AdminLive.Users do
   end
 
   def handle_event("delete_user", %{"id" => id}, socket) do
-    user = Accounts.get_user!(id)
-
-    case Accounts.delete_user(user) do
-      {:ok, _user} ->
-        page = socket.assigns[:users_page] || 1
-        page_size = socket.assigns[:users_page_size] || 25
-
-        {users, total_count, total_pages} =
-          load_users(
-            page,
-            page_size,
-            socket.assigns[:search_query] || "",
-            socket.assigns[:filters] || [],
-            socket.assigns.sort_field,
-            socket.assigns.sort_dir
-          )
-
-        # ensure current page is within range (if we deleted the last item on last page)
-        page2 = max(1, min(page, total_pages))
-
-        {users, total_count, total_pages} =
-          if page2 != page do
-            load_users(
-              page2,
-              page_size,
-              socket.assigns[:search_query] || "",
-              socket.assigns[:filters] || [],
-              socket.assigns.sort_field,
-              socket.assigns.sort_dir
-            )
-          else
-            {users, total_count, total_pages}
-          end
-
-        {:noreply,
-         socket
-         |> put_flash(:info, "User deleted successfully")
-         |> assign(:users_count, total_count)
-         |> assign(:recent_users, users)
-         |> assign(:users_page, page2)
-         |> assign(:users_total_pages, total_pages)
-         |> sync_selected_ids(user_ids(users))}
-
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to delete user")}
-    end
+    Shared.with_record(socket, Accounts.get_user(id), &delete_user(socket, &1))
   end
 
   @impl true
@@ -1032,11 +992,16 @@ defmodule GamendWeb.AdminLive.Users do
 
     {deleted, failed} =
       Enum.reduce(ids, {0, 0}, fn id, {d, f} ->
-        user = Accounts.get_user!(id)
+        case Accounts.get_user(id) do
+          # Deleted since it was ticked: the outcome asked for.
+          nil ->
+            {d + 1, f}
 
-        case Accounts.delete_user(user) do
-          {:ok, _} -> {d + 1, f}
-          {:error, _} -> {d, f + 1}
+          user ->
+            case Accounts.delete_user(user) do
+              {:ok, _} -> {d + 1, f}
+              {:error, _} -> {d, f + 1}
+            end
         end
       end)
 
@@ -1092,6 +1057,53 @@ defmodule GamendWeb.AdminLive.Users do
      |> assign(:users_page, page2)
      |> assign(:users_total_pages, total_pages)
      |> sync_selected_ids(user_ids(users))}
+  end
+
+  defp delete_user(socket, user) do
+    case Accounts.delete_user(user) do
+      {:ok, _user} ->
+        page = socket.assigns[:users_page] || 1
+        page_size = socket.assigns[:users_page_size] || 25
+
+        {users, total_count, total_pages} =
+          load_users(
+            page,
+            page_size,
+            socket.assigns[:search_query] || "",
+            socket.assigns[:filters] || [],
+            socket.assigns.sort_field,
+            socket.assigns.sort_dir
+          )
+
+        # ensure current page is within range (if we deleted the last item on last page)
+        page2 = max(1, min(page, total_pages))
+
+        {users, total_count, total_pages} =
+          if page2 != page do
+            load_users(
+              page2,
+              page_size,
+              socket.assigns[:search_query] || "",
+              socket.assigns[:filters] || [],
+              socket.assigns.sort_field,
+              socket.assigns.sort_dir
+            )
+          else
+            {users, total_count, total_pages}
+          end
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "User deleted successfully")
+         |> assign(:users_count, total_count)
+         |> assign(:recent_users, users)
+         |> assign(:users_page, page2)
+         |> assign(:users_total_pages, total_pages)
+         |> sync_selected_ids(user_ids(users))}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete user")}
+    end
   end
 
   defp decode_metadata(nil), do: {:ok, %{}}

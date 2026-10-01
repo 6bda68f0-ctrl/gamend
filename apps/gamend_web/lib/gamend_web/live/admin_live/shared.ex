@@ -87,15 +87,37 @@ defmodule GamendWeb.AdminLive.Shared do
   letters map straight onto it.
   """
   @spec country_flag(term()) :: String.t()
-  def country_flag(code) when is_binary(code) and byte_size(code) == 2 do
+  def country_flag(<<a, b>> = code)
+      when (a in ?A..?Z or a in ?a..?z) and (b in ?A..?Z or b in ?a..?z) do
     code
     |> String.upcase()
     |> String.to_charlist()
     |> Enum.map(fn char -> char - ?A + 0x1F1E6 end)
     |> List.to_string()
-  rescue
-    _ -> "🌐"
   end
 
   def country_flag(_code), do: "🌐"
+
+  @doc """
+  Runs `fun` with `record`, or flashes that it is gone when it is `nil`.
+
+  A console row can name a record another admin, its player or a sweep deleted
+  after the page drew it. A `get_*!` there crashed the page into a remount;
+  this says what happened and leaves the page as it was.
+
+      def handle_event("edit_group", %{"id" => id}, socket) do
+        Shared.with_record(socket, Groups.get_group(id), fn group -> ... end)
+      end
+  """
+  @spec with_record(Phoenix.LiveView.Socket.t(), struct() | nil, (struct() -> result)) ::
+          result | {:noreply, Phoenix.LiveView.Socket.t()}
+        when result: term()
+  def with_record(socket, nil, _fun),
+    do: {:noreply, Phoenix.LiveView.put_flash(socket, :error, gone_message())}
+
+  def with_record(_socket, record, fun), do: fun.(record)
+
+  @doc "The flash for a record deleted since the page listed it."
+  @spec gone_message() :: String.t()
+  def gone_message, do: gettext("It no longer exists. It was deleted after this page loaded.")
 end

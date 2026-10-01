@@ -9,6 +9,7 @@ defmodule Gamend.Groups.JoinRequests do
   import Ecto.Query, warn: false
 
   alias Gamend.Groups
+  alias Gamend.Groups.Group
   alias Gamend.Groups.GroupJoinRequest
   alias Gamend.Groups.GroupMember
   alias Gamend.Groups.Shared
@@ -59,12 +60,15 @@ defmodule Gamend.Groups.JoinRequests do
           # Idempotent: return existing pending request instead of erroring
           {:ok, existing}
         else
-          %GroupJoinRequest{}
-          |> GroupJoinRequest.changeset(%{group_id: group_id, user_id: user_id})
-          |> Repo.insert(
-            on_conflict: {:replace, [:status, :updated_at]},
-            conflict_target: [:group_id, :user_id]
-          )
+          # The group read above may have been deleted since.
+          Repo.rescue_foreign_key(:not_found, fn ->
+            %GroupJoinRequest{}
+            |> GroupJoinRequest.changeset(%{group_id: group_id, user_id: user_id})
+            |> Repo.insert(
+              on_conflict: {:replace, [:status, :updated_at]},
+              conflict_target: [:group_id, :user_id]
+            )
+          end)
           |> case do
             {:ok, request} ->
               Shared.broadcast_group(group_id, {:join_request_created, group_id, user_id})
@@ -157,12 +161,9 @@ defmodule Gamend.Groups.JoinRequests do
         {:error, :not_pending}
 
       %GroupJoinRequest{group_id: group_id} = request ->
-        group = Groups.get_group!(group_id)
-
-        if Groups.can_manage_group?(admin_id, group_id) do
+        with true <- Groups.can_manage_group?(admin_id, group_id) || {:error, :not_admin},
+             %Group{} = group <- Groups.get_group(group_id) || {:error, :not_found} do
           approve_join_request_with_hook(request, group, admin_id, request_id)
-        else
-          {:error, :not_admin}
         end
     end
   end
@@ -196,7 +197,7 @@ defmodule Gamend.Groups.JoinRequests do
             role: "member"
           })
         end)
-        |> Gamend.AfterCommit.transaction()
+        |> approve_in_transaction()
         |> case do
           {:ok, %{membership: member}} ->
             _ = Shared.invalidate_group_cache(group_id)
@@ -237,11 +238,22 @@ defmodule Gamend.Groups.JoinRequests do
 
           {:error, _op, changeset, _} ->
             {:error, changeset}
+
+          {:error, :not_found} = gone ->
+            gone
         end
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  # The group read before this may have been deleted since, and the request
+  # with it: the update finds no row, and the membership no group.
+  defp approve_in_transaction(multi) do
+    Repo.rescue_stale(:not_found, fn ->
+      Repo.rescue_foreign_key(:not_found, fn -> Gamend.AfterCommit.transaction(multi) end)
+    end)
   end
 
   @doc "Reject a pending join request. Admin only."

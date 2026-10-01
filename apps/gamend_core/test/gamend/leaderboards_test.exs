@@ -468,6 +468,20 @@ defmodule Gamend.LeaderboardsTest do
     end
   end
 
+  describe "get_record/1" do
+    test "answers the record, or nil for a missing id or one that is not a UUID" do
+      {:ok, lb} = Leaderboards.create_leaderboard(%{slug: "get_record_test", title: "Test"})
+      user = AccountsFixtures.user_fixture()
+      {:ok, record} = Leaderboards.submit_score(lb.id, user.id, 10)
+
+      assert %Record{id: id} = Leaderboards.get_record(record.id)
+      assert id == record.id
+      assert Leaderboards.get_record(Ecto.UUID.generate()) == nil
+      assert Leaderboards.get_record("not-a-uuid") == nil
+      assert_raise Ecto.NoResultsError, fn -> Leaderboards.get_record!(Ecto.UUID.generate()) end
+    end
+  end
+
   describe "resolve_slugs/1" do
     test "returns empty map for empty list" do
       assert %{} == Leaderboards.resolve_slugs([])

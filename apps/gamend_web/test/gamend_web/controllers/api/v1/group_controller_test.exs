@@ -260,6 +260,39 @@ defmodule GamendWeb.Api.V1.GroupControllerTest do
     end
   end
 
+  describe "DELETE /api/v1/groups/:id" do
+    test "an admin deletes the group with its members in it", %{conn: conn} do
+      owner = create_user()
+      member = create_user()
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "DeleteMe", "type" => "public"})
+      {:ok, _} = Groups.join_group(member.id, group.id)
+
+      conn = conn |> auth_conn(owner) |> delete("/api/v1/groups/#{group.id}")
+
+      assert json_response(conn, 200)
+      refute Groups.get_group(group.id)
+      refute Groups.member?(group.id, member.id)
+    end
+
+    test "a member who is not an admin is refused", %{conn: conn} do
+      owner = create_user()
+      member = create_user()
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "KeepMe", "type" => "public"})
+      {:ok, _} = Groups.join_group(member.id, group.id)
+
+      conn = conn |> auth_conn(member) |> delete("/api/v1/groups/#{group.id}")
+
+      assert %{"error" => "not_admin"} = json_response(conn, 403)
+      assert Groups.get_group(group.id)
+    end
+
+    test "a group that does not exist is not found", %{conn: conn} do
+      conn = conn |> auth_conn(create_user()) |> delete("/api/v1/groups/#{Ecto.UUID.generate()}")
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+  end
+
   describe "POST /api/v1/groups/:id/leave" do
     test "member can leave group", %{conn: conn} do
       owner = create_user()

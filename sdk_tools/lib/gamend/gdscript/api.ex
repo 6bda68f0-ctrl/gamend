@@ -406,7 +406,7 @@ defmodule Gamend.GDScript.API do
       "get_label_record" => [2],
       "get_leaderboard" => [1],
       "get_leaderboard!" => [1],
-      "get_record" => [2],
+      "get_record" => [1, 2],
       "get_record!" => [1],
       "get_user_record" => [2],
       "invalidate_cache" => [0],

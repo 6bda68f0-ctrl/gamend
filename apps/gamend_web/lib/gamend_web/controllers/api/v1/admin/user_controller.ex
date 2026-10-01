@@ -114,6 +114,10 @@ defmodule GamendWeb.Api.V1.Admin.UserController do
           {:ok, _} ->
             reply_ok(conn)
 
+          # Deleted since it was read.
+          {:error, :not_found} ->
+            reply_error(conn, :not_found, "not_found")
+
           {:error, %Ecto.Changeset{} = cs} ->
             unprocessable(conn, cs)
         end

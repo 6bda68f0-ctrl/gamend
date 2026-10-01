@@ -419,6 +419,74 @@ defmodule Gamend.MatchmakingTest do
     end
   end
 
+  describe "assign_lobby/2 and a deleted match lobby" do
+    defmodule LobbyGoneAtLockHook do
+      use Gamend.TestSupport.NoopHooks
+
+      # Hooks receive attrs with string keys.
+      @impl true
+      def before_lobby_update(lobby, %{"is_locked" => true} = attrs) do
+        {:ok, _} = Gamend.Lobbies.delete_lobby(lobby)
+        {:ok, {lobby, attrs}}
+      end
+
+      def before_lobby_update(lobby, attrs), do: {:ok, {lobby, attrs}}
+
+      # NoopHooks answers `:ok` here, which the worker logs as a bad matcher.
+      @impl true
+      def matchmaking_form_matches(_params, _tickets), do: :default
+    end
+
+    defp claimed_pair do
+      tickets = [ticket!(user()), ticket!(user())]
+      :ok = Matchmaking.claim(tickets)
+      tickets
+    end
+
+    defp match_lobby do
+      {:ok, lobby} = Lobbies.create_lobby(%{max_users: 2, is_hidden: true, hostless: true})
+      lobby
+    end
+
+    test "assigning tickets to a lobby that no longer exists answers not_found and names none" do
+      tickets = claimed_pair()
+      lobby = match_lobby()
+      {:ok, _} = Lobbies.delete_lobby(lobby)
+
+      assert Matchmaking.assign_lobby(tickets, lobby.id) == {:error, :not_found}
+      assert Enum.all?(tickets, &is_nil(Repo.get!(Ticket, &1.id).match_id))
+    end
+
+    test "assigning tickets to a live lobby names it on every ticket" do
+      tickets = claimed_pair()
+      lobby = match_lobby()
+
+      assert Matchmaking.assign_lobby(tickets, lobby.id) == :ok
+      assert Enum.all?(tickets, &(Repo.get!(Ticket, &1.id).match_id == lobby.id))
+    end
+
+    test "a match whose lobby is deleted after seating requeues its tickets" do
+      tickets = [ticket!(user()), ticket!(user())]
+
+      previous = Application.get_env(:gamend_core, :hooks_module)
+      Application.put_env(:gamend_core, :hooks_module, LobbyGoneAtLockHook)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:gamend_core, :hooks_module, previous),
+          else: Application.delete_env(:gamend_core, :hooks_module)
+      end)
+
+      assert Worker.sweep() == 0
+
+      for ticket <- tickets do
+        assert %Ticket{status: "queued", match_id: nil} = Repo.get!(Ticket, ticket.id)
+      end
+
+      assert Repo.all(Gamend.Lobbies.Lobby) == []
+    end
+  end
+
   describe "get_ticket/1" do
     test "returns the ticket with its user preloaded" do
       alice = user()

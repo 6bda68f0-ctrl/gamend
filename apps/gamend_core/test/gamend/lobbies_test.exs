@@ -421,6 +421,110 @@ defmodule Gamend.LobbiesTest do
       assert Gamend.Repo.get(Accounts.User, other.id).lobby_id == fresh.id
     end
 
+    test "joining a lobby disbanded after it was read answers not_found", %{
+      host: host,
+      other: other
+    } do
+      {:ok, stale} = Lobbies.create_lobby(%{title: "gone-room", host_id: host.id, max_users: 4})
+      _ = Lobbies.delete_lobby(stale)
+
+      assert {:error, :not_found} = Lobbies.join_lobby(other, stale)
+      assert Gamend.Repo.get(Accounts.User, other.id).lobby_id == nil
+    end
+
+    test "changing a lobby disbanded after it was read answers not_found", %{host: host} do
+      {:ok, stale} = Lobbies.create_lobby(%{title: "gone-room", host_id: host.id, max_users: 4})
+      assert {:ok, _} = Lobbies.delete_lobby(stale)
+
+      assert {:error, :not_found} = Lobbies.delete_lobby(stale)
+      assert {:error, :not_found} = Lobbies.update_lobby(stale, %{title: "renamed"})
+      assert {:error, :not_found} = Lobbies.transition_state(stale, "playing")
+      assert {:error, :not_found} = Lobbies.write_webrtc_config(stale, %{webrtc_enabled: true})
+    end
+
+    test "the last member leaving deletes the lobby and its chat", %{host: host} do
+      {:ok, lobby} = Lobbies.create_lobby(%{title: "chat-room", host_id: host.id, max_users: 4})
+
+      message =
+        Gamend.Repo.insert!(%Gamend.Chat.Message{
+          sender_id: host.id,
+          content: "gg",
+          chat_type: "lobby",
+          chat_ref_id: lobby.id
+        })
+
+      assert {:ok, :lobby_deleted} = Lobbies.leave_lobby(host)
+      refute Gamend.Repo.get(Lobbies.Lobby, lobby.id)
+      refute Gamend.Repo.get(Gamend.Chat.Message, message.id)
+    end
+
+    test "a member handed the host as they leave deletes the lobby rather than leaving it hosted by nobody",
+         %{host: host, other: other} do
+      {:ok, lobby} =
+        Lobbies.create_lobby(%{title: "handover-room", host_id: host.id, max_users: 4})
+
+      assert {:ok, _} = Lobbies.join_lobby(other, lobby)
+
+      result =
+        after_first_read("lobbies", fn -> {:ok, _} = Lobbies.leave_lobby(host) end, fn ->
+          Lobbies.leave_lobby(other)
+        end)
+
+      assert result == {:ok, :lobby_deleted}
+      refute Gamend.Repo.get(Lobbies.Lobby, lobby.id)
+    end
+
+    test "a kick landing after the host handed the lobby to its target answers not_host",
+         %{host: host, other: other} do
+      {:ok, lobby} =
+        Lobbies.create_lobby(%{title: "handover-room", host_id: host.id, max_users: 4})
+
+      assert {:ok, _} = Lobbies.join_lobby(other, lobby)
+
+      result =
+        after_first_read("lobbies", fn -> {:ok, _} = Lobbies.leave_lobby(host) end, fn ->
+          Lobbies.kick_user(host, lobby, other)
+        end)
+
+      assert result == {:error, :not_host}
+      assert Gamend.Repo.get!(Lobbies.Lobby, lobby.id).host_id == other.id
+      assert Gamend.Repo.get(Accounts.User, other.id).lobby_id == lobby.id
+    end
+
+    # The host disbands while a quick join is between reading its candidates
+    # and seating the player: the race CI's parallel flows hit, which wrote a
+    # member into a deleted lobby and answered 500.
+    defmodule VanishingLobbyHook do
+      use Gamend.TestSupport.NoopHooks
+
+      @impl true
+      def before_lobby_join(user, lobby, opts) do
+        if lobby.title == "vanishing-room", do: Gamend.Lobbies.delete_lobby(lobby)
+        {:ok, {user, lobby, opts}}
+      end
+    end
+
+    test "quick_join moves past a candidate disbanded as it joins", %{host: host, other: other} do
+      {:ok, vanishing} =
+        Lobbies.create_lobby(%{title: "vanishing-room", host_id: host.id, max_users: 4})
+
+      previous = Application.get_env(:gamend_core, :hooks_module)
+      Application.put_env(:gamend_core, :hooks_module, VanishingLobbyHook)
+
+      on_exit(fn ->
+        if previous do
+          Application.put_env(:gamend_core, :hooks_module, previous)
+        else
+          Application.delete_env(:gamend_core, :hooks_module)
+        end
+      end)
+
+      assert {:ok, fresh} = Lobbies.quick_join(other, "fresh-room", 4, %{})
+
+      refute fresh.id == vanishing.id
+      assert Gamend.Repo.get(Accounts.User, other.id).lobby_id == fresh.id
+    end
+
     test "quick_join creates a new lobby when none matches", %{other: other} do
       # ensure there are no existing matching lobbies
       assert {:ok, lobby} = Lobbies.quick_join(other, "my-quick-room", 5, %{mode: "coop"})
@@ -731,6 +835,33 @@ defmodule Gamend.LobbiesTest do
       # non-member host never departs.
       assert {:ok, _} = Lobbies.leave_lobby(player)
       assert Lobbies.get_lobby(lobby.id).host_id == server.id
+    end
+  end
+
+  # Runs `act` the first time this process reads `source`, between the read and
+  # whatever `call` does with it; fails unless it ran.
+  defp after_first_read(source, act, call) do
+    pid = self()
+    handler = {__MODULE__, :after_first_read, System.unique_integer()}
+
+    :telemetry.attach(
+      handler,
+      [:gamend, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if self() == pid and meta[:source] == source and !Process.get(handler) do
+          Process.put(handler, true)
+          act.()
+        end
+      end,
+      nil
+    )
+
+    try do
+      result = call.()
+      assert Process.get(handler), "nothing read #{source}"
+      result
+    after
+      :telemetry.detach(handler)
     end
   end
 end

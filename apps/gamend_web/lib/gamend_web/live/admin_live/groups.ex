@@ -2,6 +2,7 @@ defmodule GamendWeb.AdminLive.Groups do
   use GamendWeb, :live_view
 
   alias Gamend.Groups
+  alias GamendWeb.AdminLive.Shared
   alias GamendWeb.LiveHelpers
 
   @impl true
@@ -476,16 +477,15 @@ defmodule GamendWeb.AdminLive.Groups do
 
   @impl true
   def handle_event("edit_group", %{"id" => id}, socket) do
-    group_id = to_string(id)
-    group = Groups.get_group!(group_id)
-    changeset = Groups.change_group(group)
-    form = to_form(changeset, as: "group")
+    Shared.with_record(socket, Groups.get_group(to_string(id)), fn group ->
+      form = group |> Groups.change_group() |> to_form(as: "group")
 
-    {:noreply,
-     socket
-     |> assign(:selected_group, group)
-     |> assign(:form, form)
-     |> assign(:members, [])}
+      {:noreply,
+       socket
+       |> assign(:selected_group, group)
+       |> assign(:form, form)
+       |> assign(:members, [])}
+    end)
   end
 
   @impl true
@@ -526,15 +526,13 @@ defmodule GamendWeb.AdminLive.Groups do
 
   @impl true
   def handle_event("view_members", %{"id" => id}, socket) do
-    group_id = to_string(id)
-    group = Groups.get_group!(group_id)
-    members = Groups.get_group_members(group_id)
-
-    {:noreply,
-     socket
-     |> assign(:selected_group, group)
-     |> assign(:members, members)
-     |> assign(:form, nil)}
+    Shared.with_record(socket, Groups.get_group(to_string(id)), fn group ->
+      {:noreply,
+       socket
+       |> assign(:selected_group, group)
+       |> assign(:members, Groups.get_group_members(group.id))
+       |> assign(:form, nil)}
+    end)
   end
 
   @impl true
@@ -693,31 +691,31 @@ defmodule GamendWeb.AdminLive.Groups do
   # when the target WAS the creator. Act as the creator while they are still an
   # admin, else as any other admin, and never as the target.
   defp run_member_action(socket, gid, uid, command, success, failure) do
-    group_id = to_string(gid)
     user_id = to_string(uid)
-    group = Groups.get_group!(group_id)
 
-    case acting_admin_id(group, Groups.get_group_members(group_id), user_id) do
-      nil ->
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           "#{failure}: the group has no other admin to act as"
-         )}
+    Shared.with_record(socket, Groups.get_group(to_string(gid)), fn group ->
+      case acting_admin_id(group, Groups.get_group_members(group.id), user_id) do
+        nil ->
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             "#{failure}: the group has no other admin to act as"
+           )}
 
-      admin_id ->
-        case command.(admin_id, group_id, user_id) do
-          {:ok, _} ->
-            {:noreply,
-             socket
-             |> assign(:members, Groups.get_group_members(group_id))
-             |> put_flash(:info, success)}
+        admin_id ->
+          case command.(admin_id, group.id, user_id) do
+            {:ok, _} ->
+              {:noreply,
+               socket
+               |> assign(:members, Groups.get_group_members(group.id))
+               |> put_flash(:info, success)}
 
-          {:error, reason} ->
-            {:noreply, put_flash(socket, :error, "#{failure}: #{member_error(reason)}")}
-        end
-    end
+            {:error, reason} ->
+              {:noreply, put_flash(socket, :error, "#{failure}: #{member_error(reason)}")}
+          end
+      end
+    end)
   end
 
   defp acting_admin_id(group, members, target_id) do

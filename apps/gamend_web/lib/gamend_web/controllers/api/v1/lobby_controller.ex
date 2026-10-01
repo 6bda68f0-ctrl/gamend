@@ -2,6 +2,7 @@ defmodule GamendWeb.Api.V1.LobbyController do
   use GamendWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
+  import GamendWeb.ControllerScope, only: [with_lobby: 2]
   import GamendWeb.Helpers.ParamParser
 
   alias Gamend.Accounts.Scope
@@ -174,6 +175,10 @@ defmodule GamendWeb.Api.V1.LobbyController do
         {:error, :invalid_state} ->
           reply_error(conn, :unprocessable_entity, "invalid_state")
 
+        # Deleted after it was read: answers as a read after the delete would.
+        {:error, :not_found} ->
+          reply_error(conn, :not_found, "not_found")
+
         {:error, {:hook_rejected, reason}} ->
           reply_error(conn, :unprocessable_entity, "rejected", rejection_message(reason))
 
@@ -296,9 +301,8 @@ defmodule GamendWeb.Api.V1.LobbyController do
     responses: [
       ok: {"Success", "application/json", OkResponse},
       bad_request: Schemas.error("Not in a lobby"),
-      forbidden: Schemas.error("Not the lobby host"),
-      unauthorized: Schemas.error("Not authenticated"),
-      unprocessable_entity: Schemas.error("Unexpected error")
+      forbidden: Schemas.error("Not the lobby host, or a game hook refused (`rejected`)"),
+      unauthorized: Schemas.error("Not authenticated")
     ]
   )
 
@@ -617,8 +621,11 @@ defmodule GamendWeb.Api.V1.LobbyController do
   defp join_lobby_solo(conn, user, lobby_id, opts) do
     case Lobbies.join_lobby(user, lobby_id, opts) do
       {:ok, _member} ->
-        lobby = Lobbies.get_lobby!(lobby_id)
-        reply_data(conn, serialize_lobby(lobby))
+        # Disbanded straight after the join: answered as a join to a lobby gone.
+        case Lobbies.get_lobby(lobby_id) do
+          %Lobbies.Lobby{} = lobby -> reply_data(conn, serialize_lobby(lobby))
+          nil -> reply_error(conn, :not_found, "not_found")
+        end
 
       {:error, :invalid_lobby} ->
         reply_error(conn, :not_found, "not_found")
@@ -752,6 +759,9 @@ defmodule GamendWeb.Api.V1.LobbyController do
         {:error, :too_small} ->
           reply_error(conn, :unprocessable_entity, "too_small")
 
+        {:error, :not_found} ->
+          reply_error(conn, :not_found, "not_found")
+
         {:error, %Ecto.Changeset{} = changeset} ->
           unprocessable(conn, changeset)
 
@@ -791,7 +801,13 @@ defmodule GamendWeb.Api.V1.LobbyController do
   end
 
   defp target_lobby(%User{lobby_id: nil}, nil), do: {:error, :not_in_lobby}
-  defp target_lobby(%User{lobby_id: lobby_id}, nil), do: {:ok, Lobbies.get_lobby!(lobby_id)}
+  # The signed-in user can be a cached copy, still naming a lobby since deleted.
+  defp target_lobby(%User{lobby_id: lobby_id}, nil) do
+    case Lobbies.get_lobby(lobby_id) do
+      %Lobbies.Lobby{} = lobby -> {:ok, lobby}
+      nil -> {:error, :not_in_lobby}
+    end
+  end
 
   defp target_lobby(%User{} = user, raw_id) do
     with {:ok, lobby_id} <- Ecto.UUID.cast(raw_id),
@@ -805,37 +821,34 @@ defmodule GamendWeb.Api.V1.LobbyController do
   end
 
   def kick(conn, %{"target_user_id" => target_user_id}) do
-    case Scope.user(conn.assigns[:current_scope]) do
-      %User{} = user ->
-        if is_nil(user.lobby_id) do
-          reply_error(conn, :bad_request, "not_in_lobby")
-        else
-          lobby = Lobbies.get_lobby!(user.lobby_id)
-          target = Gamend.Accounts.get_user!(target_user_id)
+    with_lobby(conn, fn user, lobby ->
+      case Gamend.Accounts.get_user(target_user_id) do
+        %User{} = target -> do_kick(conn, user, lobby, target)
+        nil -> reply_error(conn, :not_found, "not_found")
+      end
+    end)
+  end
 
-          case Lobbies.kick_user(user, lobby, target) do
-            {:ok, _} ->
-              reply_ok(conn)
+  defp do_kick(conn, user, lobby, target) do
+    case Lobbies.kick_user(user, lobby, target) do
+      {:ok, _} ->
+        reply_ok(conn)
 
-            {:error, :not_host} ->
-              reply_error(conn, :forbidden, "not_host")
+      {:error, :not_host} ->
+        reply_error(conn, :forbidden, "not_host")
 
-            {:error, :cannot_kick_self} ->
-              reply_error(conn, :forbidden, "cannot_kick_self")
+      {:error, :cannot_kick_self} ->
+        reply_error(conn, :forbidden, "cannot_kick_self")
 
-            {:error, :not_found} ->
-              reply_error(conn, :not_found, "not_found")
+      # Gone, or not seated in this lobby: either way not a member to kick.
+      {:error, reason} when reason in [:not_found, :not_in_lobby] ->
+        reply_error(conn, :not_found, "not_found")
 
-            {:error, {:hook_rejected, _}} ->
-              reply_error(conn, :forbidden, "rejected")
+      {:error, {:hook_rejected, _}} ->
+        reply_error(conn, :forbidden, "rejected")
 
-            _other ->
-              reply_error(conn, :unprocessable_entity, "unexpected_error")
-          end
-        end
-
-      _ ->
-        reply_error(conn, :unauthorized, "not_authenticated")
+      _other ->
+        reply_error(conn, :unprocessable_entity, "unexpected_error")
     end
   end
 
@@ -864,7 +877,8 @@ defmodule GamendWeb.Api.V1.LobbyController do
     if Lobbies.can_manage_lobby?(user, lobby) do
       case Lobbies.delete_lobby(lobby) do
         {:ok, _} -> reply_ok(conn)
-        _ -> reply_error(conn, :unprocessable_entity, "unexpected_error")
+        {:error, :not_found} -> reply_error(conn, :bad_request, "not_in_lobby")
+        {:error, {:hook_rejected, _}} -> reply_error(conn, :forbidden, "rejected")
       end
     else
       reply_error(conn, :forbidden, "not_host")

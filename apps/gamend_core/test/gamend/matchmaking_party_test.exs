@@ -101,6 +101,33 @@ defmodule Gamend.MatchmakingPartyTest do
 
       assert {:error, :already_queued} = Matchmaking.join(leader, %{"mode" => "ranked"}, 2, 5)
     end
+
+    defmodule DisbandOnJoinHook do
+      use Gamend.TestSupport.NoopHooks
+
+      @impl true
+      def before_matchmaking_join(user, attrs) do
+        {:ok, :disbanded} = Parties.disband(Parties.get_party!(user.party_id))
+        {:ok, {user, attrs}}
+      end
+    end
+
+    test "queueing a party disbanded as it is read answers not_found and writes no tickets" do
+      {party, [leader | _]} = party_of(2)
+
+      previous = Application.get_env(:gamend_core, :hooks_module)
+      Application.put_env(:gamend_core, :hooks_module, DisbandOnJoinHook)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:gamend_core, :hooks_module, previous),
+          else: Application.delete_env(:gamend_core, :hooks_module)
+      end)
+
+      assert Matchmaking.join(leader, %{"mode" => "duo"}, 2, 2) == {:error, :not_found}
+      assert Parties.get_party(party.id) == nil
+      assert Matchmaking.count_tickets([]) == 0
+    end
   end
 
   describe "matching" do

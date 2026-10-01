@@ -3302,3 +3302,127 @@ msgstr "Confirmarea cu acest link elimină parola cu care a fost înregistrat co
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} min de citit"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Cont și securitate"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "Mesajele contului, cum ar fi linkurile de conectare, se trimit mereu."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Automat (acest dispozitiv): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Mesaje în chat"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Alege ce îți trimitem"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Alege ce îți trimitem: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Alege ce îți spunem și unde."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "Gata. Nu mai primești emailuri despre: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "Gata. Nu îți mai trimitem nimic prin email, în afară de mesajele contului."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "Trimite-mi email: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "Setări email"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "Emailuri despre: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Prieteni și grupuri"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "Pe site"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Telefon"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Misiuni și recompense"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Setări"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Oprește toate emailurile"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Oprește aceste emailuri"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Oprește aceste emailuri: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Acest link nu funcționează. Conectează-te ca să alegi ce îți trimitem."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Fus orar"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "Pornește din nou emailurile"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Pornește din nou notificările"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Oprește toate emailurile"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Oprește toate notificările pe telefon"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Oprește tot"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Pornește din nou notificările pe telefon"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Nu primești niciunul dintre aceste emailuri."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Primești acest email pentru că ai activat emailurile pentru: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "Ziua și mementourile tale îl urmează."

@@ -24,7 +24,6 @@ defmodule Gamend.Payments do
   alias Gamend.Payments.StoreEvents
   alias Gamend.Payments.StripeEvents
   alias Gamend.Repo
-  alias Gamend.Repo.AdvisoryLock
 
   @store_validation_providers ~w(apple google steam)
 
@@ -277,9 +276,11 @@ defmodule Gamend.Payments do
     # is `off` for everything else.
     result =
       Repo.durable_transaction(fn ->
+        # Locked, so two confirmations of one purchase (a client validate and
+        # the provider's webhook) cannot both see "pending" and both fulfil it.
         purchase =
           Purchase
-          |> lock_for_update()
+          |> Repo.lock_rows(:update)
           |> Repo.get!(purchase.id)
           |> Repo.preload([:product, :provider_product])
 
@@ -1106,25 +1107,6 @@ defmodule Gamend.Payments do
 
     ProviderConfig.production?() and is_binary(reported) and
       String.downcase(reported) != "production"
-  end
-
-  # Row-level lock for the fulfilment read, so two confirmations of the same
-  # purchase cannot both see "pending" and both fulfil it. That race is
-  # reachable in normal operation: a client `POST /payments/validate/:provider`
-  # arriving alongside the provider's own webhook for the same transaction, or
-  # a webhook alongside an admin reconcile. Each winner fires
-  # `after_purchase_fulfilled`, which is where games grant currency.
-  #
-  # Postgres only. SQLite has no row locks — `FOR UPDATE` raises rather than
-  # being ignored — but its single writer plus `default_transaction_mode:
-  # :immediate` already serialises the whole transaction, so the guarantee holds
-  # there for a different reason.
-  defp lock_for_update(query) do
-    if AdvisoryLock.postgres?() do
-      lock(query, "FOR UPDATE")
-    else
-      query
-    end
   end
 
   # Terminal states a re-validation must not walk back out of.

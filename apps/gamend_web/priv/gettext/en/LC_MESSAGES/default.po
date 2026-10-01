@@ -3255,3 +3255,127 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} min read"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr ""
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr ""

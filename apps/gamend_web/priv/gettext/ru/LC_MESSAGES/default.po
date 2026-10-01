@@ -3302,3 +3302,127 @@ msgstr "Подтверждение по этой ссылке удаляет п�
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} мин чтения"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Аккаунт и безопасность"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "Сообщения об аккаунте, например ссылки для входа, отправляются всегда."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Автоматически (это устройство): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Сообщения в чате"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Выбери, что мы тебе присылаем"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Выбери, что мы тебе присылаем: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Выбери, о чём и где мы тебе сообщаем."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "Готово. Больше никаких писем о: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "Готово. По почте мы будем присылать только сообщения об аккаунте."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "Пришлите мне письмо: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "Настройки писем"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "Письма о: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Друзья и группы"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "На сайте"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Телефон"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Задания и награды"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Настройки"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Отписаться от всех писем"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Отписаться от этих писем"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Отписаться от этих писем: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Эта ссылка не работает. Войди, чтобы выбрать, что мы тебе присылаем."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Часовой пояс"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "Снова включить письма"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Снова включить уведомления"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Отключить все письма"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Отключить все уведомления на телефоне"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Отключить всё"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Снова включить уведомления на телефоне"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Ты не получаешь ни одного из этих писем."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Ты получаешь это письмо, потому что включил письма для: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "По нему считаются твой день и напоминания."

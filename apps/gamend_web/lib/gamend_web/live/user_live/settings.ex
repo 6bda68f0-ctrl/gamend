@@ -35,7 +35,7 @@ defmodule GamendWeb.UserLive.Settings do
                      cancel_friend remove_friend unblock_friend search_prev search_next
                      incoming_prev incoming_next outgoing_prev outgoing_next friends_prev
                      friends_next blocked_prev blocked_next)
-  @notifications_events ~w(notify_toggle notify_switch)
+  @notifications_events ~w(notify_toggle notify_switch notify_time_zone)
   @payments_events ~w(cancel_stripe_subscription open_stripe_portal)
   @wallet_events ~w(wallet_ledger_prev wallet_ledger_next)
   @items_events ~w(items_prev items_next)

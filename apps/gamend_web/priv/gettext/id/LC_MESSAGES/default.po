@@ -3204,3 +3204,127 @@ msgstr "Mengonfirmasi dengan tautan ini akan menghapus kata sandi yang dipakai s
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} menit baca"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Akun dan keamanan"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "Pesan akun, seperti tautan masuk, selalu dikirim."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Otomatis (perangkat ini): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Pesan obrolan"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Pilih apa yang kami kirim"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Pilih apa yang kami kirim: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Pilih apa yang kami beri tahu, dan di mana."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "Selesai. Tidak ada lagi email tentang: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "Selesai. Kami hanya akan mengirim pesan akun lewat email."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "Kirimi aku email: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "Pengaturan email"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "Email tentang: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Teman dan grup"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "Di situs"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Ponsel"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Misi dan hadiah"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Pengaturan"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Berhenti menerima semua email"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Berhenti menerima email ini"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Berhenti menerima email ini: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Tautan ini tidak berfungsi. Masuk untuk memilih apa yang kami kirim."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Zona waktu"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "Nyalakan lagi email"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Nyalakan lagi notifikasi"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Matikan semua email"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Matikan semua notifikasi ponsel"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Matikan semuanya"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Nyalakan lagi notifikasi ponsel"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Kamu tidak menerima satu pun email ini."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Kamu menerima email ini karena mengaktifkan email untuk: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "Harimu dan pengingatmu mengikutinya."

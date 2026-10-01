@@ -363,9 +363,10 @@ defmodule GamendWeb.UserAuth do
       changes =
         %{}
         |> then(fn acc ->
-          if zone != prefs["timezone"] and Accounts.TimeZone.valid?(zone),
-            do: Map.put(acc, "timezone", zone),
-            else: acc
+          if zone != prefs["timezone"] and not Accounts.TimeZone.manual?(user) and
+               Accounts.TimeZone.valid?(zone),
+             do: Map.put(acc, "timezone", zone),
+             else: acc
         end)
         |> then(fn acc ->
           if is_binary(locale) and byte_size(locale) <= 16 and locale != prefs["locale"],

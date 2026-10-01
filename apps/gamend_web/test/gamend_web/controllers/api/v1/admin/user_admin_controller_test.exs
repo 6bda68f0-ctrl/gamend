@@ -72,5 +72,12 @@ defmodule GamendWeb.Api.V1.Admin.UserAdminControllerTest do
              |> delete("/api/v1/admin/users/#{user.id}/sessions")
              |> json_response(200) == %{"ok" => true}
     end
+
+    test "deleting a session that is not there, or an id that is not one, is not_found", ctx do
+      for id <- [Ecto.UUID.generate(), "not-a-uuid"] do
+        assert ctx.admin_conn |> delete("/api/v1/admin/sessions/#{id}") |> json_response(404) ==
+                 %{"error" => "not_found"}
+      end
+    end
   end
 end

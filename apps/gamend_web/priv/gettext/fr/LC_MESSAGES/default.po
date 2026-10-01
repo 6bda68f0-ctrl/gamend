@@ -3253,3 +3253,127 @@ msgstr "Confirmer avec ce lien supprime le mot de passe avec lequel ce compte a 
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} min de lecture"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Compte et sécurité"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "Les messages du compte, comme les liens de connexion, sont toujours envoyés."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Automatique (cet appareil) : %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Messages du chat"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Choisis ce que nous t'envoyons"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Choisis ce que nous t'envoyons : %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Choisis ce que nous te disons, et où."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "C'est fait. Plus d'e-mails pour : %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "C'est fait. Nous ne t'enverrons plus que les messages de ton compte."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "M'envoyer un e-mail : %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "Réglages des e-mails"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "E-mails pour : %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Amis et groupes"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "Sur le site"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Téléphone"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Quêtes et récompenses"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Réglages"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Ne plus recevoir aucun e-mail"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Ne plus recevoir ces e-mails"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Ne plus recevoir ces e-mails : %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Ce lien ne fonctionne pas. Connecte-toi pour choisir ce que nous t'envoyons."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Fuseau horaire"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "Réactiver les e-mails"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Réactiver les notifications"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Couper tous les e-mails"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Couper toutes les notifications sur le téléphone"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Tout couper"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Réactiver les notifications sur le téléphone"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Tu ne reçois aucun de ces e-mails."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Tu reçois cet e-mail parce que tu as activé les e-mails pour : %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "Ta journée et tes rappels le suivent."

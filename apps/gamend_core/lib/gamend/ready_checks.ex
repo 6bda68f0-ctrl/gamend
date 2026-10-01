@@ -192,13 +192,17 @@ defmodule Gamend.ReadyChecks do
       metadata: Keyword.get(opts, :metadata, %{})
     }
 
-    Gamend.AfterCommit.transaction(fn ->
-      with {:ok, check} <- %Check{} |> Check.changeset(check_attrs) |> Repo.insert(),
-           :ok <- insert_participants(check, user_ids, pre_ready, tickets) do
-        check
-      else
-        {:error, reason} -> Repo.rollback(reason)
-      end
+    # The lobby or party was read before this; deleted since, the check would
+    # point at nothing, and the database refuses it.
+    Repo.rescue_foreign_key(:not_found, fn ->
+      Gamend.AfterCommit.transaction(fn ->
+        with {:ok, check} <- %Check{} |> Check.changeset(check_attrs) |> Repo.insert(),
+             :ok <- insert_participants(check, user_ids, pre_ready, tickets) do
+          check
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
     end)
   end
 
@@ -525,10 +529,15 @@ defmodule Gamend.ReadyChecks do
 
   defp do_add_member(nil, _user_id), do: :ok
 
+  # Runs after the join committed, so the check may have gone with its lobby
+  # or party since it was read: nobody is left to answer it, and the join
+  # stands.
   defp do_add_member(check, user_id) do
-    %Participant{}
-    |> Participant.changeset(%{ready_check_id: check.id, user_id: user_id, state: "pending"})
-    |> Repo.insert()
+    Repo.rescue_foreign_key(:gone, fn ->
+      %Participant{}
+      |> Participant.changeset(%{ready_check_id: check.id, user_id: user_id, state: "pending"})
+      |> Repo.insert()
+    end)
     |> case do
       {:ok, _participant} ->
         broadcast(Repo.preload(check, :participants, force: true), "ready_check_updated")

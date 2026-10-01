@@ -3253,3 +3253,127 @@ msgstr "Tällä linkillä vahvistaminen poistaa salasanan, jolla tili rekisterö
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} min lukuaika"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Tili ja turvallisuus"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "Tiliä koskevat viestit, kuten kirjautumislinkit, lähetetään aina."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Automaattinen (tämä laite): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Chat-viestit"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Valitse, mitä lähetämme sinulle"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Valitse, mitä lähetämme sinulle: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Valitse, mitä kerromme sinulle ja missä."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "Valmis. Ei enää sähköposteja aiheesta: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "Valmis. Lähetämme sinulle sähköpostilla vain tiliä koskevat viestit."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "Lähetä minulle sähköposti: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "Sähköpostiasetukset"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "Sähköpostit aiheesta: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Kaverit ja ryhmät"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "Sivustolla"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Puhelin"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Tehtävät ja palkinnot"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Asetukset"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Lopeta kaikki sähköpostit"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Lopeta nämä sähköpostit"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Lopeta nämä sähköpostit: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Tämä linkki ei toimi. Kirjaudu sisään valitaksesi, mitä lähetämme sinulle."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Aikavyöhyke"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "Ota sähköpostit taas käyttöön"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Ota ilmoitukset taas käyttöön"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Poista kaikki sähköpostit käytöstä"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Poista kaikki puhelinilmoitukset käytöstä"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Poista kaikki käytöstä"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Ota puhelinilmoitukset taas käyttöön"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Et saa mitään näistä sähköposteista."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Saat tämän sähköpostin, koska laitoit sähköpostit päälle aiheesta: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "Päiväsi ja muistutuksesi seuraavat sitä."

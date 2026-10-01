@@ -2,6 +2,7 @@ defmodule GamendWeb.AdminLive.Parties do
   use GamendWeb, :live_view
 
   alias Gamend.Parties
+  alias GamendWeb.AdminLive.Shared
   alias GamendWeb.LiveHelpers
 
   @impl true
@@ -542,17 +543,16 @@ defmodule GamendWeb.AdminLive.Parties do
 
   @impl true
   def handle_event("edit_party", %{"id" => id}, socket) do
-    party_id = to_string(id)
-    party = Parties.get_party!(party_id)
-    changeset = Parties.change_party(party)
-    form = to_form(changeset, as: "party")
+    Shared.with_record(socket, Parties.get_party(to_string(id)), fn party ->
+      form = party |> Parties.change_party() |> to_form(as: "party")
 
-    {:noreply,
-     socket
-     |> assign(:selected_party, party)
-     |> assign(:form, form)
-     |> assign(:members, [])
-     |> assign(:show_members, false)}
+      {:noreply,
+       socket
+       |> assign(:selected_party, party)
+       |> assign(:form, form)
+       |> assign(:members, [])
+       |> assign(:show_members, false)}
+    end)
   end
 
   @impl true
@@ -607,17 +607,15 @@ defmodule GamendWeb.AdminLive.Parties do
 
   @impl true
   def handle_event("view_members", %{"id" => id}, socket) do
-    party_id = to_string(id)
-    party = Parties.get_party!(party_id)
-    members = Parties.get_party_members(party_id)
-
-    {:noreply,
-     socket
-     |> assign(:selected_party, party)
-     |> assign(:members, members)
-     |> assign(:show_members, true)
-     |> assign(:form, nil)
-     |> assign(:add_member_id, "")}
+    Shared.with_record(socket, Parties.get_party(to_string(id)), fn party ->
+      {:noreply,
+       socket
+       |> assign(:selected_party, party)
+       |> assign(:members, Parties.get_party_members(party.id))
+       |> assign(:show_members, true)
+       |> assign(:form, nil)
+       |> assign(:add_member_id, "")}
+    end)
   end
 
   @impl true

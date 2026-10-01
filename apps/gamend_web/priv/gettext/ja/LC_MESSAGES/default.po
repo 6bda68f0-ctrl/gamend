@@ -3204,3 +3204,127 @@ msgstr "このリンクで確認すると、このアカウントの登録時に
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count}分で読めます"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "アカウントとセキュリティ"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "ログインリンクなどのアカウントに関するお知らせは常に送信されます。"
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "自動（この端末）: %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "チャットメッセージ"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "受け取る内容を選ぶ"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "受け取る内容を選ぶ: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "何を、どこでお知らせするかを選んでください。"
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "完了しました。次のメールは届きません: %{group}。"
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "完了しました。今後メールで届くのはアカウントに関するお知らせだけです。"
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "メールで知らせる: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "メール設定"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "次に関するメール: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "フレンドとグループ"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "サイト上"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "スマホ"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "クエストと報酬"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "設定"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "すべてのメールを停止"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "このメールを停止"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "このメールの配信を停止: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "このリンクは使えません。ログインして受け取る内容を選んでください。"
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "タイムゾーン"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "メールを再びオン"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "通知を再びオン"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "すべてのメールをオフ"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "スマホの通知をすべてオフ"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "すべてオフ"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "スマホの通知を再びオン"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "これらのメールは届いていません。"
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "このメールは、次のメールをオンにしているため送信されています: %{group}。"
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "あなたの1日とリマインダーはこれに従います。"

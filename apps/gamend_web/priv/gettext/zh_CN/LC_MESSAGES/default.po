@@ -3204,3 +3204,127 @@ msgstr "通过此链接确认会删除注册此账户时设置的密码，请在
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "阅读时间 %{count} 分钟"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "账户与安全"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "账户消息（例如登录链接）总会发送。"
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "自动（此设备）：%{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "聊天消息"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "选择我们给你发送的内容"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "选择我们给你发送的内容：%{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "选择我们通知你什么，以及在哪里通知。"
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "已完成。不再发送关于以下内容的邮件：%{group}。"
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "已完成。我们只会通过邮件发送账户相关消息。"
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "发邮件给我：%{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "邮件设置"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "关于以下内容的邮件：%{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "好友与群组"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "在网站上"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "手机"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "任务与奖励"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "设置"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "不再接收任何邮件"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "不再接收这类邮件"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "不再接收这类邮件：%{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "此链接无效。请登录后选择我们给你发送的内容。"
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "时区"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "重新开启邮件"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "重新开启通知"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "关闭所有邮件"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "关闭所有手机通知"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "全部关闭"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "重新开启手机通知"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "你不会收到这些邮件。"
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "你收到这封邮件，是因为你开启了以下内容的邮件：%{group}。"
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "你的一天和提醒都按此时区计算。"

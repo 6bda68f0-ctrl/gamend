@@ -165,6 +165,7 @@ defmodule GamendWeb.Api.V1.Admin.GroupController do
   defp do_delete(conn, group_id) do
     case Groups.admin_delete_group(group_id) do
       {:ok, _} -> reply_ok(conn)
+      {:error, :not_found} -> not_found(conn)
       {:error, %Ecto.Changeset{} = changeset} -> unprocessable(conn, changeset)
       {:error, reason} -> reply_rejected(conn, reason)
     end

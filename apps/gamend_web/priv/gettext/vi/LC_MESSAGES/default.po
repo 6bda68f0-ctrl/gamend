@@ -3204,3 +3204,127 @@ msgstr "Xác nhận bằng liên kết này sẽ xóa mật khẩu mà tài kho�
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} phút đọc"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Tài khoản và bảo mật"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "Tin nhắn về tài khoản, như liên kết đăng nhập, luôn được gửi."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Tự động (thiết bị này): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Tin nhắn trò chuyện"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Chọn những gì chúng tôi gửi cho bạn"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Chọn những gì chúng tôi gửi cho bạn: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Chọn những gì chúng tôi báo cho bạn, và ở đâu."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "Xong. Không còn email về: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "Xong. Chúng tôi chỉ gửi email về tài khoản của bạn."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "Gửi email cho tôi: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "Cài đặt email"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "Email về: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Bạn bè và nhóm"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "Trên trang web"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Điện thoại"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Nhiệm vụ và phần thưởng"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Cài đặt"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Ngừng nhận mọi email"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Ngừng nhận các email này"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Ngừng nhận các email này: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Liên kết này không hoạt động. Hãy đăng nhập để chọn những gì chúng tôi gửi cho bạn."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Múi giờ"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "Bật lại email"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Bật lại thông báo"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Tắt mọi email"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Tắt mọi thông báo trên điện thoại"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Tắt tất cả"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Bật lại thông báo trên điện thoại"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Bạn không nhận email nào trong số này."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Bạn nhận email này vì đã bật email cho: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "Ngày của bạn và lời nhắc theo múi giờ này."

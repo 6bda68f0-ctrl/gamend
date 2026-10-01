@@ -166,10 +166,14 @@ defmodule GamendWeb.Api.V1.HookControllerTest do
     end
 
     body3 = %{"plugin" => plugin_name, "fn" => "boom", "args" => []}
-    conn3 = post(conn, "/api/v1/hooks/call", body3)
 
-    assert %{"error" => "exception", "message" => details} = json_response(conn3, 400)
-    assert details =~ "boom"
+    # A raise is the plugin's bug: 500, no detail on the wire, the trace in the log.
+    {conn3, log} =
+      ExUnit.CaptureLog.with_log(fn -> post(conn, "/api/v1/hooks/call", body3) end)
+
+    assert json_response(conn3, 500) == %{"error" => "exception"}
+    assert log =~ ".boom/0 raised"
+    assert log =~ "(RuntimeError) boom"
   end
 
   test "POST /api/v1/hooks/call converts typed protobuf hooks to and from JSON", %{conn: conn} do

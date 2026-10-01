@@ -369,6 +369,33 @@ defmodule Gamend.ChatModerationTest do
       assert {:error, :not_found} = Reports.report_message(reporter.id, Ecto.UUID.generate(), nil)
     end
 
+    test "reporting a message deleted as it is read answers not_found",
+         %{reporter: reporter, message: message} do
+      test_pid = self()
+      handler = {__MODULE__, :delete_message_after_read, System.unique_integer()}
+
+      :telemetry.attach(
+        handler,
+        [:gamend, :repo, :query],
+        fn _event, _measurements, meta, _config ->
+          if self() == test_pid and meta[:source] == "chat_messages" and
+               String.starts_with?(meta[:query], "SELECT") and !Process.get(:message_deleted) do
+            Process.put(:message_deleted, true)
+            Repo.delete_all(from m in Message, where: m.id == ^message.id)
+          end
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      result = Reports.report_message(reporter.id, message.id, "abusive")
+
+      assert Process.get(:message_deleted)
+      assert result == {:error, :not_found}
+      assert Reports.count_open_reports() == 0
+    end
+
     test "the report survives deletion of the message", %{reporter: reporter, message: message} do
       {:ok, report} = Reports.report_message(reporter.id, message.id, "abusive")
       {:ok, _} = Repo.delete(message)

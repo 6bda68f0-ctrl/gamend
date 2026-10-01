@@ -38,6 +38,8 @@ defmodule Gamend.Accounts do
     UserToken
   }
 
+  require Logger
+
   # Upper bound on cross-node staleness for cached user structs: explicit
   # invalidations propagate immediately via `Gamend.Cache.invalidate/1`,
   # and the cache TTL caps staleness if an invalidation broadcast is ever missed.
@@ -1063,35 +1065,24 @@ defmodule Gamend.Accounts do
   @doc """
   Deletes a user and associated resources.
 
-  Returns `{:ok, user}` on success or `{:error, changeset}` on failure.
+  Returns `{:ok, user}` on success, `{:error, :not_found}` when the user was
+  deleted first, or `{:error, changeset}` on failure.
   """
   alias Gamend.Lobbies
 
-  @spec delete_user(User.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  @spec delete_user(User.t()) :: {:ok, User.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def delete_user(%User{} = user) do
     # Best-effort: try to remove the user from any party they may belong to.
     # If they are the leader the party is disbanded (PubSub + cache cleanup).
-    try do
-      _ = Gamend.Parties.leave_party(user)
-    rescue
-      _ -> :ok
-    end
+    best_effort(user, "leave party", fn -> Gamend.Parties.leave_party(user) end)
 
     # Best-effort: try to remove the user from any lobby they may belong to,
     # then delete the user regardless of hook checks (hooks for deletion were removed).
-    try do
-      _ = Lobbies.leave_lobby(user)
-    rescue
-      _ -> :ok
-    end
+    best_effort(user, "leave lobby", fn -> Lobbies.leave_lobby(user) end)
 
     # Clean up group memberships (admin transfer + empty-group deletion)
     # before the DB cascade silently removes the membership rows.
-    try do
-      _ = Gamend.Groups.handle_user_deletion(user.id)
-    rescue
-      _ -> :ok
-    end
+    best_effort(user, "group cleanup", fn -> Gamend.Groups.handle_user_deletion(user.id) end)
 
     # Mark the user offline and notify friends before deleting the row.
     # Re-fetch to get current is_online state (the passed struct may be stale).
@@ -1101,7 +1092,8 @@ defmodule Gamend.Accounts do
       _ = set_user_offline(fresh_user.id)
     end
 
-    case Repo.delete(user) do
+    # Two deletes racing (an admin and retention): the second finds no row.
+    case Repo.rescue_stale(:not_found, fn -> Repo.delete(user) end) do
       {:ok, _user} = ok ->
         invalidate_users_count_cache()
 
@@ -1112,11 +1104,9 @@ defmodule Gamend.Accounts do
         # Isolated like the steps above: the row is already gone, so a failure
         # here must not skip the cleanups below — storage in particular, which
         # nothing else would ever revisit.
-        try do
-          _ = Gamend.Chat.cleanup_chat("friend", user.id)
-        rescue
-          _ -> :ok
-        end
+        best_effort(user, "friend chat cleanup", fn ->
+          Gamend.Chat.cleanup_chat("friend", user.id)
+        end)
 
         # Deleting cache entries asynchronously can cause a short-lived race where
         # a delete followed immediately by a device login sees a stale cached user
@@ -1137,8 +1127,19 @@ defmodule Gamend.Accounts do
       err ->
         err
     end
+  end
 
-    # end delete_user
+  # One cleanup step of `delete_user/1`. Each is isolated, so one raising stops
+  # neither the delete nor the steps after it; the raise is still a bug
+  # somewhere, logged with its stack trace rather than swallowed.
+  defp best_effort(%User{id: user_id}, step, fun) do
+    _ = fun.()
+    :ok
+  rescue
+    e ->
+      Logger.error(
+        "delete_user #{user_id}: #{step} failed\n" <> Exception.format(:error, e, __STACKTRACE__)
+      )
   end
 
   ## Token helper

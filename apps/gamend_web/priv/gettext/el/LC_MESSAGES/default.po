@@ -3253,3 +3253,127 @@ msgstr "Η επιβεβαίωση με αυτόν τον σύνδεσμο αφα
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} λεπ. ανάγνωσης"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Λογαριασμός και ασφάλεια"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "Τα μηνύματα του λογαριασμού, όπως οι σύνδεσμοι σύνδεσης, στέλνονται πάντα."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Αυτόματα (αυτή η συσκευή): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Μηνύματα συνομιλίας"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Διάλεξε τι σου στέλνουμε"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Διάλεξε τι σου στέλνουμε: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Διάλεξε τι σου λέμε και πού."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "Έγινε. Όχι άλλα email για: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "Έγινε. Με email θα σου στέλνουμε μόνο μηνύματα για τον λογαριασμό."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "Στείλε μου email: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "Ρυθμίσεις email"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "Email για: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Φίλοι και ομάδες"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "Στον ιστότοπο"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Κινητό"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Αποστολές και ανταμοιβές"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Ρυθμίσεις"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Διακοπή όλων των email"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Διακοπή αυτών των email"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Διακοπή αυτών των email: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Αυτός ο σύνδεσμος δεν λειτουργεί. Συνδέσου για να διαλέξεις τι σου στέλνουμε."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Ζώνη ώρας"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "Ενεργοποίηση ξανά των email"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Ενεργοποίηση ξανά των ειδοποιήσεων"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Απενεργοποίηση όλων των email"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Απενεργοποίηση όλων των ειδοποιήσεων στο κινητό"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Απενεργοποίηση όλων"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Ενεργοποίηση ξανά των ειδοποιήσεων στο κινητό"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Δεν λαμβάνεις κανένα από αυτά τα email."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Λαμβάνεις αυτό το email επειδή ενεργοποίησες τα email για: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "Η μέρα σου και οι υπενθυμίσεις σου την ακολουθούν."

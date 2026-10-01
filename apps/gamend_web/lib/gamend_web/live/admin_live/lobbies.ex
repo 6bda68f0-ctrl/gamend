@@ -5,6 +5,7 @@ defmodule GamendWeb.AdminLive.Lobbies do
   alias Gamend.Lobbies
   alias Gamend.Lobbies.SpectatorTracker
   alias Gamend.ReadyChecks
+  alias GamendWeb.AdminLive.Shared
   alias GamendWeb.LiveHelpers
 
   @impl true
@@ -571,18 +572,16 @@ defmodule GamendWeb.AdminLive.Lobbies do
 
   @impl true
   def handle_event("view_members", %{"id" => id}, socket) do
-    lobby_id = to_string(id)
-    lobby = Lobbies.get_lobby!(lobby_id)
-    members = lobby_members(lobby_id)
-
-    {:noreply,
-     socket
-     |> assign(:selected_lobby, lobby)
-     |> assign(:members, members)
-     |> assign(:ready_check, ReadyChecks.pending_for_lobby(lobby_id))
-     |> assign(:show_members, true)
-     |> assign(:form, nil)
-     |> assign(:add_member_id, "")}
+    Shared.with_record(socket, Lobbies.get_lobby(to_string(id)), fn lobby ->
+      {:noreply,
+       socket
+       |> assign(:selected_lobby, lobby)
+       |> assign(:members, lobby_members(lobby.id))
+       |> assign(:ready_check, ReadyChecks.pending_for_lobby(lobby.id))
+       |> assign(:show_members, true)
+       |> assign(:form, nil)
+       |> assign(:add_member_id, "")}
+    end)
   end
 
   @impl true
@@ -714,11 +713,17 @@ defmodule GamendWeb.AdminLive.Lobbies do
 
     {deleted, failed} =
       Enum.reduce(ids, {0, 0}, fn id, {d, f} ->
-        lobby = Lobbies.get_lobby!(id)
+        case Lobbies.get_lobby(id) do
+          # Deleted since it was ticked: the outcome asked for.
+          nil ->
+            {d + 1, f}
 
-        case Lobbies.delete_lobby(lobby) do
-          {:ok, _} -> {d + 1, f}
-          {:error, _} -> {d, f + 1}
+          lobby ->
+            case Lobbies.delete_lobby(lobby) do
+              {:ok, _} -> {d + 1, f}
+              {:error, :not_found} -> {d + 1, f}
+              {:error, _} -> {d, f + 1}
+            end
         end
       end)
 
@@ -753,17 +758,16 @@ defmodule GamendWeb.AdminLive.Lobbies do
   end
 
   def handle_event("edit_lobby", %{"id" => id}, socket) do
-    lobby_id = to_string(id)
-    lobby = Lobbies.get_lobby!(lobby_id)
-    changeset = Lobbies.change_lobby(lobby)
-    form = to_form(changeset, as: "lobby")
+    Shared.with_record(socket, Lobbies.get_lobby(to_string(id)), fn lobby ->
+      form = lobby |> Lobbies.change_lobby() |> to_form(as: "lobby")
 
-    {:noreply,
-     socket
-     |> assign(:selected_lobby, lobby)
-     |> assign(:form, form)
-     |> assign(:members, [])
-     |> assign(:show_members, false)}
+      {:noreply,
+       socket
+       |> assign(:selected_lobby, lobby)
+       |> assign(:form, form)
+       |> assign(:members, [])
+       |> assign(:show_members, false)}
+    end)
   end
 
   def handle_event("cancel_edit", _, socket) do
@@ -809,19 +813,21 @@ defmodule GamendWeb.AdminLive.Lobbies do
   end
 
   def handle_event("delete_lobby", %{"id" => id}, socket) do
-    lobby_id = to_string(id)
-    lobby = Lobbies.get_lobby!(lobby_id)
+    Shared.with_record(socket, Lobbies.get_lobby(to_string(id)), fn lobby ->
+      case Lobbies.delete_lobby(lobby) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Lobby deleted")
+           |> reload_lobbies()}
 
-    case Lobbies.delete_lobby(lobby) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Lobby deleted")
-         |> reload_lobbies()}
+        {:error, :not_found} ->
+          {:noreply, socket |> put_flash(:error, Shared.gone_message()) |> reload_lobbies()}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to delete lobby")}
-    end
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to delete lobby")}
+      end
+    end)
   end
 
   defp normalize_metadata(params) do

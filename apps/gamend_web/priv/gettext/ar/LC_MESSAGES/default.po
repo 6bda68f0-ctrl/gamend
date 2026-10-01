@@ -3449,3 +3449,127 @@ msgstr "التأكيد عبر هذا الرابط يزيل كلمة المرور
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "وقت القراءة: %{count} د"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "الحساب والأمان"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "رسائل الحساب، مثل روابط تسجيل الدخول، تُرسل دائمًا."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "تلقائي (هذا الجهاز): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "رسائل الدردشة"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "اختر ما نرسله إليك"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "اختر ما نرسله إليك: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "اختر ما نخبرك به، وأين."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "تم. لا مزيد من الرسائل عن: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "تم. لن نرسل إليك بالبريد سوى رسائل الحساب."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "راسلني بالبريد: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "إعدادات البريد الإلكتروني"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "رسائل عن: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "الأصدقاء والمجموعات"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "على الموقع"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "الهاتف"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "المهام والمكافآت"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "الإعدادات"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "أوقف كل الرسائل"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "أوقف هذه الرسائل"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "أوقف هذه الرسائل: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "هذا الرابط لا يعمل. سجّل الدخول لتختار ما نرسله إليك."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "المنطقة الزمنية"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "إعادة تشغيل الرسائل البريدية"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "إعادة تشغيل الإشعارات"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "إيقاف كل الرسائل البريدية"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "إيقاف كل إشعارات الهاتف"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "إيقاف كل شيء"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "إعادة تشغيل إشعارات الهاتف"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "لا تصلك أي من هذه الرسائل."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "تصلك هذه الرسالة لأنك فعّلت الرسائل من أجل: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "يومك وتذكيراتك يتبعانها."

@@ -6,6 +6,7 @@ defmodule Gamend.ReadyChecksTest do
   alias Gamend.Lobbies
   alias Gamend.ReadyChecks
   alias Gamend.ReadyChecks.Check
+  alias Gamend.ReadyChecks.Participant
 
   setup do
     host = AccountsFixtures.user_fixture()
@@ -73,6 +74,13 @@ defmodule Gamend.ReadyChecksTest do
     test "an accept check must have a deadline_at", ctx do
       assert {:error, _} =
                ReadyChecks.open(ctx.lobby, ctx.members, kind: "accept", timeout_ms: nil)
+    end
+
+    test "opening a board for a lobby deleted after it was read answers not_found", ctx do
+      {:ok, _} = Lobbies.delete_lobby(ctx.lobby)
+
+      assert ReadyChecks.open(ctx.lobby, ctx.members) == {:error, :not_found}
+      refute Repo.exists?(from c in Check, where: c.lobby_id == ^ctx.lobby.id)
     end
   end
 
@@ -305,6 +313,33 @@ defmodule Gamend.ReadyChecksTest do
       {:ok, _} = Lobbies.delete_lobby(ctx.lobby)
 
       assert ReadyChecks.get_check(check.id) == nil
+    end
+
+    test "a joiner's seat on a board deleted as it is read is dropped and the add answers ok",
+         ctx do
+      {:ok, check} = ReadyChecks.open(ctx.lobby, ctx.members)
+      late = AccountsFixtures.user_fixture()
+      pid = self()
+      handler = {__MODULE__, :delete_check_after_read, System.unique_integer()}
+
+      :telemetry.attach(
+        handler,
+        [:gamend, :repo, :query],
+        fn _event, _measurements, meta, _config ->
+          if self() == pid and meta[:source] == "ready_checks" and !Process.get(:check_deleted) do
+            Process.put(:check_deleted, true)
+            Repo.delete_all(from c in Check, where: c.id == ^check.id)
+          end
+        end,
+        nil
+      )
+
+      result = ReadyChecks.add_member(ctx.lobby.id, late.id)
+      :telemetry.detach(handler)
+
+      assert Process.get(:check_deleted)
+      assert result == :ok
+      refute Repo.exists?(from p in Participant, where: p.user_id == ^late.id)
     end
   end
 

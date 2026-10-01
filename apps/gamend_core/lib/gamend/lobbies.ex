@@ -646,14 +646,21 @@ defmodule Gamend.Lobbies do
          :ok <- check_password(lobby, opt(opts, :password)) do
       Lock.serialize(:lobby, lobby.id, fn ->
         with :ok <- check_seat(lobby, user_id),
-             {:ok, updated_user} <-
-               create_membership(%{lobby_id: lobby.id, user_id: user_id}) do
+             {:ok, updated_user} <- seat(lobby.id, user_id) do
           updated_user
         else
           {:error, reason} -> Repo.rollback(reason)
         end
       end)
     end
+  end
+
+  # The lobby was read before the lock, and a delete in between leaves the
+  # membership pointing at nothing (`Repo.rescue_foreign_key/2`).
+  defp seat(lobby_id, user_id) do
+    Repo.rescue_foreign_key(:not_found, fn ->
+      create_membership(%{lobby_id: lobby_id, user_id: user_id})
+    end)
   end
 
   defp check_seat(lobby, user_id) do
@@ -916,16 +923,22 @@ defmodule Gamend.Lobbies do
   Not castable through `update_lobby/2`, so a client `PATCH` cannot reach them.
   Go through `Gamend.Signaling.configure/2` rather than calling this.
   """
-  @spec write_webrtc_config(Lobby.t(), map()) :: {:ok, Lobby.t()} | {:error, Ecto.Changeset.t()}
+  @spec write_webrtc_config(Lobby.t(), map()) ::
+          {:ok, Lobby.t()} | {:error, Ecto.Changeset.t() | :not_found}
   def write_webrtc_config(%Lobby{} = lobby, changes) when is_map(changes) do
-    lobby
-    |> Ecto.Changeset.change(changes)
-    |> Repo.update()
+    Repo.rescue_stale(:not_found, fn ->
+      lobby
+      |> Ecto.Changeset.change(changes)
+      |> Repo.update()
+    end)
     |> case do
       {:ok, updated} = ok ->
         _ = invalidate_lobby_cache(updated.id)
         broadcast_lobby(updated.id, {:lobby_updated, updated})
         ok
+
+      {:error, :not_found} = gone ->
+        gone
 
       {:error, changeset} = error ->
         Logger.warning(
@@ -1015,9 +1028,11 @@ defmodule Gamend.Lobbies do
 
   defp apply_lobby_update(lobby, attrs) do
     result =
-      lobby
-      |> Lobby.changeset(normalize_changeset_params(attrs))
-      |> Repo.update()
+      Repo.rescue_stale(:not_found, fn ->
+        lobby
+        |> Lobby.changeset(normalize_changeset_params(attrs))
+        |> Repo.update()
+      end)
 
     case result do
       {:ok, updated} ->
@@ -1139,12 +1154,15 @@ defmodule Gamend.Lobbies do
   end
 
   defp write_state(lobby, to) do
-    lobby
-    |> Ecto.Changeset.change(%{state: to, state_changed_at: DateTime.utc_now(:second)})
-    |> Repo.update()
+    Repo.rescue_stale(:not_found, fn ->
+      lobby
+      |> Ecto.Changeset.change(%{state: to, state_changed_at: DateTime.utc_now(:second)})
+      |> Repo.update()
+    end)
   end
 
-  @spec delete_lobby(Lobby.t()) :: {:ok, Lobby.t()} | {:error, Ecto.Changeset.t() | term()}
+  @spec delete_lobby(Lobby.t()) ::
+          {:ok, Lobby.t()} | {:error, :not_found | {:hook_rejected, term()}}
   def delete_lobby(%Lobby{} = lobby) do
     case Gamend.Hooks.internal_call(:before_lobby_delete, [lobby]) do
       {:ok, _} ->
@@ -1204,15 +1222,12 @@ defmodule Gamend.Lobbies do
 
       _ = KV.delete_lobby_entries(lobby_id)
 
-      case Repo.delete(lobby) do
+      # Deleted since it was read: by a second disband, an admin or retention.
+      case Repo.rescue_stale(:not_found, fn -> Repo.delete(lobby) end) do
         {:ok, deleted} -> {deleted, members}
         {:error, reason} -> Repo.rollback(reason)
       end
     end)
-  rescue
-    exception -> {:error, exception}
-  catch
-    kind, reason -> {:error, {kind, reason}}
   end
 
   @spec change_lobby(Lobby.t()) :: Ecto.Changeset.t()
@@ -1318,10 +1333,21 @@ defmodule Gamend.Lobbies do
     lobby_id = lobby.id
     emptied_capture = prepare_emptied_capture(lobby, user_id, membership.id)
 
+    # The lobby's lock, as join and delete take: "no one is left, so delete
+    # it" spans the members and the lobby, and a join landing in between was
+    # cleared by the foreign key while being told it had joined. Seat and host
+    # are decided on the rows as they are now: a leave just before may have
+    # handed this player the host, or a kick unseated them.
     result =
-      Gamend.AfterCommit.transaction(fn ->
-        Repo.update!(Ecto.Changeset.change(membership, %{lobby_id: nil}))
-        handle_host_transfer(lobby, user_id, membership.id)
+      Lock.serialize(:lobby, lobby_id, fn ->
+        unseat =
+          from(u in User, where: u.id == ^user_id and u.lobby_id == ^lobby_id)
+          |> Repo.update_all(set: [lobby_id: nil, updated_at: DateTime.utc_now(:second)])
+
+        case unseat do
+          {1, _} -> handle_host_transfer(Repo.get(Lobby, lobby_id), user_id, membership.id)
+          {0, _} -> Repo.rollback(:not_in_lobby)
+        end
       end)
 
     if match?({:ok, :lobby_deleted}, result), do: Gamend.LobbySnapshots.record(emptied_capture)
@@ -1339,10 +1365,6 @@ defmodule Gamend.Lobbies do
     result
     |> broadcast_leave_result(lobby_id, user_id)
     |> maybe_run_after_lobby_leave(user_id, lobby)
-  rescue
-    Ecto.StaleEntryError ->
-      # Race condition: user was concurrently removed (double leave, kicked, etc.)
-      {:error, :not_in_lobby}
   end
 
   defp run_before_lobby_leave(user_id, lobby) do
@@ -1373,8 +1395,9 @@ defmodule Gamend.Lobbies do
   # reading and hashing it held the only SQLite write lock. It is recorded only
   # if the lobby was then deleted. No one else seated is checked again inside:
   # a player joining in between keeps the lobby, and the capture is dropped.
-  defp prepare_emptied_capture(lobby, user_id, membership_id) do
-    if lobby.host_id == user_id and not lobby.hostless and
+  # Not the host as read here: a leave just before may have handed it over.
+  defp prepare_emptied_capture(lobby, _user_id, membership_id) do
+    if not lobby.hostless and
          not Repo.exists?(
            from u in Gamend.Accounts.User,
              where: u.lobby_id == ^lobby.id and u.id != ^membership_id
@@ -1382,6 +1405,8 @@ defmodule Gamend.Lobbies do
       Gamend.LobbySnapshots.prepare(lobby.id, "lobby:emptied")
     end
   end
+
+  defp handle_host_transfer(nil, _user_id, _membership_id), do: :ok
 
   defp handle_host_transfer(lobby, user_id, membership_id) do
     # if user was host, transfer host or delete lobby if empty
@@ -1415,6 +1440,7 @@ defmodule Gamend.Lobbies do
   defp broadcast_leave_result(result, lobby_id, user_id) do
     case result do
       {:ok, :lobby_deleted} ->
+        Gamend.Async.run(fn -> Gamend.Chat.cleanup_chat("lobby", lobby_id) end)
         _ = invalidate_accounts_user_cache(user_id)
         _ = invalidate_lobby_cache(lobby_id)
         maybe_broadcast_user_updated(user_id)
@@ -1497,9 +1523,12 @@ defmodule Gamend.Lobbies do
   """
   @spec kick_user(User.t(), Lobby.t(), User.t()) :: {:ok, User.t()} | {:error, term()}
   def kick_user(%User{id: host_id} = host, %Lobby{id: lobby_id}, %User{id: target_id}) do
-    lobby = get_lobby!(lobby_id)
+    lobby = get_lobby(lobby_id)
 
     cond do
+      is_nil(lobby) ->
+        {:error, :not_found}
+
       not can_manage_lobby?(host, lobby) ->
         {:error, :not_host}
 
@@ -1531,7 +1560,7 @@ defmodule Gamend.Lobbies do
            lobby
          ]) do
       {:ok, _} ->
-        result = Repo.update(Ecto.Changeset.change(membership, %{lobby_id: nil}))
+        result = unseat_kicked(host_user, membership.id, lobby.id)
 
         case result do
           {:ok, updated} ->
@@ -1578,6 +1607,25 @@ defmodule Gamend.Lobbies do
       {:error, reason} ->
         {:error, {:hook_rejected, reason}}
     end
+  end
+
+  # Under the lobby's lock, as a leave takes, with authority and seat read as
+  # they are now: a leave may have handed the host over, or the target left
+  # and sat down elsewhere, since they were read.
+  defp unseat_kicked(host_user, target_id, lobby_id) do
+    Lock.serialize(:lobby, lobby_id, fn ->
+      with %Lobby{} = current <- Repo.get(Lobby, lobby_id),
+           true <- can_manage_lobby?(host_user, current),
+           {1, _} <-
+             from(u in User, where: u.id == ^target_id and u.lobby_id == ^lobby_id)
+             |> Repo.update_all(set: [lobby_id: nil, updated_at: DateTime.utc_now(:second)]) do
+        Repo.get!(User, target_id)
+      else
+        nil -> Repo.rollback(:not_found)
+        false -> Repo.rollback(:not_host)
+        {0, _} -> Repo.rollback(:not_in_lobby)
+      end
+    end)
   end
 
   @doc """
@@ -1861,6 +1909,8 @@ defmodule Gamend.Lobbies do
     case do_join(user.id, lobby, %{}) do
       {:ok, _} -> {:halt, {:ok, lobby}}
       {:error, :full} -> {:cont, {:none, []}}
+      # Disbanded after the candidates were read: try the next one.
+      {:error, :not_found} -> {:cont, {:none, []}}
       {:error, {:hook_rejected, _reason}} -> {:cont, {:none, []}}
       other -> {:halt, other}
     end

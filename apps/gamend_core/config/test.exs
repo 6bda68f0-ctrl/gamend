@@ -89,13 +89,8 @@ config :gamend_core, Gamend.Tournaments.Ticker, enabled: false
 config :gamend_core, Gamend.Retention, enabled: false
 config :gamend_core, Gamend.Matchmaking.Worker, enabled: false
 
-# NOTE: deliberately NOT setting `async_inline: true` here, unlike the root
-# config/test.exs. Payments call Gamend.Async.run/1 from inside a
-# Repo.transaction, and the hook fanout blocks on a Task that needs its own
-# connection — inline, that Task waits on the connection its own caller is
-# holding for the transaction, times out after 15s and rolls back. It fails
-# 7 payments/entitlement tests. The stray "client exited" disconnects that
-# inline mode would silence need a fix in Async/Hooks, not this knob.
+# As the root config/test.exs has it, so a run here and one from the root agree.
+config :gamend_core, async_inline: true
 
 # Jobs run inline on demand in tests (no queues/plugins/cron). Kept in sync with
 # the root config/test.exs.

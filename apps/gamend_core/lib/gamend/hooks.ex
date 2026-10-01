@@ -454,8 +454,7 @@ defmodule Gamend.Hooks do
             try do
               apply(mod, name, args)
             rescue
-              e in FunctionClauseError -> {:error, {:function_clause, Exception.message(e)}}
-              e -> {:error, {:exception, Exception.message(e)}}
+              e -> rescued(e, __STACKTRACE__, {mod, name, args})
             catch
               kind, reason -> {:error, {kind, reason}}
             end
@@ -526,7 +525,7 @@ defmodule Gamend.Hooks do
           other -> {:ok, other}
         end
       rescue
-        e -> {:error, {:exception, Exception.message(e)}}
+        e -> rescued(e, __STACKTRACE__, {mod, name, args})
       catch
         kind, reason -> {:error, {kind, reason}}
       end
@@ -1182,8 +1181,7 @@ defmodule Gamend.Hooks do
         try do
           apply(mod, name, args)
         rescue
-          e in FunctionClauseError -> {:error, {:function_clause, Exception.message(e)}}
-          e -> {:error, {:exception, Exception.message(e)}}
+          e -> rescued(e, __STACKTRACE__, {mod, name, args})
         catch
           kind, reason -> {:error, {kind, reason}}
         end
@@ -1194,6 +1192,34 @@ defmodule Gamend.Hooks do
       nil -> {:error, :timeout}
       {:exit, reason} -> {:error, {:exit, reason}}
     end
+  end
+
+  @doc false
+  # What a hook that raised answers, for every runner here and in
+  # `Gamend.Hooks.PluginManager`. The hook's own clauses refusing the
+  # arguments is the caller's mistake: `{:function_clause, message}`. Any
+  # other raise, a `FunctionClauseError` from deeper in the plugin included,
+  # is a bug in it: logged here with the stack trace, which is gone once it
+  # is a tuple, and answered as `{:exception, message}`.
+  @spec rescued(Exception.t(), Exception.stacktrace(), {module(), atom(), list()}) ::
+          {:error, {:function_clause | :exception, String.t()}}
+  def rescued(%FunctionClauseError{module: mod} = e, stacktrace, {mod, fun, args} = call) do
+    # The compiler may name the clauses it refuses `-inlined-<fun>/<arity>-`.
+    if e.arity == length(args) and
+         (e.function == fun or Atom.to_string(e.function) == "-inlined-#{fun}/#{e.arity}-"),
+       do: {:error, {:function_clause, Exception.message(e)}},
+       else: log_raise(e, stacktrace, call)
+  end
+
+  def rescued(exception, stacktrace, call), do: log_raise(exception, stacktrace, call)
+
+  defp log_raise(exception, stacktrace, {mod, fun, args}) do
+    Logger.error(
+      "hook #{inspect(mod)}.#{fun}/#{length(args)} raised\n" <>
+        Exception.format(:error, exception, stacktrace)
+    )
+
+    {:error, {:exception, Exception.message(exception)}}
   end
 
   defp defaults_for_missing_callback(name, args) do

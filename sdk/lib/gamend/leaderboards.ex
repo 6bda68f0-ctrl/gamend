@@ -458,6 +458,35 @@ defmodule Gamend.Leaderboards do
   end
 
   @doc ~S"""
+    Gets a record by its ID, or `nil` when there is none (or `id` is not a UUID).
+    
+    Intended for internal/admin usage.
+    
+  """
+  @spec get_record(Ecto.UUID.t()) :: Gamend.Leaderboards.Record.t() | nil
+  def get_record(_id) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        if :erlang.phash2(make_ref(), 2) == 0,
+          do: nil,
+          else: %Gamend.Leaderboards.Record{
+            id: 0,
+            leaderboard_id: 0,
+            user_id: 0,
+            label: nil,
+            score: 0,
+            rank: nil,
+            metadata: %{},
+            inserted_at: ~U[1970-01-01 00:00:00Z],
+            updated_at: ~U[1970-01-01 00:00:00Z]
+          }
+
+      _ ->
+        raise "Gamend.Leaderboards.get_record/1 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
     Gets a single record by leaderboard ID and user ID.
     
   """
@@ -485,10 +514,7 @@ defmodule Gamend.Leaderboards do
   end
 
   @doc ~S"""
-    Gets a record by its ID. Raises if not found.
-    
-    Intended for internal/admin usage.
-    
+    Like `get_record/1`, but raises `Ecto.NoResultsError` when there is none.
   """
   @spec get_record!(Ecto.UUID.t()) :: Gamend.Leaderboards.Record.t()
   def get_record!(_id) do

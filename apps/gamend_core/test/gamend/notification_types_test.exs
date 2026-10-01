@@ -21,7 +21,7 @@ defmodule Gamend.NotificationTypesTest do
     for code <- ~w(friend_request friend_accepted friend_rejected
                    group_invite group_invite_accepted group_invite_declined
                    group_join_request group_join_request_approved group_join_request_rejected
-                   group_kicked group_promoted group_demoted
+                   group_kicked group_deleted group_promoted group_demoted
                    party_invite party_invite_accepted party_invite_declined party_kicked
                    lobby_kicked
                    chat_friend chat_group chat_lobby chat_party

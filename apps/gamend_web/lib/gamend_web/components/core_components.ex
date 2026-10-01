@@ -344,7 +344,8 @@ defmodule GamendWeb.CoreComponents do
 
   The icon sits at `start`, not `left` (Arabic reads the other way), and on
   `z-10`: daisyUI's `.input` is positioned, so it painted over an icon before
-  it. `autocomplete` is off unless the caller says otherwise.
+  it. `autocomplete` is off unless the caller says otherwise. With an X of ours the
+  browser's own clear button for `type="search"` is hidden, or a box shows two.
   """
   def search_input(assigns) do
     assigns = update(assigns, :rest, &Map.put_new(&1, :autocomplete, "off"))
@@ -359,7 +360,11 @@ defmodule GamendWeb.CoreComponents do
         type={@type}
         placeholder={@label}
         aria-label={@label}
-        class={["input w-full ps-9", @close && "pe-10", @input_class]}
+        class={[
+          "input w-full ps-9",
+          @close && "pe-10 [&::-webkit-search-cancel-button]:hidden",
+          @input_class
+        ]}
         {@rest}
       />
       <button

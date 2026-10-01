@@ -59,6 +59,12 @@ pub fn decline_group_invite(node, invite_id) {
     gamend::rest(node, "POST", `/api/v1/groups/invitations/${invite_id}/decline`)
 }
 
+/// Delete a group (admin only)
+/// `DELETE /api/v1/groups/{id}`
+pub fn delete_group(node, id) {
+    gamend::rest(node, "DELETE", `/api/v1/groups/${id}`)
+}
+
 /// Demote admin to member
 /// `POST /api/v1/groups/{id}/demote`
 pub fn demote_group_member(node, id, params) {

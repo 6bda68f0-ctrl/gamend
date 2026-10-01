@@ -90,13 +90,30 @@ defmodule GamendWeb.UserLive.Settings.NotificationsTab do
           {gettext("Account messages, such as sign-in links, are always sent.")}
         </p>
 
-        <p id="notify-time-zone" class="text-sm">
-          <span class="font-medium">{gettext("Time zone")}:</span>
-          {TimeZone.of(@user) || "UTC"}
-          <span class="text-base-content/70">
-            {gettext("(from this device; reminders come in your evening)")}
-          </span>
-        </p>
+        <form id="notify-time-zone" phx-change="notify_time_zone" class="space-y-1">
+          <label for="notify-time-zone-select" class="text-sm font-medium">
+            {gettext("Time zone")}
+          </label>
+          <select
+            id="notify-time-zone-select"
+            name="zone"
+            class="select select-bordered select-sm w-full max-w-xs"
+          >
+            <option value="" selected={not TimeZone.manual?(@user)}>
+              {gettext("Automatic (this device): %{zone}", zone: TimeZone.of(@user) || "UTC")}
+            </option>
+            <option
+              :for={zone <- TimeZone.names()}
+              value={zone}
+              selected={TimeZone.manual?(@user) and TimeZone.of(@user) == zone}
+            >
+              {zone}
+            </option>
+          </select>
+          <p class="text-sm text-base-content/70">
+            {gettext("Your day and your reminders follow it.")}
+          </p>
+        </form>
       </div>
     </div>
     """
@@ -145,6 +162,13 @@ defmodule GamendWeb.UserLive.Settings.NotificationsTab do
         else: Preferences.turn_off(user, which)
 
     case result do
+      {:ok, user} -> {:noreply, assign(socket, :user, user)}
+      {:error, _reason} -> {:noreply, put_flash(socket, :error, gettext("Failed"))}
+    end
+  end
+
+  def handle_event("notify_time_zone", %{"zone" => zone}, socket) do
+    case TimeZone.choose(socket.assigns.user, if(zone == "", do: nil, else: zone)) do
       {:ok, user} -> {:noreply, assign(socket, :user, user)}
       {:error, _reason} -> {:noreply, put_flash(socket, :error, gettext("Failed"))}
     end

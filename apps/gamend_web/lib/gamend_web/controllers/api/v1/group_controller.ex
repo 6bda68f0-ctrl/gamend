@@ -174,6 +174,29 @@ defmodule GamendWeb.Api.V1.GroupController do
     ]
   )
 
+  operation(:delete,
+    operation_id: "delete_group",
+    summary: "Delete a group (admin only)",
+    description:
+      "Delete a group with everyone in it. Only group admins can. Each other member " <>
+        "gets a `group_deleted` notification, and the groups channel a `group_deleted` event.",
+    security: [%{"authorization" => []}],
+    parameters: [
+      id: [
+        in: :path,
+        schema: %Schema{type: :string, format: :uuid},
+        description: "Group ID",
+        required: true
+      ]
+    ],
+    responses: [
+      ok: {"Group deleted", "application/json", OkResponse},
+      forbidden: Schemas.error("Not an admin, or a hook refused"),
+      not_found: Schemas.error("Group not found"),
+      unauthorized: Schemas.error("Not authenticated")
+    ]
+  )
+
   operation(:join,
     operation_id: "join_group",
     summary: "Join a group",
@@ -707,6 +730,9 @@ defmodule GamendWeb.Api.V1.GroupController do
             {:error, :not_admin} ->
               reply_error(conn, :forbidden, "not_admin")
 
+            {:error, :not_found} ->
+              reply_error(conn, :not_found, "not_found")
+
             {:error, :max_members_too_low} ->
               reply_error(conn, :unprocessable_entity, "max_members_too_low")
 
@@ -715,6 +741,23 @@ defmodule GamendWeb.Api.V1.GroupController do
 
             {:error, reason} when is_atom(reason) ->
               reply_error(conn, :unprocessable_entity, reason)
+          end
+      end
+    end)
+  end
+
+  def delete(conn, %{"id" => id}) do
+    with_auth(conn, fn user ->
+      case parse_id(id) do
+        nil ->
+          reply_error(conn, :not_found, "not_found")
+
+        group_id ->
+          case Groups.delete_group(user.id, group_id) do
+            {:ok, _} -> reply_ok(conn)
+            {:error, :not_found} -> reply_error(conn, :not_found, "not_found")
+            {:error, :not_admin} -> reply_error(conn, :forbidden, "not_admin")
+            {:error, _hook_refused} -> reply_error(conn, :forbidden, "rejected")
           end
       end
     end)
@@ -803,6 +846,10 @@ defmodule GamendWeb.Api.V1.GroupController do
     case Groups.set_icon_url(user.id, group_id, url) do
       {:ok, group} ->
         reply_data(conn, serialize_group(group))
+
+      # Deleted since `with_group_admin/4` read it.
+      {:error, :not_found} ->
+        reply_error(conn, :not_found, "not_found")
 
       {:error, _reason} ->
         reply_error(conn, :unprocessable_entity, "invalid_data")

@@ -60,6 +60,42 @@ defmodule Gamend.TournamentsTest do
       do: notify({:after_tournament_finished, tournament.id, standings})
   end
 
+  # Changes the tournament between the context's read and its write, keyed on
+  # the title so only the test that asks for it is affected.
+  defmodule ChangingTournamentHook do
+    use Gamend.TestSupport.NoopHooks
+
+    @impl true
+    def before_tournament_register(user, tournament) do
+      case tournament.title do
+        "cancelled-as-joined" -> {:ok, _} = Tournaments.cancel_tournament(tournament)
+        "deleted-as-joined" -> {:ok, _} = Tournaments.delete_tournament(tournament)
+        _ -> :ok
+      end
+
+      {:ok, {user, tournament}}
+    end
+
+    @impl true
+    def before_tournament_leave(user, tournament) do
+      case tournament.title do
+        "drawn-as-left" ->
+          {:ok, due} =
+            Tournaments.update_tournament(tournament, %{starts_at: DateTime.utc_now(:second)})
+
+          %Tournament{state: "running"} = Tournaments.advance_lifecycle(due)
+
+        "deleted-as-left" ->
+          {:ok, _} = Tournaments.delete_tournament(tournament)
+
+        _ ->
+          :ok
+      end
+
+      {:ok, {user, tournament}}
+    end
+  end
+
   setup do
     orig_mod = Application.get_env(:gamend_core, :hooks_module)
     Application.put_env(:gamend_core, :hooks_module, CaptureHook)
@@ -657,6 +693,67 @@ defmodule Gamend.TournamentsTest do
 
       assert %Tournament{state: "running"} = Tournaments.get_tournament(tournament.id)
       assert_receive {:tournament_match_ready, _}
+    end
+  end
+
+  describe "a tournament that changes between its read and the write" do
+    setup do
+      Application.put_env(:gamend_core, :hooks_module, ChangingTournamentHook)
+      :ok
+    end
+
+    test "joining a tournament cancelled as it is read answers registration_closed" do
+      tournament = create_tournament(%{title: "cancelled-as-joined"})
+      [user] = users(1)
+
+      assert Tournaments.join_tournament(user, tournament) == {:error, :registration_closed}
+      assert Repo.get!(Tournament, tournament.id).state == "cancelled"
+      assert Tournaments.count_entries(tournament.id) == 0
+    end
+
+    test "joining a tournament deleted as it is read answers not_found and writes no entry" do
+      tournament = create_tournament(%{title: "deleted-as-joined"})
+      [user] = users(1)
+
+      assert Tournaments.join_tournament(user, tournament) == {:error, :not_found}
+      assert Repo.get(Tournament, tournament.id) == nil
+      assert Repo.all(from e in Tournaments.Entry, where: e.leader_id == ^user.id) == []
+    end
+
+    test "leaving a tournament drawn as it is read answers already_drawn and keeps the entry" do
+      tournament = create_tournament(%{title: "drawn-as-left"})
+      [leaver, _rival] = players = users(2)
+      join_all(tournament, players)
+
+      assert Tournaments.leave_tournament(leaver, tournament) == {:error, :already_drawn}
+      assert Repo.get!(Tournament, tournament.id).state == "running"
+      assert %Tournaments.Entry{state: "active"} = Tournaments.get_entry(tournament.id, leaver.id)
+    end
+
+    test "leaving a tournament deleted as it is read answers not_found" do
+      tournament = create_tournament(%{title: "deleted-as-left"})
+      [user] = users(1)
+      join_all(tournament, [user])
+
+      assert Tournaments.leave_tournament(user, tournament) == {:error, :not_found}
+      assert Repo.get(Tournament, tournament.id) == nil
+    end
+
+    test "deleting a tournament twice answers not_found the second time" do
+      tournament = create_tournament()
+
+      assert {:ok, _} = Tournaments.delete_tournament(tournament)
+      assert Tournaments.delete_tournament(tournament) == {:error, :not_found}
+    end
+
+    test "changing the state of a tournament already deleted answers not_found" do
+      tournament = create_tournament()
+      {:ok, cancelled} = Tournaments.cancel_tournament(tournament)
+      {:ok, _} = Tournaments.delete_tournament(tournament)
+
+      assert Tournaments.cancel_tournament(tournament) == {:error, :not_found}
+      assert Tournaments.reopen_tournament(cancelled) == {:error, :not_found}
+      assert Tournaments.advance_lifecycle(tournament) == tournament
     end
   end
 end

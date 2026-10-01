@@ -4,7 +4,9 @@ defmodule Gamend.Accounts.TimeZone do
   (`"Europe/Bucharest"`) kept in their private preferences
   (`Gamend.Accounts.Preferences`), taken from the browser
   (`Intl.DateTimeFormat().resolvedOptions().timeZone`, sent on connect) or
-  chosen in settings. Unknown or unset, everything falls back to UTC.
+  chosen in settings. A zone chosen by hand (`choose/2`) stays until the user
+  goes back to automatic: the browser no longer overwrites it
+  (`manual?/1`). Unknown or unset, everything falls back to UTC.
 
   The `tz` database is passed to `DateTime.shift_zone/3` explicitly, so a
   host needs no global `:time_zone_database` config.
@@ -15,6 +17,8 @@ defmodule Gamend.Accounts.TimeZone do
 
   @db Tz.TimeZoneDatabase
   @key "timezone"
+  @manual "timezone_manual"
+  @names_key {__MODULE__, :names}
 
   @doc "Whether `name` is a time zone the database knows."
   @spec valid?(term()) :: boolean()
@@ -42,6 +46,65 @@ defmodule Gamend.Accounts.TimeZone do
       not valid?(name) -> {:error, :invalid_time_zone}
       of(user) == name -> {:ok, user}
       true -> Preferences.update(user, &Map.put(&1, @key, name))
+    end
+  end
+
+  @doc """
+  The user's own pick: `name` is kept and the browser stops replacing it;
+  `nil` goes back to automatic (the browser's zone, from the next visit).
+  """
+  @spec choose(User.t(), String.t() | nil) :: {:ok, User.t()} | {:error, term()}
+  def choose(%User{} = user, nil), do: Preferences.update(user, &Map.delete(&1, @manual))
+
+  def choose(%User{} = user, name) do
+    if valid?(name),
+      do: Preferences.update(user, &Map.merge(&1, %{@key => name, @manual => true})),
+      else: {:error, :invalid_time_zone}
+  end
+
+  @doc "Whether the user picked their time zone by hand (`choose/2`)."
+  @spec manual?(User.t() | nil) :: boolean()
+  def manual?(user), do: Preferences.get(user)[@manual] == true
+
+  @doc """
+  Every time zone a person picks from, sorted: the IANA zones of
+  `zone1970.tab` (one per region, not every alias), plus `UTC`. Read once
+  from the `tz` package's own data and kept.
+  """
+  @spec names() :: [String.t()]
+  def names do
+    case :persistent_term.get(@names_key, nil) do
+      nil ->
+        names = read_names()
+        :persistent_term.put(@names_key, names)
+        names
+
+      names ->
+        names
+    end
+  end
+
+  defp read_names do
+    :tz
+    |> Application.app_dir("priv")
+    |> Path.join("tzdata*/zone1970.tab")
+    |> Path.wildcard()
+    |> Enum.sort()
+    |> List.last()
+    |> case do
+      nil ->
+        ["UTC"]
+
+      path ->
+        path
+        |> File.stream!()
+        |> Stream.reject(&String.starts_with?(&1, "#"))
+        |> Stream.map(&(&1 |> String.split("\t") |> Enum.at(2)))
+        |> Stream.reject(&is_nil/1)
+        |> Enum.map(&String.trim/1)
+        |> Kernel.++(["UTC"])
+        |> Enum.uniq()
+        |> Enum.sort()
     end
   end
 

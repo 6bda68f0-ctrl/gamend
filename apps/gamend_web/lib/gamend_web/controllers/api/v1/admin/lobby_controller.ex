@@ -151,11 +151,9 @@ defmodule GamendWeb.Api.V1.Admin.LobbyController do
           {:error, {:hook_rejected, reason}} ->
             reply_rejected(conn, reason)
 
-          {:error, %Ecto.Changeset{} = cs} ->
-            unprocessable(conn, cs)
-
-          {:error, reason} ->
-            failure(conn, reason)
+          # Deleted since it was read.
+          {:error, :not_found} ->
+            reply_error(conn, :not_found, "not_found")
         end
     end
   end

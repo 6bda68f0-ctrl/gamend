@@ -31,9 +31,13 @@ defmodule Gamend.PartiesTest do
 
   alias Gamend.Accounts
   alias Gamend.AccountsFixtures
+  alias Gamend.Chat.Message
   alias Gamend.Friends
   alias Gamend.Lobbies
+  alias Gamend.Lobbies.Lobby
   alias Gamend.Parties
+  alias Gamend.Parties.Party
+  alias Gamend.Parties.PartyInvite
 
   setup do
     leader = AccountsFixtures.user_fixture() |> AccountsFixtures.set_password()
@@ -1138,5 +1142,207 @@ defmodule Gamend.PartiesTest do
       updated_leader = Accounts.get_user(leader.id)
       assert is_nil(updated_leader.party_id)
     end
+  end
+
+  describe "the leader leaving while a member acts on the party they read" do
+    test "a member handed the party as they leave disbands it rather than leaving it led by nobody",
+         %{leader: leader, member1: member1} do
+      {:ok, party} = Parties.create_party(leader, %{max_size: 4})
+      add_member_to_party(member1, party)
+
+      result =
+        vanish_after(
+          &(&1[:source] == "parties"),
+          fn -> {:ok, :left} = Parties.leave_party(leader) end,
+          fn -> Parties.leave_party(member1) end
+        )
+
+      assert Process.get(:vanished)
+      assert result == {:ok, :disbanded}
+      refute Repo.get(Party, party.id)
+      assert Repo.get(Accounts.User, member1.id).party_id == nil
+    end
+
+    test "a kick landing after the leader handed the party to its target answers not_leader",
+         %{leader: leader, member1: member1} do
+      {:ok, party} = Parties.create_party(leader, %{max_size: 4})
+      add_member_to_party(member1, party)
+
+      result =
+        vanish_after(
+          &(&1[:source] == "parties"),
+          fn -> {:ok, :left} = Parties.leave_party(leader) end,
+          fn -> Parties.kick_member(leader, member1.id) end
+        )
+
+      assert Process.get(:vanished)
+      assert result == {:error, :not_leader}
+      assert Repo.get!(Party, party.id).leader_id == member1.id
+      assert Repo.get(Accounts.User, member1.id).party_id == party.id
+    end
+  end
+
+  describe "a parent deleted between its read and the write" do
+    test "accepting an invite to a party deleted as the join reads it leaves the joiner out", %{
+      leader: leader,
+      member1: member1
+    } do
+      {:ok, party} = Parties.create_party(leader, %{max_size: 4})
+      make_friends(leader, member1)
+      {:ok, _} = Parties.invite_to_party(leader, member1.id)
+
+      # The read inside the join's lock: the delete joins that transaction and
+      # rolls back with it, so only the answer is asserted.
+      result =
+        vanish_after(
+          &(&1[:source] == "parties" and Repo.in_transaction?()),
+          fn -> delete_party(party.id) end,
+          fn -> Parties.accept_party_invite(member1, party.id) end
+        )
+
+      assert Process.get(:vanished)
+      assert result == {:error, :not_found}
+      assert Repo.get(Accounts.User, member1.id).party_id == nil
+    end
+
+    test "inviting into a party deleted after it was read answers not_found and writes no invite",
+         %{leader: leader, member1: member1} do
+      {:ok, party} = Parties.create_party(leader, %{max_size: 4})
+      make_friends(leader, member1)
+
+      result =
+        vanish_after(
+          &(&1[:source] == "party_invites"),
+          fn -> delete_party(party.id) end,
+          fn -> Parties.invite_to_party(leader, member1.id) end
+        )
+
+      assert Process.get(:vanished)
+      assert result == {:error, :not_found}
+      refute Repo.exists?(from i in PartyInvite, where: i.recipient_id == ^member1.id)
+    end
+
+    @tag :capture_log
+    test "a party joining a lobby deleted after it was read answers not_found and seats nobody",
+         %{leader: leader, member1: member1} do
+      {:ok, party} = Parties.create_party(leader, %{max_size: 4})
+      add_member_to_party(member1, party)
+      set_all_online([leader, member1])
+      host = AccountsFixtures.user_fixture() |> AccountsFixtures.set_password()
+      {:ok, lobby} = Lobbies.create_lobby(%{title: "doomed-lobby", host_id: host.id})
+
+      result =
+        vanish_after(
+          &(&1[:source] == "lobbies"),
+          fn -> delete_lobby(lobby.id) end,
+          fn -> Parties.join_lobby_with_party(leader, lobby.id) end
+        )
+
+      assert Process.get(:vanished)
+      assert result == {:error, :not_found}
+      refute Repo.exists?(from u in Accounts.User, where: u.lobby_id == ^lobby.id)
+      assert Repo.get(Accounts.User, leader.id).lobby_id == nil
+      assert Repo.get(Accounts.User, member1.id).lobby_id == nil
+    end
+
+    @tag :capture_log
+    test "a party quick join moves past a candidate disbanded as it joins", %{
+      leader: leader,
+      member1: member1
+    } do
+      {:ok, party} = Parties.create_party(leader, %{max_size: 4})
+      add_member_to_party(member1, party)
+      set_all_online([leader, member1])
+      host = AccountsFixtures.user_fixture() |> AccountsFixtures.set_password()
+
+      {:ok, vanishing} =
+        Lobbies.create_lobby(%{title: "vanishing-room", host_id: host.id, max_users: 4})
+
+      # The candidate query is the first read of lobbies.
+      result =
+        vanish_after(
+          &(&1[:source] == "lobbies"),
+          fn -> delete_lobby(vanishing.id) end,
+          fn -> Parties.quick_join_with_party(leader, %{max_users: 4}) end
+        )
+
+      assert Process.get(:vanished)
+      assert {:ok, fresh} = result
+      refute fresh.id == vanishing.id
+      assert Repo.get(Accounts.User, leader.id).lobby_id == fresh.id
+      assert Repo.get(Accounts.User, member1.id).lobby_id == fresh.id
+    end
+
+    test "disbanding clears every member and the party's chat, and a second disband answers",
+         %{leader: leader, member1: member1, member2: member2} do
+      {:ok, party} = Parties.create_party(leader, %{max_size: 4})
+      add_member_to_party(member1, party)
+      add_member_to_party(member2, party)
+      post_party_message(leader, party)
+      assert party_chat(party.id) == 1
+
+      assert Parties.disband(party) == {:ok, :disbanded}
+
+      refute Repo.exists?(from u in Accounts.User, where: u.party_id == ^party.id)
+      assert party_chat(party.id) == 0
+      assert Parties.disband(party) == {:ok, :disbanded}
+    end
+
+    test "an admin delete clears every member and the party's chat, and a second answers not_found",
+         %{leader: leader, member1: member1, member2: member2} do
+      {:ok, party} = Parties.create_party(leader, %{max_size: 4})
+      add_member_to_party(member1, party)
+      add_member_to_party(member2, party)
+      post_party_message(member1, party)
+      assert party_chat(party.id) == 1
+
+      assert {:ok, %Party{id: id}} = Parties.admin_delete_party(party.id)
+      assert id == party.id
+
+      refute Repo.exists?(from u in Accounts.User, where: u.party_id == ^party.id)
+      assert party_chat(party.id) == 0
+      assert Parties.admin_delete_party(party.id) == {:error, :not_found}
+    end
+  end
+
+  # Runs `fun`, deleting a row with `vanish` the first time this process runs a
+  # query `picks?` matches.
+  defp vanish_after(picks?, vanish, fun) do
+    pid = self()
+    handler = {__MODULE__, :vanish_after, System.unique_integer()}
+
+    :telemetry.attach(
+      handler,
+      [:gamend, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if self() == pid and !Process.get(:vanished) and picks?.(meta) do
+          Process.put(:vanished, true)
+          vanish.()
+        end
+      end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(handler)
+    end
+  end
+
+  defp delete_party(party_id), do: Repo.delete_all(from p in Party, where: p.id == ^party_id)
+  defp delete_lobby(lobby_id), do: Repo.delete_all(from l in Lobby, where: l.id == ^lobby_id)
+
+  defp party_chat(party_id) do
+    Repo.aggregate(
+      from(m in Message, where: m.chat_type == "party" and m.chat_ref_id == ^party_id),
+      :count
+    )
+  end
+
+  defp post_party_message(sender, party) do
+    %Message{sender_id: sender.id}
+    |> Message.changeset(%{chat_type: "party", chat_ref_id: party.id, content: "gg"})
+    |> Repo.insert!()
   end
 end

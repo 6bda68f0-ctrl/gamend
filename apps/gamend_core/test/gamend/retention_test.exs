@@ -35,21 +35,24 @@ defmodule Gamend.RetentionTest do
     Application.put_env(:gamend_core, Gamend.Retention, chat_messages_days: 30)
 
     a = AccountsFixtures.user_fixture()
+    # A live conversation, so only age decides: chat whose group no longer
+    # exists goes regardless (`orphaned_chat`).
+    {:ok, group} = Gamend.Groups.create_group(a.id, %{title: "chat-#{unique()}"})
 
     old =
       Repo.insert!(%Gamend.Chat.Message{
         sender_id: a.id,
         content: "old",
-        chat_type: "lobby",
-        chat_ref_id: Ecto.UUID.generate()
+        chat_type: "group",
+        chat_ref_id: group.id
       })
 
     fresh =
       Repo.insert!(%Gamend.Chat.Message{
         sender_id: a.id,
         content: "fresh",
-        chat_type: "lobby",
-        chat_ref_id: Ecto.UUID.generate()
+        chat_type: "group",
+        chat_ref_id: group.id
       })
 
     backdate(Gamend.Chat.Message, old.id, 31)
@@ -65,13 +68,14 @@ defmodule Gamend.RetentionTest do
     Application.put_env(:gamend_core, Gamend.Retention, chat_messages_days: 0)
 
     a = AccountsFixtures.user_fixture()
+    {:ok, group} = Gamend.Groups.create_group(a.id, %{title: "chat-#{unique()}"})
 
     old =
       Repo.insert!(%Gamend.Chat.Message{
         sender_id: a.id,
         content: "old",
-        chat_type: "lobby",
-        chat_ref_id: Ecto.UUID.generate()
+        chat_type: "group",
+        chat_ref_id: group.id
       })
 
     backdate(Gamend.Chat.Message, old.id, 400)
@@ -80,6 +84,41 @@ defmodule Gamend.RetentionTest do
 
     assert results.chat_messages == 0
     assert Repo.get(Gamend.Chat.Message, old.id)
+  end
+
+  # A message sent as its group is deleted lands after the delete's cleanup:
+  # nothing else would ever remove it.
+  test "prunes the chat of a group that no longer exists, and keeps a live one's" do
+    a = AccountsFixtures.user_fixture()
+    {:ok, group} = Gamend.Groups.create_group(a.id, %{title: "chat-#{unique()}"})
+    gone = Ecto.UUID.generate()
+
+    message = fn ref ->
+      Repo.insert!(%Gamend.Chat.Message{
+        sender_id: a.id,
+        content: "hi",
+        chat_type: "group",
+        chat_ref_id: ref
+      })
+    end
+
+    live = message.(group.id)
+    orphan = message.(gone)
+
+    cursor =
+      Repo.insert!(%Gamend.Chat.ReadCursor{
+        user_id: a.id,
+        chat_type: "group",
+        chat_ref_id: gone,
+        last_read_message_id: orphan.id
+      })
+
+    results = Retention.prune_all()
+
+    assert results.orphaned_chat == 2
+    refute Repo.get(Gamend.Chat.Message, orphan.id)
+    refute Repo.get(Gamend.Chat.ReadCursor, cursor.id)
+    assert Repo.get(Gamend.Chat.Message, live.id)
   end
 
   test "prunes expired ip bans but keeps permanent and future ones" do
@@ -654,13 +693,14 @@ defmodule Gamend.RetentionTest do
       )
 
       user = AccountsFixtures.user_fixture()
+      {:ok, group} = Gamend.Groups.create_group(user.id, %{title: "chat-#{unique()}"})
 
       old =
         Repo.insert!(%Gamend.Chat.Message{
           sender_id: user.id,
           content: "old",
-          chat_type: "lobby",
-          chat_ref_id: Ecto.UUID.generate()
+          chat_type: "group",
+          chat_ref_id: group.id
         })
 
       backdate(Gamend.Chat.Message, old.id, 60)

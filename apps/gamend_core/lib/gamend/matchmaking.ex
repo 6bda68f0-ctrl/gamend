@@ -160,17 +160,11 @@ defmodule Gamend.Matchmaking do
       party_id: caller.party_id
     }
 
+    # The caller's party was read before this; disbanded since, a ticket would
+    # point at nothing, and the database refuses it.
     result =
-      Gamend.AfterCommit.transaction(fn ->
-        Enum.reduce_while(members, [], fn member, acc ->
-          %Ticket{}
-          |> Ticket.changeset(Map.put(base, :user_id, member.id))
-          |> Repo.insert()
-          |> case do
-            {:ok, ticket} -> {:cont, [{member, ticket} | acc]}
-            {:error, changeset} -> {:halt, Repo.rollback(changeset)}
-          end
-        end)
+      Repo.rescue_foreign_key(:not_found, fn ->
+        Gamend.AfterCommit.transaction(fn -> insert_member_tickets(members, base) end)
       end)
 
     with {:ok, inserted} <- result do
@@ -188,6 +182,18 @@ defmodule Gamend.Matchmaking do
 
       {:ok, Enum.find_value(inserted, fn {m, t} -> if m.id == caller.id, do: t end)}
     end
+  end
+
+  defp insert_member_tickets(members, base) do
+    Enum.reduce_while(members, [], fn member, acc ->
+      %Ticket{}
+      |> Ticket.changeset(Map.put(base, :user_id, member.id))
+      |> Repo.insert()
+      |> case do
+        {:ok, ticket} -> {:cont, [{member, ticket} | acc]}
+        {:error, changeset} -> {:halt, Repo.rollback(changeset)}
+      end
+    end)
   end
 
   @doc """
@@ -352,15 +358,20 @@ defmodule Gamend.Matchmaking do
   end
 
   @doc "Associates already-claimed tickets with their created lobby."
-  @spec assign_lobby([Ticket.t()], Ecto.UUID.t()) :: :ok
+  @spec assign_lobby([Ticket.t()], Ecto.UUID.t()) :: :ok | {:error, :not_found}
   def assign_lobby(tickets, lobby_id) do
     ids = Enum.map(tickets, & &1.id)
 
-    Ticket
-    |> where([t], t.id in ^ids)
-    |> Repo.update_all(set: [match_id: lobby_id, updated_at: DateTime.utc_now()])
+    # Only while the lobby is there, decided in the same statement: one deleted
+    # since would break the foreign key, and the raise stopped every other match
+    # in the sweep.
+    {assigned, _} =
+      Ticket
+      |> where([t], t.id in ^ids)
+      |> where(exists(from(l in Gamend.Lobbies.Lobby, where: l.id == ^lobby_id, select: 1)))
+      |> Repo.update_all(set: [match_id: lobby_id, updated_at: DateTime.utc_now()])
 
-    :ok
+    if assigned == 0 and ids != [], do: {:error, :not_found}, else: :ok
   end
 
   @doc """

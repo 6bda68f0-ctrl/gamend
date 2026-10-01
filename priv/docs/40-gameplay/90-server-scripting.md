@@ -248,7 +248,7 @@ curl -X POST https://your-gamend.com/api/v1/hooks/call \
   -d '{"plugin":"my_game_hook","fn":"hello_world","args":["Alice"]}'
 ```
 
-The answer is `{"data": <whatever the function returned>}`. An `{:error, reason}` from the function answers 400 with `reason` as the `error` code when it is a snake_case atom (so a game can switch on `not_enough_gold`), and `hook_error` with the detail in `message` otherwise. An unknown plugin or function is 404 (`plugin_not_found`, `not_implemented`), a hook that times out 504. `GET /api/v1/hooks` pages through what a client may call, each entry naming its `plugin` and `fn` exactly as the call takes them.
+The answer is `{"data": <whatever the function returned>}`. An `{:error, reason}` from the function answers 400 with `reason` as the `error` code when it is a snake_case atom (so a game can switch on `not_enough_gold`), and `hook_error` with the detail in `message` otherwise. Arguments none of the function's clauses accept answer 400 `function_clause`. A function that raises answers 500 `exception` with no detail, since the message can carry whatever the plugin touched; the server log has it with the stack trace. The channel's `call_hook` reply carries the same codes. An unknown plugin or function is 404 (`plugin_not_found`, `not_implemented`), a hook that times out 504. `GET /api/v1/hooks` pages through what a client may call, each entry naming its `plugin` and `fn` exactly as the call takes them.
 
 ### Server-only privileges
 

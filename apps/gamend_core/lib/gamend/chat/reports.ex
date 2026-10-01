@@ -83,10 +83,13 @@ defmodule Gamend.Chat.Reports do
     })
   end
 
+  # The message was read before this, and may have been deleted since.
   defp insert_report(attrs) do
-    %Report{}
-    |> Report.changeset(attrs)
-    |> Repo.insert()
+    Repo.rescue_foreign_key(:not_found, fn ->
+      %Report{}
+      |> Report.changeset(attrs)
+      |> Repo.insert()
+    end)
     |> case do
       {:ok, report} ->
         dispatch(:after_chat_message_reported, [report])
@@ -99,6 +102,9 @@ defmodule Gamend.Chat.Reports do
         else
           {:error, changeset}
         end
+
+      {:error, :not_found} = gone ->
+        gone
     end
   end
 

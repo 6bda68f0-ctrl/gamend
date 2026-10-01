@@ -59,6 +59,7 @@ All system-generated notifications include a type string in metadata for client-
   │ group_join_request_approved │ Your group join request was approved         │
   │ group_join_request_rejected │ Your group join request was declined         │
   │ group_kicked                │ You were removed from a group                │
+  │ group_deleted               │ A group you were in was deleted by an admin  │
   │ group_promoted              │ You were promoted to admin                   │
   │ group_demoted               │ You were demoted to member                   │
   └─────────────────────────────┴──────────────────────────────────────────────┘

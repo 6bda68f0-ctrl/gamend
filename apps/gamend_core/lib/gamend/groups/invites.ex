@@ -152,13 +152,16 @@ defmodule Gamend.Groups.Invites do
       sender = Gamend.Accounts.get_user(admin_id)
       target = Gamend.Accounts.get_user(target_user_id)
 
-      case %GroupInvite{}
-           |> GroupInvite.changeset(%{
-             group_id: group_id,
-             sender_id: admin_id,
-             recipient_id: target_user_id
-           })
-           |> Repo.insert() do
+      # The group or the recipient may have been deleted since they were read.
+      case Repo.rescue_foreign_key(:not_found, fn ->
+             %GroupInvite{}
+             |> GroupInvite.changeset(%{
+               group_id: group_id,
+               sender_id: admin_id,
+               recipient_id: target_user_id
+             })
+             |> Repo.insert()
+           end) do
         {:ok, invite} ->
           # Send an informational notification (independent of the invite record)
           Gamend.Notifications.admin_create_notification(admin_id, target_user_id, %{

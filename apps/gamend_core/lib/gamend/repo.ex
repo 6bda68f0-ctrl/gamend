@@ -19,6 +19,8 @@ defmodule Gamend.Repo do
     otp_app: :gamend_core,
     adapter: @adapter
 
+  require Ecto.Query
+
   # All tables use UUID (v7) primary/foreign keys — see Gamend.UUIDv7.
   # Set here (not only in config files) so host repos that configure the Repo
   # themselves still get binary_id migrations.
@@ -117,6 +119,41 @@ defmodule Gamend.Repo do
     do: foreign_key_error?(changeset)
 
   defp foreign_key_error?(_error), do: false
+
+  @doc """
+  Runs `fun`, answering `{:error, reason}` when the row it updates or deletes
+  was deleted first.
+
+  A struct read before a concurrent delete still names its row, and
+  `Repo.update/2` or `Repo.delete/2` on it raises `Ecto.StaleEntryError`. This
+  is the companion to `rescue_foreign_key/2` for that window: the race answers
+  as a read after the delete would have, instead of a 500. Both adapters raise
+  the same error, so there is one form to handle.
+  """
+  @spec rescue_stale(term(), (-> result)) :: result | {:error, term()} when result: term()
+  def rescue_stale(reason, fun) when is_function(fun, 0) do
+    fun.()
+  rescue
+    Ecto.StaleEntryError -> {:error, reason}
+  end
+
+  @doc """
+  Locks the rows `query` reads until the transaction ends: `:update` against
+  every other locker and writer, `:share` against writers only, so holders of
+  `:share` run side by side.
+
+  Postgres only. SQLite has no row locks (`FOR UPDATE` raises there), and its
+  single writer under `default_transaction_mode: :immediate` already runs every
+  write transaction alone, so there the query comes back unchanged.
+  """
+  @spec lock_rows(Ecto.Queryable.t(), :update | :share) :: Ecto.Queryable.t()
+  def lock_rows(query, :update) do
+    if postgres?(), do: Ecto.Query.lock(query, "FOR UPDATE"), else: query
+  end
+
+  def lock_rows(query, :share) do
+    if postgres?(), do: Ecto.Query.lock(query, "FOR SHARE"), else: query
+  end
 
   @doc ~S"""
   Escapes `LIKE` wildcards (`%`, `_`) and the escape character (`\`) in

@@ -180,6 +180,20 @@ defmodule Gamend.Notifications.PreferencesTest do
       assert TimeZone.local_hour("America/New_York", utc) == 18
     end
 
+    test "a zone picked by hand is kept until the user goes back to automatic", %{user: user} do
+      assert "Europe/Bucharest" in TimeZone.names()
+      assert "UTC" in TimeZone.names()
+      assert {:error, :invalid_time_zone} = TimeZone.choose(user, "Mars/Olympus")
+
+      {:ok, user} = TimeZone.choose(user, "Asia/Tokyo")
+      assert TimeZone.of(user) == "Asia/Tokyo"
+      assert TimeZone.manual?(user)
+
+      {:ok, user} = TimeZone.choose(user, nil)
+      refute TimeZone.manual?(user)
+      assert TimeZone.of(user) == "Asia/Tokyo"
+    end
+
     test "a day starts at the zone's midnight" do
       assert TimeZone.day_start("Europe/Bucharest", ~D[2026-10-01]) == ~U[2026-09-30 21:00:00Z]
       assert TimeZone.day_start(nil, ~D[2026-10-01]) == ~U[2026-10-01 00:00:00Z]

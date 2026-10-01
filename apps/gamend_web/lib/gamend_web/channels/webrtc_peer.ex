@@ -398,7 +398,7 @@ defmodule GamendWeb.WebRTCPeer do
   defp maybe_handle_rpc("events", "protobuf", data, state) do
     alias Gamend.Realtime.V1, as: PB
 
-    case PB.RtcEnvelope.decode(data) do
+    case decode_envelope(data) do
       %PB.RtcEnvelope{msg: {:call_hook, %PB.RpcCall{id: id, plugin: plugin, fn: func} = call}} ->
         # HookSchemas converts through the hook's registered schema when one
         # exists: args_raw decodes into the request struct, args_json objects
@@ -432,12 +432,18 @@ defmodule GamendWeb.WebRTCPeer do
       _ ->
         :ok
     end
-  rescue
-    # Malformed protobuf frame; drop it.
-    _ -> :ok
   end
 
   defp maybe_handle_rpc(_label, _format, _data, _state), do: :ok
+
+  # The frame is the client's bytes: whatever the decoder raises on a malformed
+  # one drops that frame. The rescue covers the decode alone, so a bug in
+  # answering the call still surfaces.
+  defp decode_envelope(data) do
+    Gamend.Realtime.V1.RtcEnvelope.decode(data)
+  rescue
+    _ -> :malformed
+  end
 
   defp call_hook(plugin, func, args_input, wire, state) do
     # Use the stored full user or refetch if missing
@@ -461,6 +467,9 @@ defmodule GamendWeb.WebRTCPeer do
     end
   end
 
+  # A crash's message is the server's business, as over HTTP and the channel
+  # (`GamendWeb.HookErrors`): the code alone, the stack trace in the log.
+  defp format_error({:exception, _message}), do: "exception"
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(reason) when is_atom(reason), do: to_string(reason)
   defp format_error(reason), do: inspect(reason)

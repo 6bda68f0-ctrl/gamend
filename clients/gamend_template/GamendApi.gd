@@ -1374,6 +1374,13 @@ func groups_cancel_join_request(
 func groups_create_group(createGroupRequest: GamendCreateGroupRequest):
 	return await _call_api(GroupsApi.new(_config), "create_group", [createGroupRequest])
 
+## Delete a group with everyone in it (admin only)
+func groups_delete_group(
+	# id: int   Eg: 56
+	# Group ID
+	id: String,):
+	return await _call_api(GroupsApi.new(_config), "delete_group", [id])
+
 ## Demote admin to member
 func groups_demote_group_member(
 	# id: int   Eg: 56

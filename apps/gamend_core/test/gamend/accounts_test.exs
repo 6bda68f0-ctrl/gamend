@@ -592,6 +592,24 @@ defmodule Gamend.AccountsTest do
     end
   end
 
+  describe "a row deleted before its delete" do
+    test "deleting a token a sign-out already removed answers not_found" do
+      user = user_fixture()
+      _ = Accounts.generate_user_session_token(user)
+      token = Repo.get_by!(UserToken, user_id: user.id)
+      Repo.delete_all(from t in UserToken, where: t.id == ^token.id)
+
+      assert Accounts.delete_user_token(token) == {:error, :not_found}
+    end
+
+    test "deleting a user a racing delete already removed answers not_found" do
+      user = user_fixture()
+      Repo.delete_all(from u in User, where: u.id == ^user.id)
+
+      assert Accounts.delete_user(user) == {:error, :not_found}
+    end
+  end
+
   describe "delete_user/1 and lobby/token cleanup" do
     test "deleting a host with other members transfers host and deletes tokens" do
       # create host and member

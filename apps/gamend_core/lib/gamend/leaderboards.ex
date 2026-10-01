@@ -814,17 +814,25 @@ defmodule Gamend.Leaderboards do
   # ---------------------------------------------------------------------------
 
   @doc """
-  Gets a record by its ID. Raises if not found.
+  Gets a record by its ID, or `nil` when there is none (or `id` is not a UUID).
 
   Intended for internal/admin usage.
   """
-  @spec get_record!(Ecto.UUID.t()) :: Record.t()
+  @spec get_record(Ecto.UUID.t()) :: Record.t() | nil
   @decorate cacheable(
               key: {:leaderboards, :record, record_cache_version(id), id},
+              match: &(&1 != nil),
               opts: [ttl: @records_cache_ttl_ms]
             )
+  def get_record(id) when is_binary(id), do: Repo.get_uuid(Record, id)
+
+  @doc "Like `get_record/1`, but raises `Ecto.NoResultsError` when there is none."
+  @spec get_record!(Ecto.UUID.t()) :: Record.t()
   def get_record!(id) when is_binary(id) do
-    Repo.get_uuid!(Record, id)
+    case get_record(id) do
+      %Record{} = record -> record
+      nil -> raise Ecto.NoResultsError, queryable: Record
+    end
   end
 
   @doc """

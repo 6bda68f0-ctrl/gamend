@@ -11,6 +11,7 @@ defmodule GamendWeb.NotificationSettingsTest do
   import Swoosh.TestAssertions
 
   alias Gamend.Accounts
+  alias Gamend.Accounts.TimeZone
   alias Gamend.Notifications
   alias Gamend.Notifications.Preferences
   alias GamendWeb.NotificationEmail
@@ -61,6 +62,21 @@ defmodule GamendWeb.NotificationSettingsTest do
 
       lv |> element("#notify-streak-email") |> render_click()
       refute Preferences.enabled?(reload(user), "streak", "email")
+    end
+
+    test "a time zone picked by hand is not replaced by the browser's", %{conn: conn, user: user} do
+      {:ok, lv, _html} = live(conn, ~p"/users/settings?tab=notifications")
+
+      lv |> form("#notify-time-zone", %{"zone" => "Asia/Tokyo"}) |> render_change()
+      assert TimeZone.of(reload(user)) == "Asia/Tokyo"
+
+      # The next visit reports another zone; the pick stands.
+      {:ok, _lv, _html} =
+        conn
+        |> put_connect_params(%{"timezone" => "Europe/Madrid"})
+        |> live(~p"/users/settings?tab=notifications")
+
+      assert TimeZone.of(reload(user)) == "Asia/Tokyo"
     end
 
     test "the switches turn everything off and back on", %{conn: conn, user: user} do

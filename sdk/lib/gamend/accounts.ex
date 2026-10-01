@@ -670,11 +670,12 @@ defmodule Gamend.Accounts do
   @doc ~S"""
     Deletes a user and associated resources.
     
-    Returns `{:ok, user}` on success or `{:error, changeset}` on failure.
+    Returns `{:ok, user}` on success, `{:error, :not_found}` when the user was
+    deleted first, or `{:error, changeset}` on failure.
     
   """
   @spec delete_user(Gamend.Accounts.User.t()) ::
-          {:ok, Gamend.Accounts.User.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Gamend.Accounts.User.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def delete_user(_user) do
     case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
       :placeholder ->

@@ -124,7 +124,7 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
   def update(conn, %{"record_id" => record_id} = params) do
     record_id = to_string(record_id)
 
-    case get_record(record_id) do
+    case Leaderboards.get_record(record_id) do
       nil ->
         reply_error(conn, :not_found, "not_found")
 
@@ -160,7 +160,7 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
   def delete(conn, %{"record_id" => record_id}) do
     record_id = to_string(record_id)
 
-    case get_record(record_id) do
+    case Leaderboards.get_record(record_id) do
       nil ->
         reply_error(conn, :not_found, "not_found")
 
@@ -210,11 +210,5 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardRecordController do
       inserted_at: record.inserted_at,
       updated_at: record.updated_at
     }
-  end
-
-  defp get_record(id) do
-    Leaderboards.get_record!(id)
-  rescue
-    Ecto.NoResultsError -> nil
   end
 end

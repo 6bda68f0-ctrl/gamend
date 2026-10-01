@@ -391,6 +391,7 @@ defmodule GamendWeb.Api.V1.TournamentController do
   defp error(conn, :already_registered), do: reply_error(conn, :conflict, "already_registered")
   defp error(conn, :not_registered), do: reply_error(conn, :not_found, "not_registered")
   defp error(conn, :already_drawn), do: reply_error(conn, :conflict, "already_drawn")
+  defp error(conn, :not_found), do: not_found(conn)
   defp error(conn, %Ecto.Changeset{} = changeset), do: unprocessable(conn, changeset)
 
   defp error(conn, reason) do

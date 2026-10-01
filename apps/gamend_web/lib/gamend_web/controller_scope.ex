@@ -35,11 +35,11 @@ defmodule GamendWeb.ControllerScope do
   @doc "Runs `fun` with the user and the lobby they are in, or replies 401/400."
   @spec with_lobby(Plug.Conn.t(), (User.t(), Lobbies.Lobby.t() -> Plug.Conn.t())) :: Plug.Conn.t()
   def with_lobby(conn, fun) do
+    # The signed-in user can be a cached copy, still naming a lobby since deleted.
     with_user(conn, fn user ->
-      if is_nil(user.lobby_id) do
-        reply_error(conn, :bad_request, "not_in_lobby")
-      else
-        fun.(user, Lobbies.get_lobby!(user.lobby_id))
+      case user.lobby_id && Lobbies.get_lobby(user.lobby_id) do
+        %Lobbies.Lobby{} = lobby -> fun.(user, lobby)
+        _ -> reply_error(conn, :bad_request, "not_in_lobby")
       end
     end)
   end

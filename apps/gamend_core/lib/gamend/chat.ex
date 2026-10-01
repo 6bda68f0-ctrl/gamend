@@ -621,30 +621,33 @@ defmodule Gamend.Chat do
         last_read_message_id: message_id
       }
 
-      %ReadCursor{user_id: user_id}
-      |> ReadCursor.changeset(attrs)
-      |> Repo.insert(
-        # Only ever forward. The cursor used to be set unconditionally, so two
-        # marks racing (or arriving out of order from different tabs) could
-        # leave it on an older message — and `count_unread/3` then counts
-        # everything after that one, so the badge climbs back up with no way for
-        # the reader to clear it. Ids are UUIDv7, so lexicographic order is
-        # chronological, which is what `count_unread/3`'s `m.id > ^last_id`
-        # already relies on.
-        on_conflict:
-          from(c in ReadCursor,
-            update: [
-              set: [last_read_message_id: ^message_id, updated_at: ^DateTime.utc_now(:second)]
-            ],
-            where: fragment("EXCLUDED.last_read_message_id > ?", c.last_read_message_id)
-          ),
-        conflict_target: {:unsafe_fragment, "(user_id, chat_type, chat_ref_id)"},
-        # A mark that is not ahead of the cursor updates no row, which Ecto
-        # reports as stale and raises on. That is the forward-only rule doing
-        # its job — the chat page marks on its dead render and again on
-        # connect, and the second raised through the mount.
-        allow_stale: true
-      )
+      # Validated above, but the message may be deleted before this lands.
+      Repo.rescue_foreign_key(:message_not_found, fn ->
+        %ReadCursor{user_id: user_id}
+        |> ReadCursor.changeset(attrs)
+        |> Repo.insert(
+          # Only ever forward. The cursor used to be set unconditionally, so two
+          # marks racing (or arriving out of order from different tabs) could
+          # leave it on an older message — and `count_unread/3` then counts
+          # everything after that one, so the badge climbs back up with no way for
+          # the reader to clear it. Ids are UUIDv7, so lexicographic order is
+          # chronological, which is what `count_unread/3`'s `m.id > ^last_id`
+          # already relies on.
+          on_conflict:
+            from(c in ReadCursor,
+              update: [
+                set: [last_read_message_id: ^message_id, updated_at: ^DateTime.utc_now(:second)]
+              ],
+              where: fragment("EXCLUDED.last_read_message_id > ?", c.last_read_message_id)
+            ),
+          conflict_target: {:unsafe_fragment, "(user_id, chat_type, chat_ref_id)"},
+          # A mark that is not ahead of the cursor updates no row, which Ecto
+          # reports as stale and raises on. That is the forward-only rule doing
+          # its job — the chat page marks on its dead render and again on
+          # connect, and the second raised through the mount.
+          allow_stale: true
+        )
+      end)
     end
   end
 

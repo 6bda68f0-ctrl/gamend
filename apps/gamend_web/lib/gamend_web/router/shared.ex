@@ -579,6 +579,7 @@ defmodule GamendWeb.Router.Shared do
 
         post "/groups", GroupController, :create
         patch "/groups/:id", GroupController, :update
+        delete "/groups/:id", GroupController, :delete
         post "/groups/:id/join", GroupController, :join
         post "/groups/:id/leave", GroupController, :leave
         post "/groups/:id/kick", GroupController, :kick

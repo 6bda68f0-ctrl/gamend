@@ -206,10 +206,14 @@ defmodule Gamend.Groups.Shared do
     end
   end
 
+  # Under the group's lock, which a leave that empties and deletes the group
+  # also takes; one deleted before the lock is refused by the foreign key.
   defp insert_group_member(group_id, user_id) do
-    case %GroupMember{}
-         |> GroupMember.changeset(%{group_id: group_id, user_id: user_id, role: "member"})
-         |> Repo.insert() do
+    case Repo.rescue_foreign_key(:not_found, fn ->
+           %GroupMember{}
+           |> GroupMember.changeset(%{group_id: group_id, user_id: user_id, role: "member"})
+           |> Repo.insert()
+         end) do
       {:ok, member} ->
         _ = invalidate_group_cache(group_id)
         broadcast_group(group_id, {:member_joined, group_id, user_id})

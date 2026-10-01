@@ -1,5 +1,14 @@
+defmodule GamendWeb.LobbyControllerTest.VetoDisband do
+  use Gamend.TestSupport.NoopHooks
+
+  @impl true
+  def before_lobby_delete(_lobby), do: {:error, :tournament_running}
+end
+
 defmodule GamendWeb.Api.V1.LobbyControllerTest do
   use GamendWeb.ConnCase
+
+  import Ecto.Query, only: [from: 2]
 
   alias Gamend.Accounts.User
   alias Gamend.AccountsFixtures
@@ -673,6 +682,51 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
     assert is_nil(reloaded.lobby_id)
   end
 
+  describe "a miss answers its code, never a crash" do
+    setup %{conn: conn} do
+      host = AccountsFixtures.user_fixture()
+      {:ok, lobby} = Lobbies.create_lobby(%{title: "miss-room", host_id: host.id})
+      {:ok, token, _} = Guardian.encode_and_sign(host)
+
+      %{conn: put_req_header(conn, "authorization", "Bearer " <> token), host: host, lobby: lobby}
+    end
+
+    test "kicking a player who does not exist, or is not seated here, is not_found", %{
+      conn: conn
+    } do
+      elsewhere = AccountsFixtures.user_fixture()
+
+      for target <- [Ecto.UUID.generate(), "not-a-uuid", elsewhere.id] do
+        conn = post(conn, "/api/v1/lobbies/kick", %{target_user_id: target})
+        assert json_response(conn, 404)["error"] == "not_found"
+      end
+    end
+
+    # The caller is read, then their lobby: a delete landing between the two
+    # leaves a user naming a lobby that is gone (in production, a cached copy
+    # does the same for up to the cache TTL).
+    test "a lobby deleted under the caller is not_in_lobby", %{conn: conn, lobby: lobby} do
+      other = AccountsFixtures.user_fixture()
+
+      conn =
+        delete_lobby_after_users_read(lobby, 2, fn ->
+          post(conn, "/api/v1/lobbies/kick", %{target_user_id: other.id})
+        end)
+
+      assert json_response(conn, 400)["error"] == "not_in_lobby"
+    end
+
+    test "a hook vetoing a disband is rejected", %{conn: conn, lobby: lobby} do
+      previous = Application.get_env(:gamend_core, :hooks_module)
+      Application.put_env(:gamend_core, :hooks_module, GamendWeb.LobbyControllerTest.VetoDisband)
+      on_exit(fn -> Application.put_env(:gamend_core, :hooks_module, previous) end)
+
+      conn = post(conn, "/api/v1/lobbies/disband")
+      assert json_response(conn, 403)["error"] == "rejected"
+      assert Lobbies.get_lobby(lobby.id)
+    end
+  end
+
   test "POST /api/v1/lobbies/disband ends the lobby for everyone", %{conn: conn} do
     host = AccountsFixtures.user_fixture()
     member = AccountsFixtures.user_fixture()
@@ -918,5 +972,34 @@ defmodule GamendWeb.Api.V1.LobbyControllerTest do
 
     assert json_response(resp, 403)["error"] == "blocked"
     assert Gamend.Accounts.get_user(joiner.id).lobby_id == nil
+  end
+
+  # Deletes `lobby` right after the `nth` read of the users table in this
+  # process: the pipeline reads the caller once, the controller once more.
+  defp delete_lobby_after_users_read(lobby, nth, fun) do
+    test_pid = self()
+    handler = {__MODULE__, :delete_lobby_after_users_read, System.unique_integer()}
+    Process.put(:users_reads, 0)
+
+    :telemetry.attach(
+      handler,
+      [:gamend, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if self() == test_pid and meta[:source] == "users" and
+             String.starts_with?(meta[:query], "SELECT") do
+          reads = Process.put(:users_reads, Process.get(:users_reads) + 1) + 1
+
+          if reads == nth,
+            do: Gamend.Repo.delete_all(from l in Gamend.Lobbies.Lobby, where: l.id == ^lobby.id)
+        end
+      end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(handler)
+    end
   end
 end

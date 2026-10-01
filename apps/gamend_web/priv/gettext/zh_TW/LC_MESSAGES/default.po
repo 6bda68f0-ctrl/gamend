@@ -3204,3 +3204,127 @@ msgstr "透過此連結確認會移除註冊此帳戶時設定的密碼，請在
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "閱讀時間 %{count} 分鐘"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "帳戶與安全"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "帳戶訊息（例如登入連結）一律會寄送。"
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "自動（此裝置）：%{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "聊天訊息"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "選擇我們寄給你的內容"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "選擇我們寄給你的內容：%{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "選擇我們通知你什麼，以及在哪裡通知。"
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "已完成。不再寄送關於以下內容的郵件：%{group}。"
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "已完成。我們只會透過郵件寄送帳戶相關訊息。"
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "寄郵件給我：%{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "郵件設定"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "關於以下內容的郵件：%{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "好友與群組"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "在網站上"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "手機"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "任務與獎勵"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "設定"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "不再接收任何郵件"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "不再接收這類郵件"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "不再接收這類郵件：%{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "此連結無效。請登入後選擇我們寄給你的內容。"
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "時區"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "重新開啟郵件"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "重新開啟通知"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "關閉所有郵件"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "關閉所有手機通知"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "全部關閉"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "重新開啟手機通知"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "你不會收到這些郵件。"
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "你收到這封郵件，是因為你開啟了以下內容的郵件：%{group}。"
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "你的一天和提醒都依此時區計算。"

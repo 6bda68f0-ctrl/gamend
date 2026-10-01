@@ -747,8 +747,7 @@ defmodule Gamend.Hooks.PluginManager do
         try do
           apply(mod, fun, args)
         rescue
-          e in FunctionClauseError -> {:error, {:function_clause, Exception.message(e)}}
-          e -> {:error, {:exception, Exception.message(e)}}
+          e -> Gamend.Hooks.rescued(e, __STACKTRACE__, {mod, fun, args})
         catch
           kind, reason -> {:error, {kind, reason}}
         end
@@ -864,8 +863,7 @@ defmodule Gamend.Hooks.PluginManager do
         try do
           apply(mod, fun, args)
         rescue
-          e in FunctionClauseError -> {:error, {:function_clause, Exception.message(e)}}
-          e -> {:error, {:exception, Exception.message(e)}}
+          e -> Gamend.Hooks.rescued(e, __STACKTRACE__, {mod, fun, args})
         catch
           kind, reason -> {:error, {kind, reason}}
         end

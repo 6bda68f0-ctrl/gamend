@@ -162,8 +162,11 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
 
   def delete(conn, %{"id" => id}) do
     with_tournament(conn, id, fn tournament ->
-      {:ok, _} = Tournaments.delete_tournament(tournament)
-      reply_ok(conn)
+      # A delete racing this one may have removed it since it was read.
+      case Tournaments.delete_tournament(tournament) do
+        {:ok, _} -> reply_ok(conn)
+        {:error, :not_found} -> reply_error(conn, :not_found, "not_found")
+      end
     end)
   end
 
@@ -180,8 +183,10 @@ defmodule GamendWeb.Api.V1.Admin.TournamentController do
 
   def cancel(conn, %{"id" => id}) do
     with_tournament(conn, id, fn tournament ->
-      {:ok, tournament} = Tournaments.cancel_tournament(tournament)
-      reply_data(conn, serialize(tournament))
+      case Tournaments.cancel_tournament(tournament) do
+        {:ok, tournament} -> reply_data(conn, serialize(tournament))
+        {:error, :not_found} -> reply_error(conn, :not_found, "not_found")
+      end
     end)
   end
 

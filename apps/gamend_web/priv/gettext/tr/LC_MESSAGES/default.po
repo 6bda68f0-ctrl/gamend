@@ -3253,3 +3253,127 @@ msgstr "Bu bağlantıyla onaylamak, hesabın kaydedildiği parolayı kaldırır;
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} dk okuma"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Hesap ve güvenlik"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "Giriş bağlantıları gibi hesap mesajları her zaman gönderilir."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Otomatik (bu cihaz): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Sohbet mesajları"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Sana ne gönderdiğimizi seç"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Sana ne gönderdiğimizi seç: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Sana neyi, nerede söylediğimizi seç."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "Tamam. Artık şu konuda e-posta yok: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "Tamam. E-postayla sana yalnızca hesap mesajlarını göndereceğiz."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "Bana e-posta gönder: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "E-posta ayarları"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "Şu konudaki e-postalar: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Arkadaşlar ve gruplar"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "Sitede"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Telefon"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Görevler ve ödüller"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Ayarlar"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Tüm e-postaları durdur"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Bu e-postaları durdur"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Bu e-postaları durdur: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Bu bağlantı çalışmıyor. Sana ne gönderdiğimizi seçmek için giriş yap."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Saat dilimi"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "E-postaları yeniden aç"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Bildirimleri yeniden aç"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Tüm e-postaları kapat"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Tüm telefon bildirimlerini kapat"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Her şeyi kapat"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Telefon bildirimlerini yeniden aç"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Bu e-postaların hiçbirini almıyorsun."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Bu e-postayı, şunun için e-postaları açtığın için alıyorsun: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "Günün ve hatırlatmaların buna göre işler."

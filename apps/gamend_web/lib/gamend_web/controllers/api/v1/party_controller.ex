@@ -610,7 +610,8 @@ defmodule GamendWeb.Api.V1.PartyController do
               {:ok, _} ->
                 reply_ok(conn)
 
-              {:error, :not_in_party} ->
+              # The party was disbanded while the kick was on its way.
+              {:error, reason} when reason in [:not_in_party, :not_found] ->
                 reply_error(conn, :bad_request, "not_in_party")
 
               {:error, :not_leader} ->

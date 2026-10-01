@@ -77,6 +77,36 @@ defmodule Gamend.ChatTest do
       assert {:error, :message_not_in_chat} =
                Chat.mark_read(member.id, "group", group_a.id, message_b.id)
     end
+
+    test "marking read a message deleted as it is validated answers message_not_found" do
+      owner = create_user()
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "read-gone", "type" => "public"})
+      message = insert_message(owner, "group", group.id, "about to go")
+
+      test_pid = self()
+      handler = {__MODULE__, :delete_message_after_read, System.unique_integer()}
+
+      :telemetry.attach(
+        handler,
+        [:gamend, :repo, :query],
+        fn _event, _measurements, meta, _config ->
+          if self() == test_pid and meta[:source] == "chat_messages" and
+               String.starts_with?(meta[:query], "SELECT") and !Process.get(:message_deleted) do
+            Process.put(:message_deleted, true)
+            Repo.delete_all(from m in Message, where: m.id == ^message.id)
+          end
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      result = Chat.mark_read(owner.id, "group", group.id, message.id)
+
+      assert Process.get(:message_deleted)
+      assert result == {:error, :message_not_found}
+      assert is_nil(Chat.get_read_cursor(owner.id, "group", group.id))
+    end
   end
 
   describe "count_unread_friends_batch/2" do

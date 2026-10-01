@@ -62,7 +62,7 @@ defmodule GamendWeb.Api.V1.Admin.SessionController do
   )
 
   def delete(conn, %{"id" => id}) do
-    case Repo.get(UserToken, id) do
+    case Repo.get_uuid(UserToken, id) do
       nil ->
         reply_error(conn, :not_found, "not_found")
 
@@ -70,6 +70,10 @@ defmodule GamendWeb.Api.V1.Admin.SessionController do
         case Accounts.delete_user_token(token) do
           {:ok, _} ->
             reply_ok(conn)
+
+          # Signed out since it was read.
+          {:error, :not_found} ->
+            reply_error(conn, :not_found, "not_found")
 
           {:error, %Ecto.Changeset{} = cs} ->
             unprocessable(conn, cs)

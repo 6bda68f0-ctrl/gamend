@@ -173,6 +173,15 @@ lobby title already taken):
 `leader_name`); a thing carries its `title` (`group_title`, never
 `group_name`); no property is called `name`.
 
+**[R17]** A miss is an answer, not a crash. An API controller or channel —
+and a LiveView event or a job — looks a row up with the tuple/`nil` form and
+answers the miss with its code, never with a `get_*!` whose
+`Ecto.NoResultsError` happens to render 404 over HTTP and crashes everywhere
+else. A crash in the server, a game hook's included, is 500 with the error
+code and no detail: the log has the stack trace. `mix gamend.api.lint` flags
+a raising lookup in those places; the rule behind it is "Errors" in
+CONTRIBUTING.md.
+
 **Enforcement.** `GamendWeb.ApiShapeTest` checks the OpenAPI document: every
 success response is a named component in one of the first three shapes, every
 error response is `ErrorResponse`, R16 holds for every property, and

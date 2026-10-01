@@ -3204,3 +3204,127 @@ msgstr "การยืนยันด้วยลิงก์นี้จะล
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "อ่าน %{count} นาที"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "บัญชีและความปลอดภัย"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "ข้อความเกี่ยวกับบัญชี เช่น ลิงก์เข้าสู่ระบบ จะถูกส่งเสมอ"
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "อัตโนมัติ (อุปกรณ์นี้): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "ข้อความแชท"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "เลือกสิ่งที่เราส่งถึงคุณ"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "เลือกสิ่งที่เราส่งถึงคุณ: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "เลือกว่าเราจะแจ้งอะไรคุณ และที่ไหน"
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "เรียบร้อย ไม่มีอีเมลเรื่องนี้อีก: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "เรียบร้อย เราจะส่งอีเมลถึงคุณเฉพาะข้อความเกี่ยวกับบัญชีเท่านั้น"
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "ส่งอีเมลถึงฉัน: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "การตั้งค่าอีเมล"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "อีเมลเกี่ยวกับ: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "เพื่อนและกลุ่ม"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "บนเว็บไซต์"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "โทรศัพท์"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "ภารกิจและรางวัล"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "การตั้งค่า"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "หยุดรับอีเมลทั้งหมด"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "หยุดรับอีเมลเหล่านี้"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "หยุดรับอีเมลเหล่านี้: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "ลิงก์นี้ใช้ไม่ได้ เข้าสู่ระบบเพื่อเลือกสิ่งที่เราส่งถึงคุณ"
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "เขตเวลา"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "เปิดอีเมลอีกครั้ง"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "เปิดการแจ้งเตือนอีกครั้ง"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "ปิดอีเมลทั้งหมด"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "ปิดการแจ้งเตือนบนโทรศัพท์ทั้งหมด"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "ปิดทั้งหมด"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "เปิดการแจ้งเตือนบนโทรศัพท์อีกครั้ง"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "คุณไม่ได้รับอีเมลเหล่านี้เลย"
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "คุณได้รับอีเมลนี้เพราะคุณเปิดอีเมลสำหรับ: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "วันของคุณและการแจ้งเตือนจะเป็นไปตามเขตเวลานี้"

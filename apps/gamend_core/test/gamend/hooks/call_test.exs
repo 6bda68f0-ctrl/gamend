@@ -123,6 +123,37 @@ defmodule Gamend.Hooks.CallTest do
     assert {:error, {:function_clause, _msg}} = Gamend.Hooks.call(:hello, [1])
   end
 
+  test "a hook that raises answers exception and logs the stack trace" do
+    m = System.unique_integer([:positive])
+    mod = Module.concat([Gamend, TestHooks, String.to_atom("CallTestRaise_#{m}")])
+
+    Module.create(
+      mod,
+      quote do
+        def boom(_arg), do: raise("boom")
+
+        # The clause that refuses is deeper in the plugin, not the hook's own:
+        # a bug, not the caller's arguments.
+        def deep(arg), do: inner(arg)
+        def inner(n) when is_integer(n), do: n
+      end,
+      __ENV__
+    )
+
+    Application.put_env(:gamend_core, :hooks_module, mod)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:exception, "boom"}} = Gamend.Hooks.call(:boom, [1])
+        assert {:error, {:exception, _msg}} = Gamend.Hooks.call(:deep, ["x"])
+      end)
+
+    assert log =~ "#{inspect(mod)}.boom/1 raised"
+    assert log =~ "(RuntimeError) boom"
+    assert log =~ "#{inspect(mod)}.deep/1 raised"
+    assert log =~ "FunctionClauseError"
+  end
+
   test "call exposes caller context available via Gamend.Hooks.caller/0 and caller_id/0" do
     mod =
       Module.concat([

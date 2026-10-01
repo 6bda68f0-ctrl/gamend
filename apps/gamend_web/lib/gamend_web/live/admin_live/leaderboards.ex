@@ -4,6 +4,7 @@ defmodule GamendWeb.AdminLive.Leaderboards do
   alias Gamend.Leaderboards
   alias Gamend.Leaderboards.Leaderboard
   alias Gamend.Leaderboards.Record
+  alias GamendWeb.AdminLive.Shared
   alias GamendWeb.LiveHelpers
 
   @impl true
@@ -463,11 +464,16 @@ defmodule GamendWeb.AdminLive.Leaderboards do
 
     {deleted, failed} =
       Enum.reduce(ids, {0, 0}, fn id, {d, f} ->
-        lb = Leaderboards.get_leaderboard!(id)
+        case Leaderboards.get_leaderboard(id) do
+          # Deleted since it was ticked: the outcome asked for.
+          nil ->
+            {d + 1, f}
 
-        case Leaderboards.delete_leaderboard(lb) do
-          {:ok, _} -> {d + 1, f}
-          {:error, _} -> {d, f + 1}
+          lb ->
+            case Leaderboards.delete_leaderboard(lb) do
+              {:ok, _} -> {d + 1, f}
+              {:error, _} -> {d, f + 1}
+            end
         end
       end)
 
@@ -521,37 +527,36 @@ defmodule GamendWeb.AdminLive.Leaderboards do
   end
 
   def handle_event("new_season_from", %{"id" => id}, socket) do
-    # Load the existing leaderboard to copy settings from
-    source = Leaderboards.get_leaderboard!(id)
+    # The existing leaderboard's settings, copied into a new one
+    Shared.with_record(socket, Leaderboards.get_leaderboard(id), fn source ->
+      new_leaderboard = %Leaderboard{
+        slug: source.slug,
+        title: source.title,
+        description: source.description,
+        sort_order: source.sort_order,
+        operator: source.operator,
+        metadata: source.metadata
+      }
 
-    # Create a new leaderboard struct with copied settings
-    new_leaderboard = %Leaderboard{
-      slug: source.slug,
-      title: source.title,
-      description: source.description,
-      sort_order: source.sort_order,
-      operator: source.operator,
-      metadata: source.metadata
-    }
+      changeset = Leaderboards.change_leaderboard(new_leaderboard)
+      form = to_form(changeset, as: "leaderboard")
 
-    changeset = Leaderboards.change_leaderboard(new_leaderboard)
-    form = to_form(changeset, as: "leaderboard")
-
-    {:noreply,
-     socket
-     |> assign(:selected_leaderboard, nil)
-     |> assign(:form, form)}
+      {:noreply,
+       socket
+       |> assign(:selected_leaderboard, nil)
+       |> assign(:form, form)}
+    end)
   end
 
   def handle_event("edit_leaderboard", %{"id" => id}, socket) do
-    leaderboard = Leaderboards.get_leaderboard!(id)
-    changeset = Leaderboards.change_leaderboard(leaderboard)
-    form = to_form(changeset, as: "leaderboard")
+    Shared.with_record(socket, Leaderboards.get_leaderboard(id), fn leaderboard ->
+      form = leaderboard |> Leaderboards.change_leaderboard() |> to_form(as: "leaderboard")
 
-    {:noreply,
-     socket
-     |> assign(:selected_leaderboard, leaderboard)
-     |> assign(:form, form)}
+      {:noreply,
+       socket
+       |> assign(:selected_leaderboard, leaderboard)
+       |> assign(:form, form)}
+    end)
   end
 
   def handle_event("cancel_edit", _, socket) do
@@ -582,30 +587,30 @@ defmodule GamendWeb.AdminLive.Leaderboards do
   end
 
   def handle_event("delete_leaderboard", %{"id" => id}, socket) do
-    lb = Leaderboards.get_leaderboard!(id)
+    Shared.with_record(socket, Leaderboards.get_leaderboard(id), fn lb ->
+      case Leaderboards.delete_leaderboard(lb) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Leaderboard deleted")
+           |> reload_leaderboards()}
 
-    case Leaderboards.delete_leaderboard(lb) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Leaderboard deleted")
-         |> reload_leaderboards()}
-
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to delete leaderboard")}
-    end
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to delete leaderboard")}
+      end
+    end)
   end
 
   # Records
   def handle_event("view_records", %{"id" => id}, socket) do
-    leaderboard = Leaderboards.get_leaderboard!(id)
-
-    {:noreply,
-     socket
-     |> assign(:selected_leaderboard, leaderboard)
-     |> assign(:viewing_records, true)
-     |> assign(:records_page, 1)
-     |> reload_records()}
+    Shared.with_record(socket, Leaderboards.get_leaderboard(id), fn leaderboard ->
+      {:noreply,
+       socket
+       |> assign(:selected_leaderboard, leaderboard)
+       |> assign(:viewing_records, true)
+       |> assign(:records_page, 1)
+       |> reload_records()}
+    end)
   end
 
   def handle_event("close_records", _, socket) do
@@ -633,14 +638,14 @@ defmodule GamendWeb.AdminLive.Leaderboards do
   end
 
   def handle_event("edit_record", %{"id" => id}, socket) do
-    record = Leaderboards.get_record!(id)
-    changeset = Leaderboards.change_record(record)
-    form = to_form(changeset, as: "record")
+    Shared.with_record(socket, Leaderboards.get_record(id), fn record ->
+      form = record |> Leaderboards.change_record() |> to_form(as: "record")
 
-    {:noreply,
-     socket
-     |> assign(:editing_record, record)
-     |> assign(:record_form, form)}
+      {:noreply,
+       socket
+       |> assign(:editing_record, record)
+       |> assign(:record_form, form)}
+    end)
   end
 
   def handle_event("cancel_record_edit", _, socket) do
@@ -658,18 +663,18 @@ defmodule GamendWeb.AdminLive.Leaderboards do
   end
 
   def handle_event("delete_record", %{"id" => id}, socket) do
-    record = Leaderboards.get_record!(id)
+    Shared.with_record(socket, Leaderboards.get_record(id), fn record ->
+      case Leaderboards.delete_record(record) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Record deleted")
+           |> reload_records()}
 
-    case Leaderboards.delete_record(record) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Record deleted")
-         |> reload_records()}
-
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to delete record")}
-    end
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to delete record")}
+      end
+    end)
   end
 
   # ---------------------------------------------------------------------------

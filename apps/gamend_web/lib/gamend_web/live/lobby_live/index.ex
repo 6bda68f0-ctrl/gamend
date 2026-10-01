@@ -103,8 +103,8 @@ defmodule GamendWeb.LobbyLive.Index do
       %User{} = user ->
         case Lobbies.leave_lobby(user) do
           {:ok, _} ->
-            # refresh user to update lobby_id first
-            refreshed_user = Gamend.Accounts.get_user!(user.id)
+            # refresh user to update lobby_id first (nil once deleted: a guest's list)
+            refreshed_user = Gamend.Accounts.get_user(user.id)
 
             lobbies =
               Lobbies.list_lobbies_for_user(refreshed_user, %{},
@@ -293,8 +293,9 @@ defmodule GamendWeb.LobbyLive.Index do
   def handle_event("kick", %{"lobby_id" => lobby_id, "target_id" => target_id}, socket) do
     case Scope.user(socket.assigns.current_scope) do
       %User{} = user ->
+        # Either may be gone since the page drew them: kick_user/3 answers that.
         lobby = Lobbies.get_lobby(lobby_id)
-        target = Gamend.Accounts.get_user!(target_id)
+        target = Gamend.Accounts.get_user(target_id)
 
         case Lobbies.kick_user(user, lobby, target) do
           {:ok, _} ->
@@ -338,8 +339,8 @@ defmodule GamendWeb.LobbyLive.Index do
   defp create_lobby_for_user(socket, attrs, user_id) do
     case Lobbies.create_lobby(attrs) do
       {:ok, _lobby} ->
-        # refresh user to update lobby_id first
-        refreshed_user = Gamend.Accounts.get_user!(user_id)
+        # refresh user to update lobby_id first (nil once deleted: a guest's list)
+        refreshed_user = Gamend.Accounts.get_user(user_id)
 
         lobbies =
           Lobbies.list_lobbies_for_user(refreshed_user, %{},
@@ -381,8 +382,8 @@ defmodule GamendWeb.LobbyLive.Index do
 
     case result do
       {:ok, _} ->
-        # refresh user to update lobby_id first
-        refreshed_user = Gamend.Accounts.get_user!(user.id)
+        # refresh user to update lobby_id first (nil once deleted: a guest's list)
+        refreshed_user = Gamend.Accounts.get_user(user.id)
 
         lobbies =
           Lobbies.list_lobbies_for_user(refreshed_user, %{},
@@ -431,8 +432,8 @@ defmodule GamendWeb.LobbyLive.Index do
     else
       case Lobbies.join_lobby(user, lobby.id) do
         {:ok, _member} ->
-          # refresh user to update lobby_id first
-          refreshed_user = Gamend.Accounts.get_user!(user.id)
+          # refresh user to update lobby_id first (nil once deleted: a guest's list)
+          refreshed_user = Gamend.Accounts.get_user(user.id)
 
           lobbies =
             Lobbies.list_lobbies_for_user(refreshed_user, %{},

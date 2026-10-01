@@ -4,6 +4,7 @@ defmodule GamendWeb.AdminLive.Sessions do
   alias Gamend.Accounts
   alias Gamend.Accounts.UserToken
   alias Gamend.Repo
+  alias GamendWeb.AdminLive.Shared
   alias GamendWeb.LiveHelpers
 
   import Ecto.Query
@@ -197,11 +198,16 @@ defmodule GamendWeb.AdminLive.Sessions do
 
     {deleted, failed} =
       Enum.reduce(ids, {0, 0}, fn id, {d, f} ->
-        session = Accounts.get_user_token!(id)
+        case Accounts.get_user_token(id) do
+          # Expired or signed out since it was ticked: the outcome asked for.
+          nil ->
+            {d + 1, f}
 
-        case Accounts.delete_user_token(session) do
-          {:ok, _} -> {d + 1, f}
-          {:error, _} -> {d, f + 1}
+          session ->
+            case Accounts.delete_user_token(session) do
+              {:ok, _} -> {d + 1, f}
+              {:error, _} -> {d, f + 1}
+            end
         end
       end)
 
@@ -237,8 +243,32 @@ defmodule GamendWeb.AdminLive.Sessions do
 
   @impl true
   def handle_event("delete_session", %{"id" => id}, socket) do
-    session = Accounts.get_user_token!(id)
+    Shared.with_record(socket, Accounts.get_user_token(id), &delete_session(socket, &1))
+  end
 
+  @impl true
+  def handle_event("admin_sessions_prev", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:sessions_page, max(1, (socket.assigns[:sessions_page] || 1) - 1))
+     |> reload_sessions()}
+  end
+
+  def handle_event("admin_sessions_next", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:sessions_page, (socket.assigns[:sessions_page] || 1) + 1)
+     |> reload_sessions()}
+  end
+
+  def handle_event("admin_sessions_page_size", %{"size" => size}, socket),
+    do:
+      {:noreply,
+       socket
+       |> LiveHelpers.put_page_size(size, size_key: :sessions_page_size, page_key: :sessions_page)
+       |> reload_sessions()}
+
+  defp delete_session(socket, session) do
     case Accounts.delete_user_token(session) do
       {:ok, _session} ->
         page = socket.assigns[:sessions_page] || 1
@@ -272,32 +302,10 @@ defmodule GamendWeb.AdminLive.Sessions do
          |> assign(:sessions_total_pages, total_pages)
          |> sync_selected_ids(session_ids(recent_sessions))}
 
-      {:error, _changeset} ->
+      {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Failed to delete session")}
     end
   end
-
-  @impl true
-  def handle_event("admin_sessions_prev", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:sessions_page, max(1, (socket.assigns[:sessions_page] || 1) - 1))
-     |> reload_sessions()}
-  end
-
-  def handle_event("admin_sessions_next", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:sessions_page, (socket.assigns[:sessions_page] || 1) + 1)
-     |> reload_sessions()}
-  end
-
-  def handle_event("admin_sessions_page_size", %{"size" => size}, socket),
-    do:
-      {:noreply,
-       socket
-       |> LiveHelpers.put_page_size(size, size_key: :sessions_page_size, page_key: :sessions_page)
-       |> reload_sessions()}
 
   defp reload_sessions(socket) do
     page = socket.assigns[:sessions_page] || 1

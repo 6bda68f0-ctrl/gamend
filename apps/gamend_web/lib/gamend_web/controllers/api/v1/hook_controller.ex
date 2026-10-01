@@ -6,6 +6,7 @@ defmodule GamendWeb.Api.V1.HookController do
   alias Gamend.Hooks.DynamicRpcs
   alias Gamend.Hooks.HookSchemas
   alias Gamend.Hooks.PluginManager
+  alias GamendWeb.HookErrors
   alias GamendWeb.Pagination
   alias GamendWeb.Schemas
   alias GamendWeb.Schemas.{HookCallResponse, HookFunctionPage}
@@ -128,7 +129,9 @@ defmodule GamendWeb.Api.V1.HookController do
     `not_implemented` (404: no such plugin, or no such function at that arity);
     `timeout` (504). An error the hook itself returns answers 400: its reason
     as the code when that is a snake_case atom, otherwise `hook_error`, with
-    any detail in `message`.
+    any detail in `message`; arguments none of its clauses accept answer
+    `function_clause`. A hook that raises answers 500 `exception`, with no
+    detail: the server log has the stack trace.
     """,
     tags: ["Hooks"],
     security: [%{"authorization" => []}],
@@ -148,6 +151,7 @@ defmodule GamendWeb.Api.V1.HookController do
       bad_request: Schemas.error("Malformed call, or the hook returned an error"),
       not_found: Schemas.error("No such plugin or function"),
       request_entity_too_large: Schemas.error("Arguments too large"),
+      internal_server_error: Schemas.error("The hook raised (`exception`)"),
       gateway_timeout: Schemas.error("The hook timed out"),
       unauthorized: Schemas.error("Not authenticated")
     ]
@@ -233,10 +237,14 @@ defmodule GamendWeb.Api.V1.HookController do
         log_rejected(hook, "timeout")
         reply_error(conn, :gateway_timeout, "timeout")
 
+      # Logged with its stack trace by `Gamend.Hooks`; the client gets no detail.
+      {:error, {:exception, _}} ->
+        reply_error(conn, :internal_server_error, "exception")
+
       {:error, reason} ->
         log_rejected(hook, inspect(reason))
 
-        {code, message} = hook_error(reason)
+        {code, message} = HookErrors.describe(reason)
         reply_error(conn, :bad_request, code, message)
     end
   end
@@ -255,27 +263,4 @@ defmodule GamendWeb.Api.V1.HookController do
     Gamend.Hooks.internal_hooks()
     |> Enum.any?(fn atom -> to_string(atom) == fn_name end)
   end
-
-  # The hook's own `{:error, reason}`: a snake_case atom is the code a game
-  # switches on; a crash or any other term is `hook_error`, or its kind, with
-  # the detail as the message.
-  defp hook_error({:function_clause, message}) when is_binary(message),
-    do: {"function_clause", message}
-
-  defp hook_error({:exception, message}) when is_binary(message), do: {"exception", message}
-
-  defp hook_error({kind, reason}) when is_atom(kind) do
-    if code?(kind),
-      do: {Atom.to_string(kind), inspect(reason)},
-      else: {"hook_error", inspect({kind, reason})}
-  end
-
-  defp hook_error(reason) when is_atom(reason) do
-    if code?(reason), do: {Atom.to_string(reason), nil}, else: {"hook_error", inspect(reason)}
-  end
-
-  defp hook_error(reason) when is_binary(reason), do: {"hook_error", reason}
-  defp hook_error(reason), do: {"hook_error", inspect(reason)}
-
-  defp code?(atom), do: Atom.to_string(atom) =~ ~r/^[a-z][a-z0-9_]*$/
 end

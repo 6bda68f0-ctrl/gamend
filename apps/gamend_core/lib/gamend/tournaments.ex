@@ -67,7 +67,7 @@ defmodule Gamend.Tournaments do
 
   @spec delete_tournament(Tournament.t()) :: {:ok, Tournament.t()} | {:error, term()}
   def delete_tournament(%Tournament{} = tournament),
-    do: tournament |> Repo.delete() |> tap_bump_tournament()
+    do: Repo.rescue_stale(:not_found, fn -> Repo.delete(tournament) end) |> tap_bump_tournament()
 
   # Bump the tournament cache version on any successful tournament-row write.
   defp tap_bump_tournament({:ok, _} = result) do
@@ -270,17 +270,37 @@ defmodule Gamend.Tournaments do
     end
   end
 
+  # The tournament is read again here, row-locked on Postgres: a draw, a
+  # cancel or a delete waits for this seat, or this seat for them, so an entry
+  # never lands in a drawn, cancelled or deleted tournament. Joins share the row
+  # lock; the advisory lock is what keeps their count under `max_entries`.
   defp claim_entry_seat(tournament, user) do
     Lock.serialize(:tournament_join, tournament.id, fn ->
-      if tournament.max_entries != nil and count_entries(tournament.id) >= tournament.max_entries do
-        Repo.rollback(:tournament_full)
-      end
+      case current_tournament(tournament.id, :share) do
+        nil ->
+          Repo.rollback(:not_found)
 
-      case insert_entry(tournament, user) do
-        {:ok, entry} -> entry
-        {:error, reason} -> Repo.rollback(reason)
+        %Tournament{state: "registration"} = tournament ->
+          if tournament.max_entries != nil and
+               count_entries(tournament.id) >= tournament.max_entries do
+            Repo.rollback(:tournament_full)
+          end
+
+          case insert_entry(tournament, user) do
+            {:ok, entry} -> entry
+            {:error, reason} -> Repo.rollback(reason)
+          end
+
+        %Tournament{} ->
+          Repo.rollback(:registration_closed)
       end
     end)
+  end
+
+  defp current_tournament(tournament_id, mode) do
+    from(t in Tournament, where: t.id == ^tournament_id)
+    |> Repo.lock_rows(mode)
+    |> Repo.one()
   end
 
   defp insert_entry(tournament, user) do
@@ -313,11 +333,35 @@ defmodule Gamend.Tournaments do
 
       true ->
         with {:ok, _} <-
-               Gamend.Hooks.internal_call(:before_tournament_leave, [user, tournament]) do
-          {:ok, _} = Repo.delete(entry)
+               Gamend.Hooks.internal_call(:before_tournament_leave, [user, tournament]),
+             {:ok, :left} <- withdraw_entry(tournament.id, entry) do
           broadcast_tournament(tournament, "tournament_updated")
           {:ok, tournament}
         end
+    end
+  end
+
+  # The state is read again with the delete, row-locked on Postgres as a join
+  # is: a draw that has started holds the row, and its bracket keeps the entry.
+  defp withdraw_entry(tournament_id, entry) do
+    Gamend.AfterCommit.transaction(fn ->
+      case current_tournament(tournament_id, :share) do
+        %Tournament{state: state} when state in ["scheduled", "registration"] ->
+          delete_entry!(entry)
+
+        nil ->
+          Repo.rollback(:not_found)
+
+        %Tournament{} ->
+          Repo.rollback(:already_drawn)
+      end
+    end)
+  end
+
+  defp delete_entry!(entry) do
+    case Repo.rescue_stale(:not_registered, fn -> Repo.delete(entry) end) do
+      {:ok, _} -> :left
+      {:error, reason} -> Repo.rollback(reason)
     end
   end
 
@@ -462,7 +506,10 @@ defmodule Gamend.Tournaments do
   defp past?(%DateTime{} = at, now), do: DateTime.compare(at, now) != :gt
 
   defp update_state(tournament, state) do
-    tournament |> Ecto.Changeset.change(state: state) |> Repo.update() |> tap_bump_tournament()
+    Repo.rescue_stale(:not_found, fn ->
+      tournament |> Ecto.Changeset.change(state: state) |> Repo.update()
+    end)
+    |> tap_bump_tournament()
   end
 
   @doc """
@@ -497,8 +544,10 @@ defmodule Gamend.Tournaments do
 
   defp draw(%Tournament{} = tournament, now) do
     Gamend.Lock.serialize(:tournament_draw, tournament.id, fn ->
-      # Re-read inside the lock: a concurrent caller must not draw twice.
-      case Repo.get(Tournament, tournament.id) do
+      # Re-read inside the lock: a concurrent caller must not draw twice. The
+      # row lock makes a join or a withdrawal in flight finish first, so the
+      # entries read below are the final field.
+      case current_tournament(tournament.id, :update) do
         %Tournament{state: "registration"} = tournament ->
           {:ok, tournament} = Gamend.AfterCommit.transaction(fn -> do_draw(tournament, now) end)
           after_draw(tournament, now)

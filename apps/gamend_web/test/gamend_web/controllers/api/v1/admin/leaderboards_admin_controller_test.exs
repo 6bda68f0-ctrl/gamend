@@ -102,5 +102,19 @@ defmodule GamendWeb.Api.V1.Admin.LeaderboardsAdminControllerTest do
 
       assert resp["error"] == "invalid_score"
     end
+
+    test "updating or deleting a record that is not there is not_found", %{
+      admin_conn: admin_conn,
+      lb_id: lb_id
+    } do
+      for id <- [Ecto.UUID.generate(), "not-a-uuid"] do
+        path = "/api/v1/admin/leaderboards/#{lb_id}/records/#{id}"
+
+        assert admin_conn |> patch(path, %{score: 1}) |> json_response(404) ==
+                 %{"error" => "not_found"}
+
+        assert admin_conn |> delete(path) |> json_response(404) == %{"error" => "not_found"}
+      end
+    end
   end
 end

@@ -59,7 +59,8 @@ defmodule Gamend.ApiConventions do
        stale_documented_routes() ++
        role_named_predicates() ++
        inline_ownership_checks() ++
-       unnamed_responses())
+       unnamed_responses() ++
+       raising_lookups_at_boundaries())
     |> Enum.sort_by(&{&1.rule, &1.file, &1.line})
   end
 
@@ -604,6 +605,93 @@ defmodule Gamend.ApiConventions do
 
   defp line_of(text, offset),
     do: text |> binary_part(0, offset) |> String.split("\n") |> length()
+
+  # ── R17: a boundary does not look a row up with a `!` ──────────────────────
+  #
+  # At a boundary the id comes from a client, or the row from state another
+  # process can delete, so a miss is an answer, not a bug. `get_x!` turned it
+  # into a raise: over HTTP that happened to render a 404, while a channel
+  # join, a LiveView event and a hook crashed, and the same race answered 404
+  # from one controller and 400 from the next. The rule is "Errors" in
+  # CONTRIBUTING.md. Boundaries are API controllers and channels (the whole
+  # module), and a LiveView's `handle_event`/`handle_info`/`handle_async` and a
+  # job's `perform` (those bodies: `mount` and `handle_params` may let
+  # `Ecto.NoResultsError` render its 404).
+
+  @raising_repo_lookups ~w(get! get_by! one! get_uuid! reload!)a
+  @event_callbacks ~w(handle_event handle_info handle_async perform)a
+
+  defp raising_lookups_at_boundaries do
+    for path <- ex_files(schema_dirs() ++ source_dirs()),
+        text = File.read!(path),
+        scope = boundary_scope(path, text),
+        {:ok, ast} <- [Code.string_to_quoted(text)],
+        {line, call} <- raising_lookups(ast, scope) do
+      %{
+        rule: "R17-boundary-raise",
+        file: path,
+        line: line,
+        message:
+          "#{call} raises on a miss at a boundary; call its tuple/nil twin and answer " <>
+            "the miss (CONTRIBUTING.md \"Errors\")"
+      }
+    end
+  end
+
+  defp boundary_scope(path, text) do
+    cond do
+      String.contains?(path, "/controllers/api/") or String.contains?(path, "/channels/") ->
+        :module
+
+      String.contains?(path, "/live/") or String.contains?(text, "Oban.Worker") ->
+        :callbacks
+
+      true ->
+        nil
+    end
+  end
+
+  defp raising_lookups(ast, :module), do: lookups_in(ast)
+
+  defp raising_lookups(ast, :callbacks) do
+    {_ast, bodies} =
+      Macro.prewalk(ast, [], fn
+        {:def, _, [head, body]} = node, acc ->
+          if callback_name(head) in @event_callbacks, do: {node, [body | acc]}, else: {node, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.flat_map(bodies, &lookups_in/1)
+  end
+
+  defp callback_name({:when, _, [head | _]}), do: callback_name(head)
+  defp callback_name({name, _, args}) when is_atom(name) and is_list(args), do: name
+  defp callback_name(_head), do: nil
+
+  defp lookups_in(ast) do
+    {_ast, found} =
+      Macro.prewalk(ast, [], fn
+        {{:., _, [{:__aliases__, _, parts}, fun]}, meta, args} = node, acc
+        when is_atom(fun) and is_list(args) ->
+          if raising_lookup?(List.last(parts), fun),
+            do: {node, [{meta[:line], "#{Enum.join(parts, ".")}.#{fun}"} | acc]},
+            else: {node, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.reverse(found)
+  end
+
+  defp raising_lookup?(:Repo, fun), do: fun in @raising_repo_lookups
+
+  defp raising_lookup?(_module, fun) do
+    name = Atom.to_string(fun)
+    String.starts_with?(name, "get_") and String.ends_with?(name, "!")
+  end
 
   defp decision_site?(file),
     do: String.contains?(file, "/controllers/") or String.contains?(file, "/channels/")

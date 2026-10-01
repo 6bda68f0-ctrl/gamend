@@ -3253,3 +3253,127 @@ msgstr "Att bekräfta med den här länken tar bort lösenordet som kontot regis
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} min lästid"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Konto och säkerhet"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "Meddelanden om kontot, som inloggningslänkar, skickas alltid."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Automatisk (den här enheten): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Chattmeddelanden"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Välj vad vi skickar till dig"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Välj vad vi skickar till dig: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Välj vad vi berättar för dig, och var."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "Klart. Inga fler mejl om: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "Klart. Vi mejlar dig bara meddelanden om ditt konto."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "Mejla mig: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "Mejlinställningar"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "Mejl om: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Vänner och grupper"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "På webbplatsen"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Telefon"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Uppdrag och belöningar"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Inställningar"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Sluta få alla mejl"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Sluta få de här mejlen"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Sluta få de här mejlen: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Den här länken fungerar inte. Logga in för att välja vad vi skickar till dig."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Tidszon"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "Slå på mejl igen"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Slå på aviseringar igen"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Stäng av alla mejl"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Stäng av alla telefonaviseringar"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Stäng av allt"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Slå på telefonaviseringar igen"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Du får inget av de här mejlen."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Du får det här mejlet eftersom du har slagit på mejl för: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "Din dag och dina påminnelser följer den."

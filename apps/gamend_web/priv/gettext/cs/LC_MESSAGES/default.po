@@ -3302,3 +3302,127 @@ msgstr "Potvrzení tímto odkazem odstraní heslo, se kterým byl účet zaregis
 #, elixir-autogen, elixir-format
 msgid "%{count} min read"
 msgstr "%{count} min čtení"
+
+#, elixir-autogen, elixir-format
+msgid "Account and security"
+msgstr "Účet a zabezpečení"
+
+#, elixir-autogen, elixir-format
+msgid "Account messages, such as sign-in links, are always sent."
+msgstr "Zprávy o účtu, například odkazy pro přihlášení, posíláme vždy."
+
+#, elixir-autogen, elixir-format
+msgid "Automatic (this device): %{zone}"
+msgstr "Automaticky (toto zařízení): %{zone}"
+
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr "Zprávy v chatu"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you"
+msgstr "Vyber, co ti posíláme"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we send you: %{url}"
+msgstr "Vyber, co ti posíláme: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "Choose what we tell you, and where."
+msgstr "Vyber, o čem a kde ti dáme vědět."
+
+#, elixir-autogen, elixir-format
+msgid "Done. No more emails about: %{group}."
+msgstr "Hotovo. Už žádné e-maily o: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Done. We will not email you anything but account messages."
+msgstr "Hotovo. E-mailem ti budeme posílat jen zprávy o účtu."
+
+#, elixir-autogen, elixir-format
+msgid "Email me: %{group}"
+msgstr "Pošli mi e-mail: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Email settings"
+msgstr "Nastavení e-mailů"
+
+#, elixir-autogen, elixir-format
+msgid "Emails about: %{group}"
+msgstr "E-maily o: %{group}"
+
+#, elixir-autogen, elixir-format
+msgid "Friends and groups"
+msgstr "Přátelé a skupiny"
+
+#, elixir-autogen, elixir-format
+msgid "On the site"
+msgstr "Na webu"
+
+#, elixir-autogen, elixir-format
+msgid "Phone"
+msgstr "Telefon"
+
+#, elixir-autogen, elixir-format
+msgid "Quests and rewards"
+msgstr "Úkoly a odměny"
+
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr "Nastavení"
+
+#, elixir-autogen, elixir-format
+msgid "Stop all emails"
+msgstr "Odhlásit všechny e-maily"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails"
+msgstr "Odhlásit tyto e-maily"
+
+#, elixir-autogen, elixir-format
+msgid "Stop these emails: %{url}"
+msgstr "Odhlásit tyto e-maily: %{url}"
+
+#, elixir-autogen, elixir-format
+msgid "This link does not work. Sign in to choose what we send you."
+msgstr "Tento odkaz nefunguje. Přihlas se a vyber, co ti posíláme."
+
+#, elixir-autogen, elixir-format
+msgid "Time zone"
+msgstr "Časové pásmo"
+
+#, elixir-autogen, elixir-format
+msgid "Turn email back on"
+msgstr "Znovu zapnout e-maily"
+
+#, elixir-autogen, elixir-format
+msgid "Turn notifications back on"
+msgstr "Znovu zapnout oznámení"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all email"
+msgstr "Vypnout všechny e-maily"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off all phone notifications"
+msgstr "Vypnout všechna oznámení na telefonu"
+
+#, elixir-autogen, elixir-format
+msgid "Turn off everything"
+msgstr "Vypnout vše"
+
+#, elixir-autogen, elixir-format
+msgid "Turn phone notifications back on"
+msgstr "Znovu zapnout oznámení na telefonu"
+
+#, elixir-autogen, elixir-format
+msgid "You get none of these emails."
+msgstr "Žádný z těchto e-mailů nedostáváš."
+
+#, elixir-autogen, elixir-format
+msgid "You get this email because you turned on emails for: %{group}."
+msgstr "Tento e-mail dostáváš, protože sis zapnul e-maily pro: %{group}."
+
+#, elixir-autogen, elixir-format
+msgid "Your day and your reminders follow it."
+msgstr "Tvůj den a připomínky se jím řídí."

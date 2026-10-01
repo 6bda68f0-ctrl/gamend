@@ -510,9 +510,8 @@ defmodule Gamend.Groups do
           {:ok, Group.t()} | {:error, atom() | Ecto.Changeset.t()}
   def update_group(user_id, group_id, attrs)
       when is_binary(user_id) and is_binary(group_id) and is_map(attrs) do
-    if can_manage_group?(user_id, group_id) do
-      group = get_group!(group_id)
-
+    with true <- can_manage_group?(user_id, group_id) || {:error, :not_admin},
+         %Group{} = group <- get_group(group_id) || {:error, :not_found} do
       # `icon_url` is dropped: it is set only by `save_icon/3`, after an upload
       # ticket has been confirmed. Leaving it castable here let a group admin
       # point the icon at any external URL, and did so even when the
@@ -534,8 +533,6 @@ defmodule Gamend.Groups do
           do_update_group(group, attrs)
         end
       end
-    else
-      {:error, :not_admin}
     end
   end
 
@@ -552,10 +549,9 @@ defmodule Gamend.Groups do
           {:ok, Group.t()} | {:error, :not_admin | Ecto.Changeset.t() | term()}
   def set_icon_url(user_id, group_id, url)
       when is_binary(user_id) and is_binary(group_id) and is_binary(url) do
-    if can_manage_group?(user_id, group_id) do
-      group_id |> get_group!() |> do_update_group(%{"icon_url" => url})
-    else
-      {:error, :not_admin}
+    with true <- can_manage_group?(user_id, group_id) || {:error, :not_admin},
+         %Group{} = group <- get_group(group_id) || {:error, :not_found} do
+      do_update_group(group, %{"icon_url" => url})
     end
   end
 
@@ -569,9 +565,10 @@ defmodule Gamend.Groups do
             attrs
           end
 
-        group
-        |> Group.changeset(attrs_to_use)
-        |> Repo.update()
+        # The group may come from the cache and be deleted since.
+        Repo.rescue_stale(:not_found, fn ->
+          group |> Group.changeset(attrs_to_use) |> Repo.update()
+        end)
         |> case do
           {:ok, updated} ->
             Gamend.Async.run(fn ->
@@ -609,37 +606,40 @@ defmodule Gamend.Groups do
   end
 
   @doc """
-  Delete a group. Admin-only. Refuses if the group still has members — groups
-  are auto-deleted when the last member leaves.
+  Delete a group. Any of its admins can, members or not: everyone in it is
+  removed with it and told, as a kick tells one member.
   """
-  @spec delete_group(Ecto.UUID.t(), Ecto.UUID.t()) :: {:ok, Group.t()} | {:error, atom()}
+  @spec delete_group(Ecto.UUID.t(), Ecto.UUID.t()) :: {:ok, Group.t()} | {:error, term()}
   def delete_group(user_id, group_id)
       when is_binary(user_id) and is_binary(group_id) do
-    cond do
-      not can_manage_group?(user_id, group_id) ->
-        {:error, :not_admin}
-
-      count_group_members(group_id) > 0 ->
-        {:error, :has_members}
-
-      true ->
-        group = get_group!(group_id)
-
-        with {:ok, _} <- Gamend.Hooks.internal_call(:before_group_delete, [group]) do
-          do_delete_group(group)
-        end
+    with %Group{} = group <- get_group(group_id) || {:error, :not_found},
+         true <- can_manage_group?(user_id, group_id) || {:error, :not_admin},
+         {:ok, _} <- Gamend.Hooks.internal_call(:before_group_delete, [group]) do
+      do_delete_group(group, user_id)
     end
   end
 
-  defp do_delete_group(%Group{} = group) do
+  # Under the group's lock, as a join and a leave take: the members read here
+  # are exactly the ones the delete removes.
+  defp do_delete_group(%Group{} = group, deleted_by) do
     # Gather pending invite user IDs before cascade-delete removes them
     pending_invite_user_ids = Shared.gather_pending_invite_user_ids(group.id)
 
-    case Repo.delete(group) do
-      {:ok, deleted} ->
+    Lock.serialize(:group, group.id, fn ->
+      member_ids = group_member_ids(group.id)
+
+      # Two deletes racing: the second finds no row, which is the outcome it asked for.
+      case Repo.rescue_stale(:not_found, fn -> Repo.delete(group) end) do
+        {:ok, deleted} -> {deleted, member_ids}
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, {deleted, member_ids}} ->
         _ = invalidate_group_cache(deleted.id)
         Shared.invalidate_invite_caches_for_users(pending_invite_user_ids)
         Shared.notify_invite_users_group_deleted(pending_invite_user_ids, deleted)
+        notify_members_group_deleted(deleted, member_ids -- [deleted_by], deleted_by)
         Gamend.Chat.cleanup_chat("group", deleted.id)
         broadcast_groups({:group_deleted, deleted.id})
 
@@ -654,13 +654,30 @@ defmodule Gamend.Groups do
     end
   end
 
+  # A server admin's delete has no member to send it: the row is the member's
+  # own then, as `Gamend.Notifications.notify/3` writes the server's.
+  defp notify_members_group_deleted(%Group{} = group, member_ids, deleted_by) do
+    for member_id <- member_ids do
+      Gamend.Notifications.admin_create_notification(deleted_by || member_id, member_id, %{
+        "title" => "#{group.title} was deleted",
+        "content" => "",
+        "metadata" => %{
+          "type" => "group_deleted",
+          "group_id" => group.id,
+          "group_title" => group.title
+        }
+      })
+    end
+
+    :ok
+  end
+
   @doc "Admin-level delete (no membership check, for server admins)."
   @spec admin_delete_group(Ecto.UUID.t()) :: {:ok, Group.t()} | {:error, term()}
   def admin_delete_group(group_id) when is_binary(group_id) do
-    group = get_group!(group_id)
-
-    with {:ok, _} <- Gamend.Hooks.internal_call(:before_group_delete, [group]) do
-      do_delete_group(group)
+    with %Group{} = group <- get_group(group_id) || {:error, :not_found},
+         {:ok, _} <- Gamend.Hooks.internal_call(:before_group_delete, [group]) do
+      do_delete_group(group, nil)
     end
   end
 
@@ -901,7 +918,7 @@ defmodule Gamend.Groups do
           :ok
 
         group ->
-          Repo.delete(group)
+          _ = Repo.rescue_stale(:not_found, fn -> Repo.delete(group) end)
           after_leave_commit(fn -> announce_group_deleted(group) end)
       end
     end
@@ -912,6 +929,7 @@ defmodule Gamend.Groups do
     broadcast_groups({:group_deleted, group_id})
 
     Gamend.Async.run(fn ->
+      Gamend.Chat.cleanup_chat("group", group_id)
       Gamend.Hooks.internal_call(:after_group_deleted, [group])
     end)
   end

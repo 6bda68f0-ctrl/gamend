@@ -31,6 +31,18 @@ zone is only known in their browser. So:
 - Any read-modify-write (merging a map, checking capacity before insert) must hold a lock. Plain "set field X" writes do not.
 - Background work (sweeps, schedulers) as a supervised GenServer — add it to `GamendWeb.HostSupervision.children/1`, which every host (this repo and the starter) starts. A host-only process goes in that function's `:extra` option instead.
 
+## Errors
+
+A failure is either **expected** — a client, bad input or a concurrent write can cause it — or a **bug**. They travel differently, and hosts (Forge, Polyglot Pirates) follow the same rules.
+
+- **Expected failures return `{:error, reason}`** (or `nil` from a plain `get_*`), through `with`, `case`, guards and changesets. The `@spec` says so and holds: a function that returns tuples calls no `!` function on a path a client or a concurrent delete can reach. "Check, then `get_x!`" is that path — the row goes between the two.
+- **Bugs and infrastructure failures raise** (a bad call, the database down, a constraint no changeset declares). A context does not rescue them, does not wrap and re-raise them as its own error, and does not turn them into `{:error, exception}`: the caller can do nothing with it, the stack trace is lost, and a server fault comes back as a 4xx.
+- **A `!` function is a thin wrapper over its tuple twin**, for a caller whose miss is a bug: tests, seeds, mix tasks, boot, and an admin LiveView's `mount`/`handle_params` (`Ecto.NoResultsError` renders a 404). Never in an API controller, a channel, a hook RPC, a LiveView `handle_event`/`handle_info`/`handle_async` or a job's `perform` — there a miss is an answer. `mix gamend.api.lint` (R17) flags `get_*!` and `Repo` lookups with `!` in those places; an admin page answers a miss with `GamendWeb.AdminLive.Shared.with_record/3`.
+- **Rescue one exception that has a domain meaning, at the write that raises it, around that one call:** `Repo.rescue_stale/2` (the row was deleted since it was read), `Repo.rescue_foreign_key/2` (its parent is gone). Prefer `unique_constraint/3` and `foreign_key_constraint/3` in the changeset, which need no rescue at all.
+- **The process boundary handles everything else, the same way each time.** Plug answers 500 through `ErrorJSON`; a hook that raises answers 500 `exception` with no detail, logged with its stack trace by `Gamend.Hooks`; a crashed channel rejoins; a job that raises retries and still leaves its rows in a terminal state. A best-effort step that must not stop its caller (the cleanups in `Accounts.delete_user/1`) may rescue, and logs the exception with `Exception.format/3` — never `rescue _ -> :ok`.
+- **No `throw`/`catch` for control flow.** `with` and tagged tuples carry an early exit.
+- **Test the misses.** Each documented 4xx of an endpoint gets a test, and so does the race a `rescue_stale` covers. `RESPONSE_CONTRACT_SEEN=<file> mix test` lists the operation/status pairs the suite reaches; a documented status missing from it is untested.
+
 ## Hooks (so plugins can extend the feature)
 
 Adding one callback touches six places — miss one and plugins break in confusing ways:
@@ -87,5 +99,5 @@ Adding one callback touches six places — miss one and plugins break in confusi
 - Keep guides short. They render inside a disclosure someone opened with a question in mind: lead with the answer, prefer a table or a short example over prose, and leave the exhaustive reference to the API docs.
 - New settings declared with `Gamend.Settings.Provider`, never read with `System.get_env/1`. The env var name derives from the declaration, and both `.env.example` and the public Settings guide are generated — run `mix gamend.settings.env_example` and `mix gamend.settings.guide`, and commit the result. Both take `--check` so CI catches a declaration whose docs were never regenerated.
 - `CHANGELOG.md` entry (`[added]` / `[changed]` / `[fixed]` / `[removed]` / `[breaking]`): a bold one-line summary, then what changed and why, grouped with related items.
-- `mix format`, `mix credo --strict`, full `mix test` green.
+- `mix format`, `mix credo --strict`, `mix gamend.api.lint`, full `mix test` green.
 - SDKs regenerate from the OpenAPI spec in CI — no manual SDK edits.

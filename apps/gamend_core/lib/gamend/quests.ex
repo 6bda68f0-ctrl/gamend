@@ -585,19 +585,26 @@ defmodule Gamend.Quests do
     objective_progress = merge_objectives(%{}, quest, event, amount, meta)
     completed? = all_objectives_met?(objective_progress, quest)
 
-    %QuestProgress{}
-    |> QuestProgress.changeset(%{
-      user_id: user_id,
-      quest_key: quest.key,
-      period_key: period_key,
-      objective_progress: objective_progress,
-      status: if(completed?, do: "completed", else: "active"),
-      completed_at: if(completed?, do: now)
-    })
-    |> Repo.insert()
+    # The quest was read before this; deleted since, its progress has nothing
+    # to belong to, and the event simply advances nothing.
+    Repo.rescue_foreign_key(:quest_gone, fn ->
+      %QuestProgress{}
+      |> QuestProgress.changeset(%{
+        user_id: user_id,
+        quest_key: quest.key,
+        period_key: period_key,
+        objective_progress: objective_progress,
+        status: if(completed?, do: "completed", else: "active"),
+        completed_at: if(completed?, do: now)
+      })
+      |> Repo.insert()
+    end)
     |> case do
       {:ok, progress} ->
         {if(completed?, do: :completed, else: :advanced), progress}
+
+      {:error, :quest_gone} ->
+        :done
 
       {:error, changeset} ->
         # Someone else created this user's row for this period first. Their

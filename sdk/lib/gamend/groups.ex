@@ -410,12 +410,12 @@ defmodule Gamend.Groups do
   end
 
   @doc ~S"""
-    Delete a group. Admin-only. Refuses if the group still has members — groups
-    are auto-deleted when the last member leaves.
+    Delete a group. Any of its admins can, members or not: everyone in it is
+    removed with it and told, as a kick tells one member.
     
   """
   @spec delete_group(Ecto.UUID.t(), Ecto.UUID.t()) ::
-          {:ok, Gamend.Groups.Group.t()} | {:error, atom()}
+          {:ok, Gamend.Groups.Group.t()} | {:error, term()}
   def delete_group(_user_id, _group_id) do
     case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
       :placeholder ->

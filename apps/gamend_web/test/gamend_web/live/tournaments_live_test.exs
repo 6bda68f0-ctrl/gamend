@@ -529,7 +529,7 @@ defmodule GamendWeb.TournamentsLiveTest do
 
     {:ok, _view, html} = live(conn, ~p"/tournaments/#{tournament.slug}/brackets/0")
 
-    assert html =~ Calendar.strftime(tournament.starts_at, "%b %d, %Y")
+    assert html =~ Calendar.strftime(tournament.starts_at, "%b %-d, %Y")
     assert html =~ "Running"
   end
 end

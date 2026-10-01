@@ -24,12 +24,37 @@ defmodule Gamend.GroupsTest.HooksModifyGroupUpdate do
   end
 end
 
+defmodule Gamend.GroupsTest.HooksVanishingGroup do
+  use Gamend.TestSupport.NoopHooks
+
+  import Ecto.Query, only: [from: 2]
+
+  @impl true
+  def before_group_join(user, group, opts) do
+    vanish(group)
+    {:ok, {user, group, opts}}
+  end
+
+  @impl true
+  def before_group_delete(group) do
+    vanish(group)
+    {:ok, group}
+  end
+
+  # A concurrent delete committing while the caller still holds the group.
+  defp vanish(group) do
+    Gamend.Repo.delete_all(from g in Gamend.Groups.Group, where: g.id == ^group.id)
+  end
+end
+
 defmodule Gamend.GroupsTest do
   use Gamend.DataCase
 
   alias Gamend.AccountsFixtures
+  alias Gamend.Chat
+  alias Gamend.Chat.{Message, ReadCursor}
   alias Gamend.Groups
-  alias Gamend.Groups.{Group, GroupJoinRequest, GroupMember}
+  alias Gamend.Groups.{Group, GroupInvite, GroupJoinRequest, GroupMember}
 
   setup do
     owner = AccountsFixtures.user_fixture() |> AccountsFixtures.set_password()
@@ -168,17 +193,32 @@ defmodule Gamend.GroupsTest do
   # ---------------------------------------------------------------------------
 
   describe "delete_group/2" do
-    test "admin can delete empty group", %{owner: owner} do
-      {:ok, group} = Groups.create_group(owner.id, %{"title" => "Doomed"})
-      # Leave first so the group is empty
-      Groups.leave_group(owner.id, group.id)
-      # Re-create to test: create a group, leave it (auto-deletes since empty)
-      # Instead, test through admin_delete_group which has no member check
+    test "an admin deletes a group with its members in it, and each member is told", %{
+      owner: owner,
+      other: other
+    } do
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "Populated"})
+      {:ok, _} = Groups.join_group(other.id, group.id)
+
+      assert {:ok, %Group{}} = Groups.delete_group(owner.id, group.id)
+
+      refute Repo.get(Group, group.id)
+      assert Groups.user_group_ids(other.id) == []
+
+      told = fn user ->
+        Repo.all(
+          from n in Gamend.Notifications.Notification,
+            where: n.recipient_id == ^user.id and n.metadata["type"] == "group_deleted",
+            select: n.metadata["group_id"]
+        )
+      end
+
+      assert told.(other) == [group.id]
+      assert told.(owner) == [], "the admin who deleted it is not told"
     end
 
-    test "cannot delete group with members", %{owner: owner} do
-      {:ok, group} = Groups.create_group(owner.id, %{"title" => "Populated"})
-      assert {:error, :has_members} = Groups.delete_group(owner.id, group.id)
+    test "deleting a group that does not exist answers not_found", %{owner: owner} do
+      assert {:error, :not_found} = Groups.delete_group(owner.id, Ecto.UUID.generate())
     end
 
     test "non-admin cannot delete", %{owner: owner, other: other} do
@@ -1324,6 +1364,185 @@ defmodule Gamend.GroupsTest do
 
       assert {:ok, _} = Groups.admin_delete_group(group.id)
       assert is_nil(Groups.get_group(group.id))
+    end
+  end
+
+  describe "a deleted group's chat" do
+    test "deleting a group removes its messages", %{owner: owner} do
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "ChatGone"})
+      insert_group_message(owner, group)
+
+      assert {:ok, _} = Groups.admin_delete_group(group.id)
+      assert Chat.count_messages("group", group.id) == 0
+    end
+
+    test "the last member leaving removes the emptied group's messages and read cursors",
+         %{owner: owner} do
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "ChatEmptied"})
+      message = insert_group_message(owner, group)
+      {:ok, _} = Chat.mark_read(owner.id, "group", group.id, message.id)
+
+      assert {:ok, _} = Groups.leave_group(owner.id, group.id)
+
+      assert is_nil(Groups.get_group(group.id))
+      assert Chat.count_messages("group", group.id) == 0
+      refute Repo.exists?(from c in ReadCursor, where: c.chat_ref_id == ^group.id)
+    end
+  end
+
+  describe "a group deleted between read and write" do
+    test "joining a group deleted as it is joined answers not_found", %{
+      owner: owner,
+      other: other
+    } do
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "VanishJoin", "type" => "public"})
+      use_hooks(Gamend.GroupsTest.HooksVanishingGroup)
+
+      assert Groups.join_group(other.id, group.id) == {:error, :not_found}
+      refute Repo.exists?(from m in GroupMember, where: m.group_id == ^group.id)
+    end
+
+    test "deleting a group a racing delete already removed answers not_found", %{owner: owner} do
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "VanishDelete"})
+      use_hooks(Gamend.GroupsTest.HooksVanishingGroup)
+
+      assert Groups.admin_delete_group(group.id) == {:error, :not_found}
+      assert is_nil(Groups.get_group(group.id))
+    end
+
+    test "requesting to join a group deleted as it is read answers not_found",
+         %{owner: owner, other: other} do
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "VanishReq", "type" => "private"})
+
+      result =
+        delete_group_after_read(group, "group_join_requests", fn ->
+          Groups.request_join(other.id, group.id)
+        end)
+
+      assert result == {:error, :not_found}
+      refute Repo.exists?(from r in GroupJoinRequest, where: r.group_id == ^group.id)
+    end
+
+    test "approving a request whose group is deleted as it is approved answers not_found",
+         %{owner: owner, other: other} do
+      {:ok, group} =
+        Groups.create_group(owner.id, %{"title" => "VanishAppr", "type" => "private"})
+
+      {:ok, request} = Groups.request_join(other.id, group.id)
+      use_hooks(Gamend.GroupsTest.HooksVanishingGroup)
+
+      assert Groups.approve_join_request(owner.id, request.id) == {:error, :not_found}
+      refute Repo.exists?(from m in GroupMember, where: m.group_id == ^group.id)
+    end
+
+    test "updating a group deleted after the admin check answers not_found", %{owner: owner} do
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "VanishUpd"})
+
+      result =
+        delete_group_after_read(group, "group_members", fn ->
+          Groups.update_group(owner.id, group.id, %{"description" => "late"})
+        end)
+
+      assert result == {:error, :not_found}
+    end
+
+    test "setting the icon of a group deleted after the admin check answers not_found",
+         %{owner: owner} do
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "VanishIcon"})
+
+      result =
+        delete_group_after_read(group, "group_members", fn ->
+          Groups.set_icon_url(owner.id, group.id, "/uploads/icon.png")
+        end)
+
+      assert result == {:error, :not_found}
+    end
+
+    test "updating a group held since it was deleted answers not_found", %{owner: owner} do
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "VanishHeld"})
+      Repo.delete_all(from g in Group, where: g.id == ^group.id)
+
+      assert Groups.admin_update_group(group, %{"description" => "late"}) ==
+               {:error, :not_found}
+    end
+
+    test "an admin deleting a group that does not exist is answered not_found" do
+      assert Groups.admin_delete_group(Ecto.UUID.generate()) == {:error, :not_found}
+    end
+
+    test "approving a request whose group is deleted after the admin check answers not_found",
+         %{owner: owner, other: other} do
+      {:ok, group} =
+        Groups.create_group(owner.id, %{"title" => "VanishApprCheck", "type" => "private"})
+
+      {:ok, request} = Groups.request_join(other.id, group.id)
+
+      result =
+        delete_group_after_read(group, "group_members", fn ->
+          Groups.approve_join_request(owner.id, request.id)
+        end)
+
+      assert result == {:error, :not_found}
+    end
+
+    test "inviting to a group deleted as it is read answers not_found",
+         %{owner: owner, other: other} do
+      {:ok, group} = Groups.create_group(owner.id, %{"title" => "VanishInv", "type" => "hidden"})
+
+      result =
+        delete_group_after_read(group, "group_invites", fn ->
+          Groups.invite_to_group(owner.id, group.id, other.id)
+        end)
+
+      assert result == {:error, :not_found}
+      refute Repo.exists?(from i in GroupInvite, where: i.group_id == ^group.id)
+    end
+  end
+
+  defp insert_group_message(sender, group) do
+    %Message{sender_id: sender.id}
+    |> Message.changeset(%{chat_type: "group", chat_ref_id: group.id, content: "hello"})
+    |> Repo.insert!()
+  end
+
+  defp use_hooks(module) do
+    previous = Application.get_env(:gamend_core, :hooks_module)
+    Application.put_env(:gamend_core, :hooks_module, module)
+
+    on_exit(fn ->
+      if previous do
+        Application.put_env(:gamend_core, :hooks_module, previous)
+      else
+        Application.delete_env(:gamend_core, :hooks_module)
+      end
+    end)
+  end
+
+  # Deletes the group the first time this process reads `source`, so the
+  # context's checks pass and its write is the first thing to notice.
+  defp delete_group_after_read(group, source, fun) do
+    test_pid = self()
+    handler = {__MODULE__, :delete_group_after_read, System.unique_integer()}
+
+    :telemetry.attach(
+      handler,
+      [:gamend, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if self() == test_pid and meta[:source] == source and
+             String.starts_with?(meta[:query], "SELECT") and !Process.get(:group_deleted) do
+          Process.put(:group_deleted, true)
+          Repo.delete_all(from g in Group, where: g.id == ^group.id)
+        end
+      end,
+      nil
+    )
+
+    try do
+      result = fun.()
+      assert Process.get(:group_deleted), "#{source} was never read"
+      result
+    after
+      :telemetry.detach(handler)
     end
   end
 end

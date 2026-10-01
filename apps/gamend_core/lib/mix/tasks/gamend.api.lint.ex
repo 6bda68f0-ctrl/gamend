@@ -31,7 +31,9 @@ defmodule Mix.Tasks.Gamend.Api.Lint do
     {"R13-context-paging", "A context builds limit/offset instead of using Gamend.Query"},
     {"R14-display-name", "A user's name is built from an inline `display_name ||` fallback"},
     {"R15-response-shape",
-     "An API controller answers outside GamendWeb.Reply, or documents an inline response schema"}
+     "An API controller answers outside GamendWeb.Reply, or documents an inline response schema"},
+    {"R17-boundary-raise",
+     "A controller, channel, LiveView event or job looks a row up with a raising `!`"}
   ]
 
   @impl true
