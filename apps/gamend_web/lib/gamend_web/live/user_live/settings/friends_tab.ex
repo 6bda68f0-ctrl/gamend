@@ -193,7 +193,7 @@ defmodule GamendWeb.UserLive.Settings.FriendsTab do
                   <button
                     phx-click="unblock_friend"
                     phx-value-id={b.id}
-                    class="btn btn-sm btn-outline"
+                    class="btn btn-surface btn-sm"
                   >
                     {gettext("Unblock")}
                   </button>

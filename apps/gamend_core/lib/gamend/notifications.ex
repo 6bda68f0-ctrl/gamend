@@ -40,6 +40,7 @@ defmodule Gamend.Notifications do
 
   alias Gamend.Friends
   alias Gamend.Notifications.Notification
+  alias Gamend.Notifications.Preferences
   alias Gamend.Repo
   alias Gamend.Repo.AdvisoryLock
 
@@ -359,6 +360,80 @@ defmodule Gamend.Notifications do
     upsert_notification(sender_id, recipient_id, attrs)
   end
 
+  @doc """
+  Tell a user something the SERVER has to say (a streak about to end, a class
+  result), through the channels they chose for `group`
+  (`Gamend.Notifications.Preferences`): the in-app row, a push to their
+  devices, an email. A channel they turned off is skipped.
+
+  `attrs`: `"title"` (required), `"content"`, `"type"` (a declared code,
+  `Gamend.Notifications.Types`), `"url"` (a path on this site the
+  notification leads to), and for the email `"subject"` and `"text"`
+  (default: the title and the content).
+
+  The in-app row is the user's own (sender = recipient), so repeating a title
+  refreshes the one row rather than stacking. Returns the channels it went
+  out on.
+  """
+  @spec notify(user_id(), String.t(), map()) :: {:ok, [String.t()]} | {:error, :not_found}
+  def notify(user_id, group, attrs)
+      when is_binary(user_id) and is_binary(group) and is_map(attrs) do
+    case Gamend.Accounts.get_user(user_id) do
+      nil ->
+        {:error, :not_found}
+
+      user ->
+        metadata =
+          %{"type" => attrs["type"], "url" => attrs["url"], "group" => group}
+          |> Map.reject(fn {_k, v} -> is_nil(v) end)
+
+        row = %{
+          "title" => attrs["title"],
+          "content" => attrs["content"] || "",
+          "metadata" => metadata
+        }
+
+        in_app? =
+          Preferences.enabled?(user, group, "in_app") and
+            match?({:ok, _}, upsert_notification(user_id, user_id, row, fan_out: false))
+
+        push? =
+          Preferences.enabled?(user, group, "push") and
+            push_message(user_id, row, "notify-#{group}")
+
+        email? = Preferences.enabled?(user, group, "email") and enqueue_email(user, group, attrs)
+
+        {:ok,
+         for(
+           {channel, true} <- [{"in_app", in_app?}, {"push", push?}, {"email", email?}],
+           do: channel
+         )}
+    end
+  end
+
+  # The email is the web app's to build (it knows the site's URL and signs the
+  # unsubscribe link), so core queues its job by the worker's name.
+  @email_worker "GamendWeb.Workers.NotificationEmail"
+
+  defp enqueue_email(%{email: email} = user, group, attrs) when is_binary(email) do
+    args =
+      Map.reject(
+        %{
+          "user_id" => user.id,
+          "group" => group,
+          "subject" => attrs["subject"] || attrs["title"],
+          "text" => attrs["text"] || attrs["content"] || "",
+          "url" => attrs["url"]
+        },
+        fn {_k, v} -> is_nil(v) end
+      )
+
+    job = Oban.Job.new(args, worker: @email_worker, queue: :mailers, max_attempts: 5)
+    match?({:ok, _}, Oban.insert(job))
+  end
+
+  defp enqueue_email(_user, _group, _attrs), do: false
+
   @doc "Admin: delete a single notification by ID (no ownership check)."
   @spec admin_delete_notification(Ecto.UUID.t()) :: {:ok, Notification.t()} | {:error, term()}
   def admin_delete_notification(id) when is_binary(id) do
@@ -464,7 +539,7 @@ defmodule Gamend.Notifications do
 
   # Upsert a notification: on conflict (same sender, recipient, title),
   # replace content, metadata, and read flag so the user sees the latest.
-  defp upsert_notification(sender_id, recipient_id, attrs) do
+  defp upsert_notification(sender_id, recipient_id, attrs, opts \\ []) do
     content = Map.get(attrs, "content") || Map.get(attrs, :content, "")
     metadata = Map.get(attrs, "metadata") || Map.get(attrs, :metadata, %{})
     icon_url = Map.get(attrs, "icon_url") || Map.get(attrs, :icon_url)
@@ -491,7 +566,7 @@ defmodule Gamend.Notifications do
         invalidate_notifications_cache(recipient_id)
         invalidate_notifications_cache(sender_id)
         broadcast_user(recipient_id, {:notification_created, notification})
-        push_notification(notification)
+        if Keyword.get(opts, :fan_out, true), do: push_notification(notification)
         {:ok, notification}
 
       error ->
@@ -503,8 +578,46 @@ defmodule Gamend.Notifications do
   # runs after the row is committed and broadcast, and its outcome never
   # affects the notification (delivery itself is queued jobs). The cached
   # has-live-tokens check keeps the common no-device case free.
-  defp push_notification(%Notification{} = notification) do
-    if Gamend.Push.user_has_live_tokens?(notification.recipient_id) do
+  #
+  # The recipient's choices apply: a notification whose type belongs to a
+  # group (`Preferences.group_for_type/1`) is pushed only when they left that
+  # group's push on, and emailed when they turned its email on. One with no
+  # group (a moderator's notice) is pushed as it always was.
+  defp push_notification(%Notification{recipient_id: recipient_id} = notification) do
+    metadata = notification.metadata || %{}
+    group = metadata["group"] || Preferences.group_for_type(metadata["type"])
+
+    row = %{
+      "title" => notification.title,
+      "content" => notification.content,
+      "metadata" => Map.put(metadata, "notification_id", notification.id)
+    }
+
+    if is_nil(group) do
+      # One collapse id per notification row, so the re-upserted rows (chat
+      # previews) replace their earlier push instead of stacking.
+      push_message(recipient_id, row, "notif-#{notification.id}")
+    else
+      user = Gamend.Accounts.get_user(recipient_id)
+
+      if Preferences.enabled?(user, group, "push"),
+        do: push_message(recipient_id, row, "notif-#{notification.id}")
+
+      if Preferences.enabled?(user, group, "email"),
+        do:
+          enqueue_email(user, group, %{
+            "title" => notification.title,
+            "content" => notification.content,
+            "url" => metadata["url"]
+          })
+    end
+
+    :ok
+  end
+
+  # Whether a push went out: false when the user has no device to take it.
+  defp push_message(user_id, %{"title" => title} = row, collapse_key) do
+    if Gamend.Push.user_has_live_tokens?(user_id) do
       alias Gamend.Push.Message
 
       # Byte-safe truncation: notification titles/content allow more than the
@@ -512,24 +625,16 @@ defmodule Gamend.Notifications do
       # exceed the cap even at equal char limits) — a push must degrade to a
       # shorter preview, never be dropped by validation.
       _ =
-        Gamend.Push.send_to_user(notification.recipient_id, %{
-          "title" => Message.truncate(notification.title, Gamend.Limits.get(:max_push_title)),
-          "body" =>
-            Message.truncate(notification.content || "", Gamend.Limits.get(:max_push_body)),
-          "data" => push_data(notification),
-          # One collapse id per notification row, so the re-upserted rows
-          # (chat previews) replace their earlier push instead of stacking.
-          "collapse_key" => "notif-#{notification.id}"
+        Gamend.Push.send_to_user(user_id, %{
+          "title" => Message.truncate(title, Gamend.Limits.get(:max_push_title)),
+          "body" => Message.truncate(row["content"] || "", Gamend.Limits.get(:max_push_body)),
+          "data" => Map.take(row["metadata"] || %{}, ["type", "url", "notification_id"]),
+          "collapse_key" => collapse_key
         })
-    end
 
-    :ok
-  end
-
-  defp push_data(%Notification{} = notification) do
-    case notification.metadata do
-      %{"type" => type} -> %{"type" => type, "notification_id" => notification.id}
-      _ -> %{"notification_id" => notification.id}
+      true
+    else
+      false
     end
   end
 

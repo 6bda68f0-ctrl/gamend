@@ -13,13 +13,15 @@ defmodule Gamend.Accounts.UserNotifier do
 
   # Delivers the email using the application mailer.
   defp deliver(recipient, subject, body) do
-    email =
-      new()
-      |> to(recipient)
-      |> from(sender_tuple())
-      |> subject(subject)
-      |> text_body(body)
+    new()
+    |> to(recipient)
+    |> from(sender_tuple())
+    |> subject(subject)
+    |> text_body(body)
+    |> send_email(subject)
+  end
 
+  defp send_email(email, subject) do
     # Always protect delivery attempts so a missing/invalid Mailer or
     # transport doesn't crash live processes. Return {:ok, email} on
     # success and {:error, reason} otherwise.
@@ -83,6 +85,26 @@ defmodule Gamend.Accounts.UserNotifier do
         {"Gamend", "contact@gamend.org"}
     end
   end
+
+  @doc """
+  A notification the user chose to get by email
+  (`Gamend.Notifications.notify/3`). `unsubscribe_url` ends the body and goes
+  in the `List-Unsubscribe` headers too (RFC 8058 one-click), so a mail
+  client's own "Unsubscribe" button works without opening the site.
+  """
+  def deliver_notification(%User{email: email}, subject, body, unsubscribe_url)
+      when is_binary(email) and is_binary(unsubscribe_url) do
+    new()
+    |> to(email)
+    |> from(sender_tuple())
+    |> subject(subject)
+    |> text_body(body)
+    |> header("List-Unsubscribe", "<#{unsubscribe_url}>")
+    |> header("List-Unsubscribe-Post", "List-Unsubscribe=One-Click")
+    |> send_email(subject)
+  end
+
+  def deliver_notification(_user, _subject, _body, _url), do: {:ok, :no_email}
 
   @doc """
   Warn a user that their account will be deleted after `days` of inactivity.

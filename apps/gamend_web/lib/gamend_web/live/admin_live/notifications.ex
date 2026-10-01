@@ -37,7 +37,7 @@ defmodule GamendWeb.AdminLive.Notifications do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="space-y-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
         <%!-- Create notification form --%>
         <div class="card bg-base-200">
@@ -47,7 +47,7 @@ defmodule GamendWeb.AdminLive.Notifications do
               <button
                 type="button"
                 phx-click="toggle_create"
-                class="btn btn-sm btn-outline"
+                class="btn btn-surface btn-sm"
               >
                 {if @show_create, do: "Hide", else: "Show"}
               </button>

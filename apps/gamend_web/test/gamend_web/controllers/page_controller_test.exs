@@ -357,6 +357,31 @@ defmodule GamendWeb.PageControllerTest do
     assert body =~ "Acceptance of Terms"
   end
 
+  # The reference page: every example captioned with its classes, and kept out
+  # of search, since it is a reference and not content.
+  test "the UI page shows the building blocks and is not indexed", %{conn: conn} do
+    body = conn |> get("/ui") |> html_response(200)
+
+    assert body =~ "UI elements"
+    assert body =~ ~s(<meta name="robots" content="noindex, follow")
+
+    for class <- [
+          "btn btn-primary",
+          "btn btn-surface",
+          "btn btn-ghost btn-circle",
+          "badge badge-primary",
+          "alert alert-info"
+        ] do
+      assert body =~ ~s(class="#{class}), "no #{class} specimen"
+      assert body =~ "#{class}</figcaption>", "#{class} is not captioned"
+    end
+
+    for id <- ~w(buttons badges forms alerts surfaces colours type feedback) do
+      assert body =~ ~s(id="#{id}"), "no #{id} section"
+      assert body =~ ~s(href="##{id}"), "#{id} is not in the page's contents"
+    end
+  end
+
   test "legal pages give the theme's contact email as a mailto link", %{conn: conn} do
     for path <- ["/privacy", "/data_deletion", "/terms"] do
       body = conn |> get(path) |> html_response(200)

@@ -163,7 +163,7 @@ defmodule GamendWeb.AdminLive.Economy do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
-      <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+      <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
       <div class="card bg-base-200 mb-4">
         <div class="card-body">
@@ -207,7 +207,7 @@ defmodule GamendWeb.AdminLive.Economy do
               class="input input-sm input-bordered w-48"
             />
             <button type="button" phx-click="grant" class="btn btn-primary btn-sm">Grant</button>
-            <button type="button" phx-click="spend" class="btn btn-outline btn-sm">Spend</button>
+            <button type="button" phx-click="spend" class="btn btn-surface btn-sm">Spend</button>
           </form>
         </div>
       </div>
@@ -301,7 +301,7 @@ defmodule GamendWeb.AdminLive.Economy do
               class="input input-sm input-bordered w-24"
             />
             <button type="button" phx-click="grant_item" class="btn btn-primary btn-sm">Grant</button>
-            <button type="button" phx-click="consume_item" class="btn btn-outline btn-sm">Consume</button>
+            <button type="button" phx-click="consume_item" class="btn btn-surface btn-sm">Consume</button>
           </form>
           <div class="overflow-x-auto mt-3">
             <table class="table table-sm">

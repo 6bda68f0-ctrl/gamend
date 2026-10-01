@@ -39,14 +39,14 @@ defmodule GamendWeb.AdminLive.Lobbies do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="space-y-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
         <div class="card bg-base-200">
           <div class="card-body">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <h2 class="card-title">Lobbies ({@count})</h2>
               <div class="flex flex-wrap gap-2">
-                <.link navigate={~p"/admin/lobbies/live"} class="btn btn-sm btn-outline">
+                <.link navigate={~p"/admin/lobbies/live"} class="btn btn-surface btn-sm">
                   Open lobby page
                 </.link>
                 <button

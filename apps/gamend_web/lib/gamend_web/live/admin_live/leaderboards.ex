@@ -30,7 +30,7 @@ defmodule GamendWeb.AdminLive.Leaderboards do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="space-y-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
         <div class="card bg-base-200">
           <div class="card-body">
@@ -143,7 +143,7 @@ defmodule GamendWeb.AdminLive.Leaderboards do
                         <button
                           phx-click="view_records"
                           phx-value-id={lb.id}
-                          class="btn btn-xs btn-outline"
+                          class="btn btn-surface btn-xs"
                         >
                           Records
                         </button>

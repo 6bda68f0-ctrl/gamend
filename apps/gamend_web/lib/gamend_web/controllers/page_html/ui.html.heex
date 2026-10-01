@@ -1,0 +1,390 @@
+<%!-- Every class on this page is written out in full, never built from a
+      fragment ("btn-" <> colour): Tailwind only generates a class it can find
+      spelled in the source, so a composed one would render unstyled here.
+      And nothing from a daisyUI component a host may `exclude` (tooltip, kbd,
+      breadcrumbs…): Polyglot's stylesheet test fails on one. --%>
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <.header>
+    {gettext("UI elements")}
+    <:subtitle>
+      The pieces this site builds its pages from. Each one is captioned with the classes that draw it: copy those rather than inventing a new look.
+    </:subtitle>
+  </.header>
+
+  <nav aria-label="Sections" class="mb-6 flex flex-wrap gap-2">
+    <a
+      :for={
+        {id, label} <- [
+          {"buttons", "Buttons"},
+          {"badges", "Badges"},
+          {"forms", "Forms"},
+          {"alerts", "Alerts"},
+          {"surfaces", "Surfaces"},
+          {"colours", "Colours"},
+          {"type", "Type"},
+          {"feedback", "Feedback"}
+        ]
+      }
+      href={"#" <> id}
+      class="btn btn-surface btn-sm"
+    >
+      {label}
+    </a>
+  </nav>
+
+  <div class="space-y-6">
+    <.ui_section id="buttons" title="Buttons">
+      <:intro>
+        A page's main action is <code>btn-primary</code>. Every other button is <code>btn-surface</code>. A button that is only an icon is <code>btn-ghost</code>, the icon alone. A neutral
+        <code>btn-outline</code>
+        is not used; a coloured one is.
+      </:intro>
+
+      <.ui_row title="Roles">
+        <.specimen code="btn btn-primary">
+          <button type="button" class="btn btn-primary">Play</button>
+        </.specimen>
+        <.specimen code="btn btn-surface">
+          <button type="button" class="btn btn-surface">Tests</button>
+        </.specimen>
+        <.specimen code="btn btn-ghost">
+          <button type="button" class="btn btn-ghost">Cancel</button>
+        </.specimen>
+        <.specimen code="btn btn-link">
+          <button type="button" class="btn btn-link">Read more</button>
+        </.specimen>
+      </.ui_row>
+
+      <.ui_row title="With an icon">
+        <.specimen code="btn btn-primary + .icon size-5">
+          <button type="button" class="btn btn-primary">
+            <.icon name="hero-play-solid" class="size-5" /> Play
+          </button>
+        </.specimen>
+        <.specimen code="btn btn-surface + .icon size-5">
+          <button type="button" class="btn btn-surface">
+            <.icon name="hero-pencil-square-solid" class="size-5" /> Tests
+          </button>
+        </.specimen>
+        <.specimen code="btn btn-surface btn-sm + .icon size-4">
+          <button type="button" class="btn btn-surface btn-sm">
+            <.icon name="hero-arrow-left-solid" class="size-4" /> Back
+          </button>
+        </.specimen>
+      </.ui_row>
+
+      <.ui_row title="Only an icon">
+        <.specimen code="btn btn-ghost btn-circle">
+          <button type="button" class="btn btn-ghost btn-circle" aria-label="Search">
+            <.icon name="hero-magnifying-glass-solid" class="size-5" />
+          </button>
+        </.specimen>
+        <.specimen code="btn btn-ghost btn-square">
+          <button type="button" class="btn btn-ghost btn-square" aria-label="Close">
+            <.icon name="hero-x-mark-solid" class="size-5" />
+          </button>
+        </.specimen>
+        <.specimen code="btn btn-primary btn-square">
+          <button type="button" class="btn btn-primary btn-square" aria-label="Play">
+            <.icon name="hero-play-solid" class="size-5" />
+          </button>
+        </.specimen>
+        <.specimen code="btn btn-ghost btn-sm sm:btn-surface">
+          <button type="button" class="btn btn-ghost btn-sm sm:btn-surface">
+            <.icon name="hero-arrow-left-solid" class="size-4" />
+            <span class="sr-only sm:not-sr-only">Back</span>
+          </button>
+        </.specimen>
+      </.ui_row>
+
+      <.ui_row title="Sizes">
+        <.specimen
+          :for={class <- ~w(btn-xs btn-sm btn-md btn-lg)}
+          code={"btn btn-surface " <> class}
+        >
+          <button type="button" class={["btn btn-surface", class]}>Tests</button>
+        </.specimen>
+      </.ui_row>
+
+      <.ui_row title="States">
+        <.specimen code="btn btn-primary disabled">
+          <button type="button" class="btn btn-primary" disabled>Play</button>
+        </.specimen>
+        <.specimen code="btn btn-surface disabled">
+          <button type="button" class="btn btn-surface" disabled>Tests</button>
+        </.specimen>
+        <.specimen code="btn btn-surface btn-active">
+          <button type="button" class="btn btn-surface btn-active">Selected</button>
+        </.specimen>
+        <.specimen code="btn btn-primary + loading loading-spinner">
+          <button type="button" class="btn btn-primary">
+            <span class="loading loading-spinner loading-sm"></span> Saving
+          </button>
+        </.specimen>
+      </.ui_row>
+
+      <.ui_row title="Colours">
+        <.specimen
+          :for={
+            class <-
+              ~w(btn-secondary btn-accent btn-neutral btn-info btn-success btn-warning btn-error)
+          }
+          code={"btn " <> class}
+        >
+          <button type="button" class={["btn", class]}>Button</button>
+        </.specimen>
+      </.ui_row>
+
+      <.ui_row title="Soft and coloured outline">
+        <.specimen
+          :for={class <- ~w(btn-primary btn-info btn-success btn-warning btn-error)}
+          code={"btn btn-soft " <> class}
+        >
+          <button type="button" class={["btn btn-soft", class]}>Button</button>
+        </.specimen>
+        <.specimen code="btn btn-outline btn-error">
+          <button type="button" class="btn btn-outline btn-error">Delete</button>
+        </.specimen>
+      </.ui_row>
+    </.ui_section>
+
+    <.ui_section id="badges" title="Badges">
+      <:intro>
+        A short label beside something, never instead of a button. The Pro badge is <code>badge badge-primary badge-xs</code>.
+      </:intro>
+
+      <.ui_row title="Colours">
+        <.specimen code="badge">
+          <span class="badge">Badge</span>
+        </.specimen>
+        <.specimen
+          :for={
+            class <-
+              ~w(badge-primary badge-secondary badge-accent badge-neutral badge-info badge-success badge-warning badge-error)
+          }
+          code={"badge " <> class}
+        >
+          <span class={["badge", class]}>Badge</span>
+        </.specimen>
+      </.ui_row>
+
+      <.ui_row title="Styles and sizes">
+        <.specimen code="badge badge-soft badge-success">
+          <span class="badge badge-soft badge-success">A1</span>
+        </.specimen>
+        <.specimen code="badge badge-outline">
+          <span class="badge badge-outline">Badge</span>
+        </.specimen>
+        <.specimen
+          :for={class <- ~w(badge-xs badge-sm badge-md badge-lg)}
+          code={"badge badge-primary " <> class}
+        >
+          <span class={["badge badge-primary", class]}>Pro</span>
+        </.specimen>
+      </.ui_row>
+    </.ui_section>
+
+    <.ui_section id="forms" title="Forms">
+      <:intro>
+        An icon inside a box sits before the input with <code>z-10</code>: daisyUI's
+        <code>input</code>
+        is positioned and paints over anything before it.
+      </:intro>
+
+      <.ui_row title="Text">
+        <.specimen code="input">
+          <input type="text" class="input" placeholder="Name" aria-label="Name" />
+        </.specimen>
+        <.specimen code="<.search_input label=…>">
+          <.search_input label="Search" type="text" />
+        </.specimen>
+        <.specimen code="<.search_input close={…} close_label=…>">
+          <.search_input label="Search" type="text" close={%{}} close_label="Close" />
+        </.specimen>
+        <.specimen code="input input-error">
+          <input type="text" class="input input-error" value="Wrong" aria-label="Wrong" />
+        </.specimen>
+        <.specimen code="textarea">
+          <textarea class="textarea" placeholder="Message" aria-label="Message"></textarea>
+        </.specimen>
+      </.ui_row>
+
+      <.ui_row title="Choices">
+        <.specimen code="select">
+          <select class="select" aria-label="Language">
+            <option>English</option>
+            <option>Română</option>
+          </select>
+        </.specimen>
+        <.specimen code="checkbox">
+          <label class="flex items-center gap-2">
+            <input type="checkbox" class="checkbox" checked /> Remember me
+          </label>
+        </.specimen>
+        <.specimen code="radio">
+          <label class="flex items-center gap-2">
+            <input type="radio" name="ui-radio" class="radio" checked /> One
+          </label>
+        </.specimen>
+        <.specimen code="toggle">
+          <label class="flex items-center gap-2">
+            <input type="checkbox" class="toggle toggle-primary" checked /> Sound
+          </label>
+        </.specimen>
+        <.specimen code="range range-primary">
+          <input
+            type="range"
+            class="range range-primary range-sm w-40"
+            value="60"
+            aria-label="Range"
+          />
+        </.specimen>
+      </.ui_row>
+    </.ui_section>
+
+    <.ui_section id="alerts" title="Alerts">
+      <:intro>One line on something the reader has to know now.</:intro>
+
+      <div class="grid gap-3 md:grid-cols-2">
+        <.specimen code="alert alert-info">
+          <div role="alert" class="alert alert-info">
+            <.icon name="hero-information-circle-solid" class="size-5" /> A new version is out.
+          </div>
+        </.specimen>
+        <.specimen code="alert alert-success">
+          <div role="alert" class="alert alert-success">
+            <.icon name="hero-check-circle-solid" class="size-5" /> Saved.
+          </div>
+        </.specimen>
+        <.specimen code="alert alert-warning">
+          <div role="alert" class="alert alert-warning">
+            <.icon name="hero-exclamation-triangle-solid" class="size-5" /> One test left today.
+          </div>
+        </.specimen>
+        <.specimen code="alert alert-error">
+          <div role="alert" class="alert alert-error">
+            <.icon name="hero-x-circle-solid" class="size-5" /> The map could not be loaded.
+          </div>
+        </.specimen>
+      </div>
+    </.ui_section>
+
+    <.ui_section id="surfaces" title="Surfaces">
+      <:intro>
+        Something set on the page is a <code>&lt;.panel&gt;</code>; something set into a panel is <code>base-200</code>; nothing yet is an <code>&lt;.empty_state&gt;</code>.
+      </:intro>
+
+      <div class="grid gap-4 md:grid-cols-3">
+        <.specimen code="<.panel title=…>">
+          <.panel title="Capital" class="w-56">București</.panel>
+        </.specimen>
+        <.specimen code="<.panel compact>">
+          <.panel compact class="w-56 text-sm">In a list or a sidebar</.panel>
+        </.specimen>
+        <.specimen code="rounded-lg bg-base-200 p-3">
+          <div class="rounded-lg bg-base-200 p-3 text-sm">A tile set into a panel</div>
+        </.specimen>
+        <.specimen code="<.empty_state title=… text=…>">
+          <.empty_state title="No tests yet" text="Pick a level, then press Start test.">
+            <:actions>
+              <button type="button" class="btn btn-primary btn-sm">Tests</button>
+            </:actions>
+          </.empty_state>
+        </.specimen>
+        <.specimen code="<.empty_state compact>">
+          <.empty_state compact title="Log in to keep this result." />
+        </.specimen>
+        <.specimen code="card border border-base-300 bg-base-100">
+          <div class="card border border-base-300 bg-base-100">
+            <div class="card-body p-4">
+              <h3 class="card-title text-base">A card</h3>
+              <p class="text-sm text-base-content/70">With a title and actions.</p>
+              <div class="card-actions justify-end">
+                <button type="button" class="btn btn-primary btn-sm">Open</button>
+              </div>
+            </div>
+          </div>
+        </.specimen>
+      </div>
+    </.ui_section>
+
+    <.ui_section id="colours" title="Colours">
+      <:intro>The theme's colours. Use the name, never a hex: each theme sets its own.</:intro>
+
+      <.ui_row title="Theme">
+        <.specimen
+          :for={
+            class <-
+              ~w(bg-primary bg-secondary bg-accent bg-neutral bg-info bg-success bg-warning bg-error bg-base-100 bg-base-200 bg-base-300 bg-base-content)
+          }
+          code={class}
+        >
+          <div class={["size-14 rounded-box border border-base-300", class]}></div>
+        </.specimen>
+      </.ui_row>
+    </.ui_section>
+
+    <.ui_section id="type" title="Type">
+      <div class="space-y-4">
+        <.specimen code="<.page_title> (a page's h1)">
+          <.page_title tag="p">Explore</.page_title>
+        </.specimen>
+        <.specimen code="text-xl font-semibold (a section's h2)">
+          <p class="text-xl font-semibold">Buttons</p>
+        </.specimen>
+        <.specimen code="<.eyebrow> (a group's small heading)">
+          <.eyebrow>A small heading</.eyebrow>
+        </.specimen>
+        <.specimen code="(body)">
+          <p>Body text reads at the base size.</p>
+        </.specimen>
+        <.specimen code="text-sm text-base-content/70">
+          <p class="text-sm text-base-content/70">A line of detail under something.</p>
+        </.specimen>
+        <.specimen code="link link-primary">
+          <a href="#type" class="link link-primary">A link in a sentence</a>
+        </.specimen>
+        <.specimen code="code">
+          <code>btn-surface</code>
+        </.specimen>
+      </div>
+    </.ui_section>
+
+    <.ui_section id="feedback" title="Feedback">
+      <:intro>Something is happening, or how far along it is.</:intro>
+
+      <.ui_row title="Progress">
+        <.specimen code="loading loading-spinner">
+          <span class="loading loading-spinner"></span>
+        </.specimen>
+        <.specimen code="loading loading-dots">
+          <span class="loading loading-dots"></span>
+        </.specimen>
+        <.specimen code="progress progress-primary">
+          <progress class="progress progress-primary w-48" value="60" max="100"></progress>
+        </.specimen>
+      </.ui_row>
+
+      <.ui_row title="Tabs and menus">
+        <.specimen code="tabs tabs-box">
+          <div role="tablist" class="tabs tabs-box">
+            <a role="tab" class="tab tab-active">Words</a>
+            <a role="tab" class="tab">Tests</a>
+            <a role="tab" class="tab">Map</a>
+          </div>
+        </.specimen>
+        <.specimen code="dropdown + menu dropdown-content">
+          <details class="dropdown">
+            <summary class="btn btn-surface list-none">
+              Menu <.icon name="hero-chevron-down-solid" class="size-4" />
+            </summary>
+            <ul class="menu dropdown-content z-10 mt-2 w-44 rounded-box bg-base-100 p-2 shadow-lg">
+              <li><a href="#feedback">First</a></li>
+              <li><a href="#feedback">Second</a></li>
+            </ul>
+          </details>
+        </.specimen>
+      </.ui_row>
+    </.ui_section>
+  </div>
+</Layouts.app>

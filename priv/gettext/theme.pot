@@ -34,6 +34,9 @@ msgstr ""
 msgid "API Docs"
 msgstr ""
 
+msgid "UI elements"
+msgstr ""
+
 msgid "Elixir Docs"
 msgstr ""
 

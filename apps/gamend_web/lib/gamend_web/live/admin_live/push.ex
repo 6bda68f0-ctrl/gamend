@@ -24,7 +24,7 @@ defmodule GamendWeb.AdminLive.Push do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="space-y-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
         <div class="stats shadow bg-base-200 w-full">
           <div class="stat">
@@ -60,7 +60,7 @@ defmodule GamendWeb.AdminLive.Push do
           <div class="card-body">
             <div class="flex flex-wrap items-center justify-between">
               <h2 class="card-title">Send Test Push</h2>
-              <button type="button" phx-click="toggle_send" class="btn btn-sm btn-outline">
+              <button type="button" phx-click="toggle_send" class="btn btn-surface btn-sm">
                 {if @show_send, do: "Hide", else: "Show"}
               </button>
             </div>

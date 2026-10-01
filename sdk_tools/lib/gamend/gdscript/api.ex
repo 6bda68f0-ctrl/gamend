@@ -479,6 +479,7 @@ defmodule Gamend.GDScript.API do
       "list_sent_notifications_by_title" => [2],
       "mark_all_notifications_read" => [1],
       "mark_notification_read" => [2],
+      "notify" => [3],
       "send_notification" => [2],
       "subscribe" => [1],
       "unsubscribe" => [1]

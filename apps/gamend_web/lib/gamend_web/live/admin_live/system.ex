@@ -10,7 +10,7 @@ defmodule GamendWeb.AdminLive.System do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="space-y-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">&larr; Back to Admin</.link>
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">&larr; Back to Admin</.link>
 
         <%!-- Top-level stats --%>
         <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-4">

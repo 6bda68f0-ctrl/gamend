@@ -188,7 +188,7 @@ defmodule GamendWeb.LeaderboardsLive do
     <div class="flex flex-col gap-4 mb-6">
       <%!-- Back button and title --%>
       <div class="flex items-center gap-4">
-        <.link navigate={~p"/leaderboards"} class="btn btn-outline btn-sm">
+        <.link navigate={~p"/leaderboards"} class="btn btn-surface btn-sm">
           {gettext("Back")}
         </.link>
         <div>

@@ -32,7 +32,7 @@ defmodule GamendWeb.AdminLive.Payments do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="space-y-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">&larr; Back to Admin</.link>
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">&larr; Back to Admin</.link>
 
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -42,13 +42,13 @@ defmodule GamendWeb.AdminLive.Payments do
             </p>
           </div>
           <div class="flex flex-wrap gap-2">
-            <a href="/api/docs" class="btn btn-outline btn-sm">OpenAPI</a>
-            <a href="/admin/config" class="btn btn-outline btn-sm">Provider config</a>
+            <a href="/api/docs" class="btn btn-surface btn-sm">OpenAPI</a>
+            <a href="/admin/config" class="btn btn-surface btn-sm">Provider config</a>
             <a
               href="https://docs.stripe.com/keys"
               target="_blank"
               rel="noreferrer"
-              class="btn btn-outline btn-sm"
+              class="btn btn-surface btn-sm"
             >
               Stripe keys
             </a>
@@ -56,7 +56,7 @@ defmodule GamendWeb.AdminLive.Payments do
               href="https://docs.stripe.com/webhooks"
               target="_blank"
               rel="noreferrer"
-              class="btn btn-outline btn-sm"
+              class="btn btn-surface btn-sm"
             >
               Stripe webhooks
             </a>

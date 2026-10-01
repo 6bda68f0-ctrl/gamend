@@ -151,7 +151,7 @@ defmodule GamendWeb.AdminLive.Storage do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
-      <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+      <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
       <div class="card bg-base-200 mb-4">
         <div class="card-body">
@@ -271,7 +271,7 @@ defmodule GamendWeb.AdminLive.Storage do
                     <a
                       href={Storage.url(obj.key, signed: true)}
                       download
-                      class="btn btn-outline btn-xs"
+                      class="btn btn-surface btn-xs"
                     >
                       Download
                     </a>

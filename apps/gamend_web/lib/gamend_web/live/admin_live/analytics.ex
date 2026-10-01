@@ -55,7 +55,7 @@ defmodule GamendWeb.AdminLive.Analytics do
       <div class="space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div class="flex items-center gap-3">
-            <.link navigate={~p"/admin"} class="btn btn-outline btn-sm">&larr; Back to Admin</.link>
+            <.link navigate={~p"/admin"} class="btn btn-surface btn-sm">&larr; Back to Admin</.link>
             <h1 class="text-xl font-bold">Analytics · activity &amp; retention</h1>
           </div>
           <div class="flex items-center gap-2">

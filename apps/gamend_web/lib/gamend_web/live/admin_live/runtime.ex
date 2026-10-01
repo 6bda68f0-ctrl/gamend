@@ -185,7 +185,7 @@ defmodule GamendWeb.AdminLive.Runtime do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
-      <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+      <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
       <div class="card bg-base-200">
         <div class="card-body">
@@ -245,7 +245,7 @@ defmodule GamendWeb.AdminLive.Runtime do
             <button
               :if={@tab == "model"}
               phx-click="toggle_diagram"
-              class="btn btn-outline btn-sm"
+              class="btn btn-surface btn-sm"
             >
               {if @show_diagram, do: "Hide ER diagram", else: "Show ER diagram"}
             </button>

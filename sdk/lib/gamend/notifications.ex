@@ -337,6 +337,33 @@ defmodule Gamend.Notifications do
   end
 
   @doc ~S"""
+    Tell a user something the SERVER has to say (a streak about to end, a class
+    result), through the channels they chose for `group`
+    (`Gamend.Notifications.Preferences`): the in-app row, a push to their
+    devices, an email. A channel they turned off is skipped.
+    
+    `attrs`: `"title"` (required), `"content"`, `"type"` (a declared code,
+    `Gamend.Notifications.Types`), `"url"` (a path on this site the
+    notification leads to), and for the email `"subject"` and `"text"`
+    (default: the title and the content).
+    
+    The in-app row is the user's own (sender = recipient), so repeating a title
+    refreshes the one row rather than stacking. Returns the channels it went
+    out on.
+    
+  """
+  @spec notify(user_id(), String.t(), map()) :: {:ok, [String.t()]} | {:error, :not_found}
+  def notify(_user_id, _group, _attrs) do
+    case Application.get_env(:gamend_sdk, :stub_mode, :raise) do
+      :placeholder ->
+        {:ok, nil}
+
+      _ ->
+        raise "Gamend.Notifications.notify/3 is a stub - only available at runtime on Gamend"
+    end
+  end
+
+  @doc ~S"""
     Send a notification to a friend.
     
     `sender_id` is the authenticated user. `attrs` must include:

@@ -150,6 +150,10 @@
             "href": "/api/docs"
           },
           {
+            "label": "UI elements",
+            "href": "/ui"
+          },
+          {
             "label": "Powered by Gamend",
             "href": "https://gamend.org",
             "external": true

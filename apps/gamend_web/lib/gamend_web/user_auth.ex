@@ -332,6 +332,8 @@ defmodule GamendWeb.UserAuth do
         Scope.for_user(user)
       end)
 
+    remember_reader(socket)
+
     # Attach hook to capture current_path for nav active state.
     # Only works for views mounted via live/3 in the router.
     try do
@@ -343,6 +345,39 @@ defmodule GamendWeb.UserAuth do
     rescue
       RuntimeError -> socket
     end
+  end
+
+  # The reader's time zone (sent on the LiveView connect, `app.js`) and site
+  # language (the locale this page is in), saved on their account the first
+  # time they are seen and whenever they change: "their day" and "their
+  # evening" for a daily and its reminder, and the language an email is
+  # written in. A write happens only on a change, so a page load costs a map
+  # lookup.
+  defp remember_reader(socket) do
+    with true <- Phoenix.LiveView.connected?(socket),
+         %Accounts.User{} = user <- Scope.user(socket.assigns.current_scope) do
+      zone = (Phoenix.LiveView.get_connect_params(socket) || %{})["timezone"]
+      locale = socket.assigns[:locale]
+      prefs = Accounts.Preferences.get(user)
+
+      changes =
+        %{}
+        |> then(fn acc ->
+          if zone != prefs["timezone"] and Accounts.TimeZone.valid?(zone),
+            do: Map.put(acc, "timezone", zone),
+            else: acc
+        end)
+        |> then(fn acc ->
+          if is_binary(locale) and byte_size(locale) <= 16 and locale != prefs["locale"],
+            do: Map.put(acc, "locale", locale),
+            else: acc
+        end)
+
+      if changes != %{}, do: Accounts.Preferences.update(user, &Map.merge(&1, changes))
+    end
+  rescue
+    # get_connect_params outside mount (a nested live_render) raises.
+    RuntimeError -> :ok
   end
 
   @doc "Returns the path to redirect to after log in."

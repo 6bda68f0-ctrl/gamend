@@ -307,34 +307,17 @@ defmodule GamendWeb.HostLayoutShell do
           {GamendWeb.HostLayouts.translate("Search")}
         </h2>
 
-        <div class="relative">
-          <%!-- `start`/`ps`, not `left`/`pl`: in Arabic a magnifier pinned to
-                the physical left sits where the reader's text ends. --%>
-          <.icon
-            name="hero-magnifying-glass-solid"
-            class="pointer-events-none absolute start-3 top-1/2 w-4 h-4 -translate-y-1/2 opacity-50"
-          />
-          <input
-            id="gamend-search-input"
-            data-gamend-search-input
-            type="search"
-            role="combobox"
-            autocomplete="off"
-            aria-expanded="false"
-            aria-controls="gamend-search-results"
-            aria-autocomplete="list"
-            placeholder={GamendWeb.HostLayouts.translate("Search")}
-            class="input input-bordered w-full ps-9 pe-10"
-          />
-          <button
-            type="button"
-            data-gamend-search-close
-            aria-label={GamendWeb.HostLayouts.translate("Close")}
-            class="btn btn-ghost btn-square btn-sm absolute end-1 top-1/2 -translate-y-1/2"
-          >
-            <.icon name="hero-x-mark-solid" class="w-4 h-4" />
-          </button>
-        </div>
+        <.search_input
+          id="gamend-search-input"
+          label={GamendWeb.HostLayouts.translate("Search")}
+          data-gamend-search-input
+          role="combobox"
+          aria-expanded="false"
+          aria-controls="gamend-search-results"
+          aria-autocomplete="list"
+          close={%{"data-gamend-search-close" => true}}
+          close_label={GamendWeb.HostLayouts.translate("Close")}
+        />
 
         <%!-- `flex-nowrap`: daisyUI's `.menu` is `column wrap`, so a capped
               height wraps into a second column off to the side instead of

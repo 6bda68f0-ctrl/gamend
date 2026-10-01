@@ -25,7 +25,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="space-y-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
         <div class="card bg-base-200">
           <div class="card-body">
@@ -170,7 +170,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
                 <button
                   :if={@detail.tournament.state == "scheduled"}
                   phx-click="force_registration"
-                  class="btn btn-sm btn-outline"
+                  class="btn btn-surface btn-sm"
                 >
                   Open registration
                 </button>
@@ -178,7 +178,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
                   :if={@detail.tournament.state == "registration"}
                   phx-click="force_draw"
                   data-confirm="Draw the bracket now?"
-                  class="btn btn-sm btn-outline"
+                  class="btn btn-surface btn-sm"
                 >
                   Draw now
                 </button>
@@ -186,7 +186,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
                   :if={@detail.tournament.state == "running"}
                   phx-click="force_finish"
                   data-confirm="Finish this tournament now?"
-                  class="btn btn-sm btn-outline"
+                  class="btn btn-surface btn-sm"
                 >
                   Finish
                 </button>
@@ -201,7 +201,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
                 <button
                   :if={@detail.tournament.state == "cancelled"}
                   phx-click="force_reopen"
-                  class="btn btn-sm btn-outline"
+                  class="btn btn-surface btn-sm"
                 >
                   Reopen
                 </button>
@@ -255,7 +255,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
                 phx-value-index={b.index}
                 class={[
                   "btn btn-xs",
-                  if(@detail.selected_bracket == b.index, do: "btn-primary", else: "btn-outline")
+                  if(@detail.selected_bracket == b.index, do: "btn-primary", else: "btn-surface")
                 ]}
               >
                 {b.index + 1} ({b.size})
@@ -265,7 +265,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
                 navigate={
                   ~p"/tournaments/#{@detail.tournament.id}/brackets/#{@detail.selected_bracket}"
                 }
-                class="btn btn-xs btn-outline"
+                class="btn btn-surface btn-xs"
               >
                 View bracket tree →
               </.link>
@@ -306,7 +306,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
                           phx-click="force_resolve"
                           phx-value-match={match.id}
                           phx-value-winner={match.a_entry_id}
-                          class="btn btn-xs btn-outline"
+                          class="btn btn-surface btn-xs"
                         >
                           A wins
                         </button>
@@ -315,7 +315,7 @@ defmodule GamendWeb.AdminLive.Tournaments do
                           phx-click="force_resolve"
                           phx-value-match={match.id}
                           phx-value-winner={match.b_entry_id}
-                          class="btn btn-xs btn-outline"
+                          class="btn btn-surface btn-xs"
                         >
                           B wins
                         </button>

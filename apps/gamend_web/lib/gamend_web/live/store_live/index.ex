@@ -62,7 +62,7 @@ defmodule GamendWeb.StoreLive.Index do
             </div>
           </div>
           <div class="flex flex-wrap gap-2">
-            <.link navigate={~p"/users/settings?tab=payments"} class="btn btn-sm btn-outline">
+            <.link navigate={~p"/users/settings?tab=payments"} class="btn btn-surface btn-sm">
               {gettext("Payments")}
             </.link>
           </div>

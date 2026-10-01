@@ -218,7 +218,7 @@ defmodule GamendWeb.UserLive.Settings.AccountTab do
                   <button
                     phx-click="unlink_provider"
                     phx-value-provider={provider}
-                    class="btn btn-outline btn-sm"
+                    class="btn btn-surface btn-sm"
                   >
                     {gettext("Remove")}
                   </button>

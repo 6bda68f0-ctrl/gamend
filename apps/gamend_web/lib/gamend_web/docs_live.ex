@@ -821,12 +821,12 @@ defmodule GamendWeb.DocsLive do
     >
       <%!-- The empty span keeps `justify-between` pushing a lone "next"
             to the right on the first page. --%>
-      <.link :if={@prev} navigate={"#{@item_path}/#{@prev.slug}"} class="btn btn-outline btn-sm">
+      <.link :if={@prev} navigate={"#{@item_path}/#{@prev.slug}"} class="btn btn-surface btn-sm">
         <.icon name="hero-chevron-left" class="size-4" />
         {@prev.title}
       </.link>
       <span :if={!@prev}></span>
-      <.link :if={@next} navigate={"#{@item_path}/#{@next.slug}"} class="btn btn-outline btn-sm">
+      <.link :if={@next} navigate={"#{@item_path}/#{@next.slug}"} class="btn btn-surface btn-sm">
         {@next.title}
         <.icon name="hero-chevron-right" class="size-4" />
       </.link>

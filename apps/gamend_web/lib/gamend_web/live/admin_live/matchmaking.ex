@@ -128,7 +128,7 @@ defmodule GamendWeb.AdminLive.Matchmaking do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
-      <.link navigate={~p"/admin"} class="btn btn-outline mb-4">← Back to Admin</.link>
+      <.link navigate={~p"/admin"} class="btn btn-surface mb-4">← Back to Admin</.link>
 
       <div class="grid gap-4 sm:grid-cols-3 mb-6">
         <div class="card bg-base-200">
@@ -229,7 +229,7 @@ defmodule GamendWeb.AdminLive.Matchmaking do
           <div class="flex flex-wrap items-center justify-between gap-2">
             <h2 class="card-title">Tickets ({@count})</h2>
             <div class="flex gap-2">
-              <button phx-click="sweep_now" class="btn btn-outline btn-sm" id="sweep-now-btn">
+              <button phx-click="sweep_now" class="btn btn-surface btn-sm" id="sweep-now-btn">
                 Run sweep now
               </button>
               <button phx-click="refresh" class="btn btn-ghost btn-sm">Refresh</button>

@@ -57,6 +57,9 @@ defmodule Gamend.Accounts.User do
     field :is_admin, :boolean, default: false
     field :is_activated, :boolean, default: true
     field :metadata, :map, default: %{}
+    # The user's own settings (notifications, time zone): never serialized,
+    # never sent to another player. `Gamend.Accounts.Preferences`.
+    field :preferences, :map, default: %{}
     field :is_online, :boolean, default: false
     field :last_seen_at, :utc_datetime
     field :token_version, :integer, default: 0

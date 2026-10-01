@@ -19,11 +19,13 @@ defmodule GamendWeb.UserLive.Settings do
   alias GamendWeb.UserLive.Settings.FriendsTab
   alias GamendWeb.UserLive.Settings.GroupsTab
   alias GamendWeb.UserLive.Settings.ItemsTab
+  alias GamendWeb.UserLive.Settings.NotificationsTab
   alias GamendWeb.UserLive.Settings.PaymentsTab
   alias GamendWeb.UserLive.Settings.Shared
   alias GamendWeb.UserLive.Settings.WalletTab
 
-  @valid_tabs ~w(account friends groups wallet items payments data devices api_tokens)
+  @valid_tabs ~w(account notifications friends groups wallet items payments data devices
+                 api_tokens)
 
   @account_events ~w(validate_email update_email validate_display_name update_display_name
                      validate_username update_username validate_avatar save_avatar cancel_avatar
@@ -33,6 +35,7 @@ defmodule GamendWeb.UserLive.Settings do
                      cancel_friend remove_friend unblock_friend search_prev search_next
                      incoming_prev incoming_next outgoing_prev outgoing_next friends_prev
                      friends_next blocked_prev blocked_next)
+  @notifications_events ~w(notify_toggle notify_switch)
   @payments_events ~w(cancel_stripe_subscription open_stripe_portal)
   @wallet_events ~w(wallet_ledger_prev wallet_ledger_next)
   @items_events ~w(items_prev items_next)
@@ -92,6 +95,7 @@ defmodule GamendWeb.UserLive.Settings do
           :for={
             {tab, label} <- [
               {"account", gettext("Account")},
+              {"notifications", gettext("Notifications")},
               {"friends", gettext("Friends")},
               {"groups", gettext("Groups")},
               {"wallet", gettext("Wallet")},
@@ -117,6 +121,11 @@ defmodule GamendWeb.UserLive.Settings do
       </div>
 
       <AccountTab.tab {tab_assigns(assigns)} />
+      <NotificationsTab.tab
+        settings_tab={@settings_tab}
+        user={@user}
+        notify_groups={@notify_groups}
+      />
       <FriendsTab.tab {tab_assigns(assigns)} />
       <PaymentsTab.tab {tab_assigns(assigns)} />
       <WalletTab.tab {tab_assigns(assigns)} />
@@ -159,6 +168,7 @@ defmodule GamendWeb.UserLive.Settings do
       |> assign(:conflict_user, conflict_user)
       |> assign(:conflict_provider, conflict_provider)
       |> AccountTab.assign_defaults(user)
+      |> NotificationsTab.assign_defaults()
       |> FriendsTab.assign_defaults(user)
       |> DataTab.assign_defaults()
       |> DevicesTab.assign_defaults()
@@ -184,6 +194,9 @@ defmodule GamendWeb.UserLive.Settings do
 
   def handle_event(event, params, socket) when event in @account_events,
     do: AccountTab.handle_event(event, params, socket)
+
+  def handle_event(event, params, socket) when event in @notifications_events,
+    do: NotificationsTab.handle_event(event, params, socket)
 
   def handle_event(event, params, socket) when event in @friends_events,
     do: FriendsTab.handle_event(event, params, socket)

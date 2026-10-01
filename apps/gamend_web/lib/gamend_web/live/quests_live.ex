@@ -559,7 +559,7 @@ defmodule GamendWeb.QuestsLive do
                 phx-value-status={status || ""}
                 class={[
                   "btn btn-sm",
-                  if(@status == status, do: "btn-primary", else: "btn-outline")
+                  if(@status == status, do: "btn-primary", else: "btn-surface")
                 ]}
               >
                 {status_label(status)}

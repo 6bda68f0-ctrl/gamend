@@ -508,7 +508,7 @@ defmodule GamendWeb.TournamentsLive do
     ~H"""
     <div class="flex flex-col gap-4 mb-6">
       <div class="flex items-center gap-4">
-        <.link navigate={~p"/tournaments"} class="btn btn-outline btn-sm">
+        <.link navigate={~p"/tournaments"} class="btn btn-surface btn-sm">
           {gettext("Back")}
         </.link>
         <div>
@@ -738,7 +738,7 @@ defmodule GamendWeb.TournamentsLive do
     ~H"""
     <%= cond do %>
       <% not @signed_in? and @tournament.state == "registration" -> %>
-        <.link navigate={~p"/users/log_in"} class="btn btn-outline btn-sm">
+        <.link navigate={~p"/users/log_in"} class="btn btn-surface btn-sm">
           {gettext("Log in")}
         </.link>
       <% not @signed_in? -> %>
@@ -785,7 +785,7 @@ defmodule GamendWeb.TournamentsLive do
   defp bracket_view(assigns) do
     ~H"""
     <div class="flex items-center gap-4 mb-6">
-      <.link navigate={@base_path} class="btn btn-outline btn-sm">
+      <.link navigate={@base_path} class="btn btn-surface btn-sm">
         {gettext("Back")}
       </.link>
       <div>

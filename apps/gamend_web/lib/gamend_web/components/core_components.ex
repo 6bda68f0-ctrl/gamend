@@ -242,6 +242,139 @@ defmodule GamendWeb.CoreComponents do
     end
   end
 
+  attr :tag, :string, default: "div", doc: "`section`, `article`, `li`…"
+  attr :compact, :boolean, default: false, doc: "`p-3`, not `p-4`: in a list or a sidebar"
+  attr :title, :string, default: nil, doc: "a small heading on top (`eyebrow/1`)"
+
+  attr :class, :any,
+    default: nil,
+    doc: "layout only (`space-y-3`, `flex`), never a colour or padding"
+
+  attr :rest, :global, include: ~w(open action method)
+  slot :inner_block, required: true
+
+  @doc """
+  A panel: something set on the page, the page's colour behind a `base-300`
+  border. The one box every card, form and summary sits in, so a page does
+  not grow its own border, radius, padding and shadow.
+
+      <.panel title="Capital">Bucharest</.panel>
+      <.panel tag="section" compact class="space-y-3">…</.panel>
+
+  `class` is for layout: a second padding or background would fight the
+  panel's own, and which one wins is the stylesheet's order, not the markup's.
+  """
+  def panel(assigns) do
+    ~H"""
+    <.dynamic_tag
+      tag_name={@tag}
+      class={[
+        "rounded-box border border-base-300 bg-base-100 shadow-sm",
+        if(@compact, do: "p-3", else: "p-4"),
+        @class
+      ]}
+      {@rest}
+    >
+      <.eyebrow :if={@title}>{@title}</.eyebrow>
+      {render_slot(@inner_block)}
+    </.dynamic_tag>
+    """
+  end
+
+  attr :tag, :string, default: "h1"
+  attr :class, :any, default: nil, doc: "layout only (`flex items-center gap-3`), never a size"
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  @doc """
+  A page's title: the one size and weight every page's `<h1>` is drawn in, a
+  step smaller on a phone so a heading row with a Back button and a switcher
+  still fits one line. `header/1` draws it; a page that builds its own
+  heading row uses this rather than restating the classes.
+  """
+  def page_title(assigns) do
+    ~H"""
+    <.dynamic_tag
+      tag_name={@tag}
+      class={["text-3xl font-black text-base-content/95 sm:text-4xl", @class]}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+    </.dynamic_tag>
+    """
+  end
+
+  attr :tag, :string, default: "p"
+  attr :class, :any, default: nil, doc: "spacing only"
+  attr :rest, :global
+  slot :inner_block, required: true
+
+  @doc """
+  The small heading over a group: a panel's title, a list's name, a form
+  field's label on a dashboard. Small, uppercase, spaced and muted, the one
+  way the site says it.
+  """
+  def eyebrow(assigns) do
+    ~H"""
+    <.dynamic_tag
+      tag_name={@tag}
+      class={["text-xs font-semibold uppercase tracking-[0.2em] text-base-content/55", @class]}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+    </.dynamic_tag>
+    """
+  end
+
+  attr :label, :string, required: true, doc: "the placeholder and the input's accessible name"
+  attr :type, :string, default: "search"
+  attr :class, :any, default: nil, doc: "on the wrapper: width, flex"
+  attr :input_class, :any, default: nil
+  attr :close, :any, default: nil, doc: "attributes for an X at the box's end; no X when nil"
+  attr :close_label, :string, default: nil
+  attr :rest, :global, include: ~w(name value autocomplete role), doc: "on the <input>"
+
+  @doc """
+  A search box: the magnifier, the input and, when `close` is given, an X at
+  its end. The one search box: the site search palette, a hub's filter and a
+  page's own search all draw this, so they cannot drift apart.
+
+      <.search_input label="Search" name="q" value={@q} />
+      <.search_input label="Search" close={%{"data-close" => true}} close_label="Close" />
+
+  The icon sits at `start`, not `left` (Arabic reads the other way), and on
+  `z-10`: daisyUI's `.input` is positioned, so it painted over an icon before
+  it. `autocomplete` is off unless the caller says otherwise.
+  """
+  def search_input(assigns) do
+    assigns = update(assigns, :rest, &Map.put_new(&1, :autocomplete, "off"))
+
+    ~H"""
+    <div class={["relative", @class]}>
+      <.icon
+        name="hero-magnifying-glass-solid"
+        class="pointer-events-none absolute start-3 top-1/2 z-10 size-4 -translate-y-1/2 opacity-50"
+      />
+      <input
+        type={@type}
+        placeholder={@label}
+        aria-label={@label}
+        class={["input w-full ps-9", @close && "pe-10", @input_class]}
+        {@rest}
+      />
+      <button
+        :if={@close}
+        type="button"
+        aria-label={@close_label}
+        class="btn btn-ghost btn-square btn-sm absolute end-1 top-1/2 -translate-y-1/2"
+        {@close}
+      >
+        <.icon name="hero-x-mark-solid" class="size-4" />
+      </button>
+    </div>
+    """
+  end
+
   @doc """
   Renders an input with label and error messages.
 
@@ -618,17 +751,13 @@ defmodule GamendWeb.CoreComponents do
         <%!-- The back button sits ON the title line, not above it as a stray
               text link: one place, one shape, on every page that has a parent. --%>
         <div :if={@back} class="flex flex-wrap items-center gap-3">
-          <.link navigate={@back} class="btn btn-outline btn-sm">
+          <.link navigate={@back} class="btn btn-surface btn-sm">
             <.icon name="hero-arrow-left-solid" class="size-4" />
             {@back_label || gettext("Back")}
           </.link>
-          <h1 class={["text-4xl font-black text-base-content/95", @class]}>
-            {render_slot(@inner_block)}
-          </h1>
+          <.page_title class={@class}>{render_slot(@inner_block)}</.page_title>
         </div>
-        <h1 :if={!@back} class={["text-4xl font-black text-base-content/95", @class]}>
-          {render_slot(@inner_block)}
-        </h1>
+        <.page_title :if={!@back} class={@class}>{render_slot(@inner_block)}</.page_title>
         <p :if={@subtitle != []} class="mt-1 text-sm text-base-content/70">
           {render_slot(@subtitle)}
         </p>
@@ -909,12 +1038,15 @@ defmodule GamendWeb.CoreComponents do
   end
 
   @doc """
-  The "there is nothing here" panel: an icon, a heading and a line of prose.
+  The "there is nothing here" box: nothing yet, nothing matched, or nothing
+  without an account. A dashed border, so it reads as a gap rather than as
+  content, with an optional icon, a heading, a line of prose and the way on.
 
-  For a page that legitimately has no content — no changelog file, no results,
-  an empty list — not for an error. Both halves of the copy are attributes, and
-  both should be translated: the `text` on the changelog page was an English
-  literal on every host for exactly as long as it was written inline.
+  For a page or a list that legitimately has no content — no changelog file,
+  no results, an empty list — not for an error. Both halves of the copy are
+  attributes, and both should be translated: the `text` on the changelog page
+  was an English literal on every host for exactly as long as it was written
+  inline. `compact` is a small note inside something else, left-aligned.
 
   ## Example
 
@@ -923,17 +1055,35 @@ defmodule GamendWeb.CoreComponents do
         title={gettext("No results.")}
         text={gettext("Add a changelog file at CHANGELOG.md to display it here.")}
       />
+
+      <.empty_state title={gettext("Log in to keep your tests")}>
+        <:actions><.link navigate={~p"/users/log_in"} class="btn btn-primary btn-sm">Log in</.link></:actions>
+      </.empty_state>
   """
-  attr :icon, :string, required: true
+  attr :icon, :string, default: nil
   attr :title, :string, required: true
   attr :text, :string, default: nil
+  attr :compact, :boolean, default: false
+  attr :class, :any, default: nil, doc: "spacing only"
+  attr :rest, :global
+  slot :actions, doc: "what to do about it: a button or two"
 
   def empty_state(assigns) do
     ~H"""
-    <div class="py-20 text-center">
-      <.icon name={@icon} class="mx-auto mb-4 h-16 w-16 text-base-content/50" />
-      <h2 class="mb-2 text-xl font-semibold text-base-content/60">{@title}</h2>
-      <p :if={@text} class="text-base-content/50">{@text}</p>
+    <div
+      class={[
+        "rounded-box border border-dashed border-base-300",
+        if(@compact, do: "p-3", else: "p-6 text-center"),
+        @class
+      ]}
+      {@rest}
+    >
+      <.icon :if={@icon} name={@icon} class="mx-auto mb-3 size-12 text-base-content/40" />
+      <p class={if @compact, do: "text-sm font-semibold", else: "font-bold"}>{@title}</p>
+      <p :if={@text} class="mt-1 text-sm text-base-content/70">{@text}</p>
+      <div :if={@actions != []} class={["mt-3 flex flex-wrap gap-2", !@compact && "justify-center"]}>
+        {render_slot(@actions)}
+      </div>
     </div>
     """
   end

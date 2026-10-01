@@ -12,7 +12,7 @@ defmodule GamendWeb.AdminLive.Users do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
       <div class="space-y-6">
-        <.link navigate={~p"/admin"} class="btn btn-outline mb-4">
+        <.link navigate={~p"/admin"} class="btn btn-surface mb-4">
           ← Back to Admin
         </.link>
 
@@ -65,7 +65,7 @@ defmodule GamendWeb.AdminLive.Users do
                   phx-value-field="inserted_at"
                   class={[
                     "btn btn-xs",
-                    if(@sort_field == "inserted_at", do: "btn-primary", else: "btn-outline")
+                    if(@sort_field == "inserted_at", do: "btn-primary", else: "btn-surface")
                   ]}
                 >
                   Created
@@ -78,7 +78,7 @@ defmodule GamendWeb.AdminLive.Users do
                   phx-value-field="updated_at"
                   class={[
                     "btn btn-xs",
-                    if(@sort_field == "updated_at", do: "btn-primary", else: "btn-outline")
+                    if(@sort_field == "updated_at", do: "btn-primary", else: "btn-surface")
                   ]}
                 >
                   Updated
@@ -91,7 +91,7 @@ defmodule GamendWeb.AdminLive.Users do
                   phx-value-field="last_seen_at"
                   class={[
                     "btn btn-xs",
-                    if(@sort_field == "last_seen_at", do: "btn-primary", else: "btn-outline")
+                    if(@sort_field == "last_seen_at", do: "btn-primary", else: "btn-surface")
                   ]}
                 >
                   Last Seen
@@ -449,13 +449,13 @@ defmodule GamendWeb.AdminLive.Users do
             <div class="flex flex-wrap gap-2 mt-1 mb-3">
               <.link
                 navigate={~p"/admin/economy?user_id=#{@selected_user.id}"}
-                class="btn btn-xs btn-outline"
+                class="btn btn-surface btn-xs"
               >
                 Wallet &amp; Items
               </.link>
               <.link
                 navigate={~p"/admin/kv?user_id=#{@selected_user.id}"}
-                class="btn btn-xs btn-outline"
+                class="btn btn-surface btn-xs"
               >
                 KV Data
               </.link>

@@ -48,7 +48,7 @@ defmodule GamendWeb.AdminLive.ConfigSystemSections do
             id="plugins-reload-btn"
             type="button"
             phx-click="reload_plugins"
-            class="btn btn-outline btn-sm"
+            class="btn btn-surface btn-sm"
           >
             Reload plugins
           </button>
@@ -71,7 +71,7 @@ defmodule GamendWeb.AdminLive.ConfigSystemSections do
             <button
               id="plugins-build-btn"
               type="submit"
-              class="btn btn-outline btn-sm"
+              class="btn btn-surface btn-sm"
               disabled={
                 @plugin_build_running or @plugin_build_options == [] or
                   not @plugin_build_available
@@ -787,7 +787,7 @@ defmodule GamendWeb.AdminLive.ConfigSystemSections do
           </div>
 
           <div class="mt-4">
-            <.link navigate={~p"/admin/logs"} class="btn btn-outline btn-sm">
+            <.link navigate={~p"/admin/logs"} class="btn btn-surface btn-sm">
               View Logs →
             </.link>
           </div>
@@ -801,7 +801,7 @@ defmodule GamendWeb.AdminLive.ConfigSystemSections do
                   <button
                     type="button"
                     phx-click="close_docs"
-                    class="btn btn-outline btn-sm"
+                    class="btn btn-surface btn-sm"
                   >
                     Close
                   </button>

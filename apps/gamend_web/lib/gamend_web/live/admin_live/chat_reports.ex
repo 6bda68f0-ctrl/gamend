@@ -361,7 +361,7 @@ defmodule GamendWeb.AdminLive.ChatReports do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} current_path={assigns[:current_path]}>
-      <.link navigate={~p"/admin"} class="btn btn-outline mb-4">
+      <.link navigate={~p"/admin"} class="btn btn-surface mb-4">
         ← {gettext("Back to Admin")}
       </.link>
 
@@ -472,7 +472,7 @@ defmodule GamendWeb.AdminLive.ChatReports do
                         phx-click="open_action"
                         phx-value-action="warn"
                         phx-value-id={report.id}
-                        class="btn btn-outline btn-xs"
+                        class="btn btn-surface btn-xs"
                       >
                         {gettext("Warn")}
                       </button>

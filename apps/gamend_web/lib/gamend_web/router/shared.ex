@@ -248,10 +248,24 @@ defmodule GamendWeb.Router.Shared do
         get "/privacy", PageController, :privacy
         get "/data_deletion", PageController, :data_deletion
         get "/terms", PageController, :terms
+        get "/ui", PageController, :ui
 
         # The typed icon set as SVG, so `icon_url` can point at an icon we
         # already ship. Public and unauthenticated: it is static artwork.
         get "/icons/:name", IconController, :show
+      end
+
+      # An email's unsubscribe link. The POST has no pipeline on purpose: a
+      # mail client's one-click unsubscribe (RFC 8058) carries no CSRF token
+      # and no session, and the signed link is the proof.
+      scope "/", GamendWeb do
+        pipe_through :browser
+
+        get "/notifications/unsubscribe/:token", NotificationUnsubscribeController, :show
+      end
+
+      scope "/", GamendWeb do
+        post "/notifications/unsubscribe/:token", NotificationUnsubscribeController, :create
       end
 
       gamend_search_routes()

@@ -543,7 +543,7 @@ defmodule GamendWeb.GroupsLive do
           <button
             phx-click="request_join"
             phx-value-id={@group.id}
-            class="btn btn-outline btn-sm"
+            class="btn btn-surface btn-sm"
           >
             {gettext("Request")}
           </button>
@@ -561,7 +561,7 @@ defmodule GamendWeb.GroupsLive do
     ~H"""
     <div class="flex flex-col gap-4 mb-6">
       <div class="flex items-center gap-4">
-        <button phx-click="back_to_list" class="btn btn-outline btn-sm" id="groups-back-btn">
+        <button phx-click="back_to_list" class="btn btn-surface btn-sm" id="groups-back-btn">
           ← {gettext("Back")}
         </button>
         <div>
@@ -690,7 +690,7 @@ defmodule GamendWeb.GroupsLive do
         <% MapSet.member?(@member_group_ids, @selected_group.id) -> %>
           <.link
             navigate={~p"/chat?#{[type: "group", id: @selected_group.id]}"}
-            class="btn btn-outline btn-sm"
+            class="btn btn-surface btn-sm"
             id="group-chat-btn"
           >
             {gettext("Open chat")}
@@ -718,7 +718,7 @@ defmodule GamendWeb.GroupsLive do
           <button
             phx-click="request_join"
             phx-value-id={@selected_group.id}
-            class="btn btn-outline btn-sm"
+            class="btn btn-surface btn-sm"
             id="group-request-btn"
           >
             {gettext("Request")}
@@ -726,7 +726,7 @@ defmodule GamendWeb.GroupsLive do
         <% true -> %>
       <% end %>
     <% else %>
-      <.link navigate={~p"/users/log_in"} class="btn btn-outline btn-sm">
+      <.link navigate={~p"/users/log_in"} class="btn btn-surface btn-sm">
         {gettext("Log in")}
       </.link>
     <% end %>
