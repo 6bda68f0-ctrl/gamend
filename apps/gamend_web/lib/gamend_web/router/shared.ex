@@ -255,6 +255,19 @@ defmodule GamendWeb.Router.Shared do
         get "/icons/:name", IconController, :show
       end
 
+      # An email's unsubscribe link. The POST has no pipeline on purpose: a
+      # mail client's one-click unsubscribe (RFC 8058) carries no CSRF token
+      # and no session, and the signed link is the proof.
+      scope "/", GamendWeb do
+        pipe_through :browser
+
+        get "/notifications/unsubscribe/:token", NotificationUnsubscribeController, :show
+      end
+
+      scope "/", GamendWeb do
+        post "/notifications/unsubscribe/:token", NotificationUnsubscribeController, :create
+      end
+
       gamend_search_routes()
 
       # Serve stored objects. The local backend serves the bytes; a private S3

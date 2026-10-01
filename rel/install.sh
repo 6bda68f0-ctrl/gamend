@@ -52,8 +52,15 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 echo "Downloading $name ($version)"
-curl -fSL --progress-bar "$base/$name.tar.gz" -o "$tmp/$name.tar.gz" ||
-  fail "download failed: $base/$name.tar.gz"
+# A release being republished answers 404 for the seconds between an asset's
+# delete and its upload, so a failed download is tried a few more times.
+tries=0
+until curl -fSL --progress-bar "$base/$name.tar.gz" -o "$tmp/$name.tar.gz"; do
+  tries=$((tries + 1))
+  [ "$tries" -lt 5 ] || fail "download failed: $base/$name.tar.gz"
+  echo "Retrying the download ($tries of 4)"
+  sleep 3
+done
 
 if curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null; then
   expected=$(grep " $name.tar.gz\$" "$tmp/SHA256SUMS" | cut -d ' ' -f 1)

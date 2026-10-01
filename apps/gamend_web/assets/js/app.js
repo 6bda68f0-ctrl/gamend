@@ -423,6 +423,15 @@ async function loadExtraHooks() {
   return mergedHooks
 }
 
+// An IANA name ("Europe/Bucharest"), or nothing when the browser will not say.
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
+  } catch (_error) {
+    return undefined
+  }
+}
+
 function createLiveSocket(extraHooks) {
   // Optional: a publicly cacheable, signed-out page omits the token on purpose
   // (see the comment on the tag in root.html.heex). Such a page carries no
@@ -438,7 +447,9 @@ function createLiveSocket(extraHooks) {
     // one closes the socket. Phoenix's 30 s default meant up to a minute of
     // typing into a page that had already stopped listening.
     heartbeatIntervalMs: 15000,
-    params: {_csrf_token: csrfToken},
+    // The reader's time zone, saved on their account (`GamendWeb.UserAuth`)
+    // so "today" and "this evening" are theirs, not UTC's.
+    params: {_csrf_token: csrfToken, timezone: browserTimeZone()},
     hooks: {...colocatedHooks, ...Hooks, ...extraHooks},
   })
 }

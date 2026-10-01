@@ -239,6 +239,13 @@ defmodule GamendWeb.NotificationsLive do
   defp action_for_type(_type, _n), do: nil
 
   # Fallback: infer action from metadata keys for notifications without a known type
+  # A server notification (`Gamend.Notifications.notify/3`) says where it
+  # leads. Only a path on this site: never another host.
+  defp action_for_metadata(%{"url" => url}) when is_binary(url) do
+    if String.starts_with?(url, "/") and not String.starts_with?(url, ["//", "/\\"]),
+      do: {gettext("Open"), url}
+  end
+
   defp action_for_metadata(%{"leaderboard_slug" => slug}) when is_binary(slug),
     do: {gettext("View"), ~p"/leaderboards/#{slug}"}
 
